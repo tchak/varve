@@ -456,6 +456,33 @@ requiredness — generalising the "may derived cells be overridden" rule of §2.
 Authorization then reduces to *which surface does this actor get*, and stays
 **entirely out of the kernel**. The kernel never needs a permission model.
 
+### Entry visibility derives from surfaces
+
+**Settled (was open question 9): there is no per-entry visibility class.**
+Confirmed from DN practice: everything actor-restricted lives in restricted
+*columns* (the private-annotation pattern); messages and third-party opinions
+are platform features beside the record, not log entries; applicants see
+current state, not history.
+
+Visibility therefore reduces to machinery that already exists:
+
+> An entry is visible through surface S iff it touches at least one column
+> visible in S — and only those ops are shown.
+
+The kernel contributes one pure function — `filter(log, surface) → redacted
+log` — and the platform's only job remains *which surface does this actor
+get*, the same reduction as authorization above. No entry ACLs, and no
+side-table of entry permissions that would fail to travel on migration.
+
+Chain interaction: omitting entries from a filtered history export would
+break `prev` verification. A filtered export therefore uses **redacted
+entries** — envelope transmitted (`seq`, `prev`, content hash), content
+withheld — verifiable because canonical hashing is already erasure-tolerant
+(§2.10). Visibility filtering and erasure ride the same mechanism. Specified
+now, needed later: applicant-facing exports are folded state, and operator
+migration carries full history, so nothing requires redacted entries on day
+one of `strata-wire`.
+
 ### Checkpoints, now precisely defined
 
 > A checkpoint is a named entry hash in the log — the hash, not the seq, is
@@ -618,6 +645,10 @@ set and the same apply function:
 Do not blur them: a snapshot export must not carry `entry` lines, and a
 history export must not carry folded `record`/`item` cell lines — a stream
 mixing both has two sources of truth for the same cells.
+
+(A third variant — history export filtered through a surface, with
+chain-preserving redacted entries — is specified in §2.9 but required by
+nothing on day one.)
 
 ### Stored state on the wire
 
@@ -882,11 +913,12 @@ Only then: `surface`, `store`, service.
    integrations rather than a handful of shared référentiels, the resolver
    declaration must be pluggable from day one rather than an enum of known
    sources. Decide from the M0 data, not from taste.
-9. **Log entry visibility.** With multiple actors, some entries may not be
-   visible to all of them (internal annotation vs applicant-visible edit). Is
-   a visibility class per entry a kernel concept, or does the platform filter?
-   Leaning platform — but if the kernel cannot express it, every consumer
-   reimplements the filter. Decide before `strata-record` stabilises.
+9. ~~Log entry visibility.~~ **Resolved (§2.9): no per-entry visibility
+   class.** Confirmed from DN practice that restricted data lives in
+   restricted columns, so visibility derives from surfaces: an entry is
+   visible through S iff it touches a column visible in S. Kernel provides
+   `filter(log, surface)`; chain-preserving redacted entries (via §2.10's
+   encoding) cover filtered history export, specified but not day-one.
 10. ~~Reading lens default.~~ **Resolved (§2.9): default is `pinned`;
     changeable after records exist** — the lens is pure interpretation, so
     the switch is byte-free and reversible, but reportable via the impact
