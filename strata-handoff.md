@@ -606,7 +606,12 @@ version, referenced by inclusion.
 
 - **Every enum is nomenclature-backed.** Inline options are the degenerate
   case — a small nomenclature owned by the schema. One concept, no special
-  cases; §2.11's `(id, label)` is the row shape.
+  cases; §2.11's `(id, label)` is the row shape. **Inline nomenclatures
+  have no identity and no ceremony**: they version with the revision that
+  contains them (ids synthesized by the authoring tool), exactly as inline
+  groups do — publication with standalone identity is the lift-out, the
+  same relationship a group has to a block. The resolver aspect stays
+  dormant until rows carry more than `(id, label)`.
 - **It is the fourth flavour of the §2.7 mechanism** — a resolver whose
   source is data, not IO. Key = the chosen id; "payload" = the row; mapped
   cells derive extra fields (pick a commune → the département fills).
@@ -975,10 +980,13 @@ Only then: `surface`, `store`, service.
 
 ## 10. Open questions
 
-1. **Name.** "Strata" is provisional — verify crates.io availability before any
-   publish. Rejected `-DB` suffix: invites comparison to Dolt/TerminusDB on
-   axes that are lost (query planner, replication, durability) while hiding the
-   actual differentiator.
+1. **Name.** "Strata" is provisional — and now known-compromised: as of
+   2026-08-16, `strata` and `strata-core` are **taken on crates.io** (the
+   rest of the family is free). A real name must be chosen before M3
+   publishes anything; until then stop investing in "strata". Rejected
+   `-DB` suffix: invites comparison to Dolt/TerminusDB on axes that are
+   lost (query planner, replication, durability) while hiding the actual
+   differentiator.
 2. **`strata-impact` name.** Not settled.
 3. **Attachments / files.** Needs its own design pass. A filename is ambiguous,
    a URL is instance-bound. Cross-instance export needs a manifest + bundle
