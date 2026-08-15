@@ -126,15 +126,16 @@ occurrences inside a repetition.
    strictness may differ per surface, and a mis-formatted value makes a
    record non-admissible with respect to a surface — never globally
    invalid.
-3. **Referential-backed enums.** Pays/région/département/commune/epci (1.5%)
-   are closed external codelists — and the enum-size tail (p99 = 367
-   options, max = **47,738**) shows administrations stuffing referentials
-   into hand-made dropdowns. Argues for enums backed by a published
-   codelist (a block-like versioned object) rather than inline options
-   only. *Foundation laid: options are `(id, label)` (§2.11 of the
-   handoff), so a codelist-backed enum is the same shape with pairs
-   sourced from a versioned published object. The codelist object itself
-   is the remaining design item.*
+3. ~~Referential-backed enums.~~ **Resolved: nomenclatures (§2.12 of the
+   handoff).** Pays/région/département/commune/epci (1.5%) are closed
+   external codelists — and the enum-size tail (p99 = 367 options, max =
+   **47,738**) shows administrations stuffing referentials into hand-made
+   dropdowns. A **nomenclature** is a versioned, content-addressed
+   `(id, label, …fields)` table, published standalone or inline (inline
+   options are the degenerate case); every enum is nomenclature-backed. It
+   is simultaneously the static-source fourth flavour of the resolver
+   mechanism — fully portable (travels like a block), synchronous, and
+   statically typecheckable where API resolvers cannot be.
 4. ~~Hierarchical enum.~~ **Resolved (institutional memory): same story.**
    LinkedDropDownList predates conditional logic. It desugars to a primary
    enum plus per-primary-value secondary enums under visibility rules. No

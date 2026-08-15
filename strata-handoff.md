@@ -266,6 +266,9 @@ pointing at the snapshot.
   kernel operation; the override stays in the log, the restore is just the
   next entry.
 
+A fourth flavour — a resolver whose source is static, versioned data
+rather than an API — is the **nomenclature** (§2.12).
+
 ## 2.8 Deferred resolution
 
 DN allows submitting an incomplete record and fetching later when the resolver
@@ -594,6 +597,44 @@ not data.
 Migration from DN: synthesize ids from legacy values (slug or hash), label
 = the original string; existing cells map over mechanically.
 
+## 2.12 Nomenclatures (referential-backed enums)
+
+**Settled — closes the last M0 residue item.** A **nomenclature** is a
+versioned, content-addressed table of `(id, label, …fields)`. It is to
+values what a block is to structure: published with its own identity and
+version, referenced by inclusion.
+
+- **Every enum is nomenclature-backed.** Inline options are the degenerate
+  case — a small nomenclature owned by the schema. One concept, no special
+  cases; §2.11's `(id, label)` is the row shape.
+- **It is the fourth flavour of the §2.7 mechanism** — a resolver whose
+  source is data, not IO. Key = the chosen id; "payload" = the row; mapped
+  cells derive extra fields (pick a commune → the département fills).
+  Trigger and candidate presentation stay surface concerns, as ever.
+- **Stronger than the API flavours on both §2.7 axes:**
+  - *Portability.* An API resolver's implementation is instance-local and
+    does not travel (§2.8); a nomenclature travels in the wire stream like
+    a block (`nomenclature` line kind, schema-side). These resolvers are
+    fully portable — imported records need no caveat at all.
+  - *Determinism.* Resolution is synchronous and total: no pending
+    lifecycle, no retries, no abandonment. Per-pick snapshots are
+    redundant — binding `(nomenclature, version, id)` suffices, since the
+    version is already content-addressed.
+- **Typing the API flavours can never have.** An enum column typed "id
+  from nomenclature N@v" gives the checker a closed id set: rule literals
+  and exhaustiveness become statically checkable. Version bumps run
+  through the §3 enum rows — label edits free, removed ids flagged with an
+  exact record count.
+- Lives in `strata-schema`, beside blocks.
+
+**Name.** Chosen for domain authenticity: INSEE publishes *nomenclatures*
+(COG, NAF, PCS) — the kernel uses the word of the référentiels world it
+models. Rejected: `codelist` (accurate SDMX term, colder), `codebook`
+(survey-practice kin but documents variables — broader), `vocabulary`
+(implies words and RDF semantics), `valueset` (misuses the FHIR precedent —
+a ValueSet is a selection from a code system), `taxonomy` (promises
+hierarchy), `registry` (promises mutability and a central authority).
+
 ## 3. Change classification
 
 Because column IDs are stable, **cells are revision-agnostic; only their
@@ -645,6 +686,7 @@ in one file in dependency order.
 {"k":"header", ...}                 // format ver, kernel ver, source instance, manifest
 {"k":"revision", "id":"...", ...}   // writer schema travels with the data (Avro property)
 {"k":"block", "id":"...", ...}
+{"k":"nomenclature", "id":"...", ...}   // versioned (id, label, ...fields) table (§2.12); travels like a block
 {"k":"record", "id":"...", "lens":"...", "cells":{...}}   // snapshot mode; lens = fold revision, not a record property (§2.9)
 {"k":"item", "record":"...", "group":"...", "id":"...", "ord":0, "cells":{...}}
 {"k":"entry", "record":"...", "seq":0, "prev":"...", "ops":[...], ...}  // history mode: one log entry (§2.9)
@@ -848,8 +890,8 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
   nothing.
 
 **Tier 1**
-- `strata-schema` — types, arity, groups, cardinality, blocks, structural
-  constraints, depth policy. **Includes the cast table** — the compatibility
+- `strata-schema` — types, arity, groups, cardinality, blocks,
+  nomenclatures (§2.12), structural constraints, depth policy. **Includes the cast table** — the compatibility
   relation between two types is a property of the type system itself — **and its
   dual, the type join / least upper bound** used to build aggregate revisions
   (§5.5). Canonical hash → revision ID. **The `Revision` object itself — an
@@ -1026,8 +1068,8 @@ With access to open DN schema statistics:
    count. Since resolved: format constraints are surface admissibility over
    plain `text` (§2.6); geometry is a single-Feature scalar with arity
    `many` (FeatureCollection is a render shape); civilité is an enum block;
-   record references are **on ice** (§6) — multiple surfaces over one
-   schema cover most DN uses. Remaining residue: referential-backed enums.
+   record references are **on ice** (§6); referential-backed enums are
+   **nomenclatures** (§2.12) — the residue is fully closed.
 4. Enumerate historical revision transitions and hand-classify a sample into
    safe / lossy / breaking; check whether the proposed change-class table
    predicts them.
