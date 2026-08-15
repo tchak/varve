@@ -227,6 +227,35 @@ presentation, and **whether derived cells may be overridden**. The split pays
 off immediately: back-office review can permit an address correction that the
 public form forbids.
 
+### Worked example: SIRET, the three-layer decomposition
+
+DN has a first-class `SiretChampDescriptor`. The kernel has no SIRET type —
+the ensemble decomposes across the three layers, each holding exactly what
+it owns:
+
+- **Schema** — a published block ("entreprise") of *plain* columns:
+  `siret: text` (the key), `raison_sociale: text`, `date_creation: date`,
+  address columns… nothing special about any of them. Beside the block, a
+  **resolver declaration**: id + version, input signature (`siret: text`),
+  declared result type (the INSEE payload shape), mapping from result
+  fields to the block's columns. The declaration is a versioned schema
+  *object* — like a block, not like a type. Publishing typechecks the
+  mapping against the columns it feeds.
+- **Surface** — trigger mode (typed key on blur, or explicit button),
+  candidate presentation if autocomplete, and whether the mapped cells may
+  be overridden *here* (back-office yes, public form no).
+- **Record** — the retained INSEE payload (content-addressed snapshot), a
+  resolution instance with its lifecycle if the fetch was deferred (§2.8),
+  and a `derived { source, source_version, mapping_version, snapshot_ref }`
+  origin on every mapped cell.
+
+This answers M0's "which composites are first-class in the kernel vs merely
+published blocks": **none are first-class.** SIRET, Address (BAN), RNA,
+RNF, AnnuaireEducation are all block + declaration pairs — library content,
+shippable, versionable and retirable without touching the kernel. Static
+sources (commune, pays, département…) collapse further, into nomenclatures
+(§2.12).
+
 ### Retain the payload, not just the cells
 
 Keep the raw response, content-addressed, keyed by
