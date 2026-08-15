@@ -141,6 +141,12 @@ review surface, and neither is lying.
 A record is never globally "invalid" — it is **non-admissible with respect to a
 surface**.
 
+Format constraints get the same treatment (**settled from the M0 residue**):
+email, phone, IBAN, regex formats are admissibility, not representability.
+The schema type is plain `text`; the format check lives in the surface.
+Casts stay trivial, strictness may differ per surface, and a mis-formatted
+value is non-admissible — never ill-typed.
+
 Logic splits accordingly: type-level predicates in the schema; visibility and
 requirement rules in the surface. Both compile against a specific revision and
 are re-checked on every new one.
@@ -912,7 +918,12 @@ Only then: `surface`, `store`, service.
 8. **Resolver pluggability.** If the corpus shows a long tail of one-off
    integrations rather than a handful of shared référentiels, the resolver
    declaration must be pluggable from day one rather than an enum of known
-   sources. Decide from the M0 data, not from taste.
+   sources. Decide from the M0 data, not from taste. *First M0 signal
+   (`corpus/M0-type-frequency.md`): DN itself grew a generic connector
+   (`Referentiel`, 44 uses) and a dead one-off (`COJO`, Paris 2024, 5 uses)
+   alongside the shared référentiels — leans strongly toward pluggable,
+   plus a resolver-retirement story. Not yet closed: needs the resolver
+   census (§12.6) over mapping-change frequency.*
 9. ~~Log entry visibility.~~ **Resolved (§2.9): no per-entry visibility
    class.** Confirmed from DN practice that restricted data lives in
    restricted columns, so visibility derives from surfaces: an entry is
@@ -963,9 +974,22 @@ With access to open DN schema statistics:
 
 1. Load and characterise the corpus — how many procedures, revisions per
    procedure, columns per procedure, records per procedure.
-2. **Type frequency report** (M0).
-3. Attempt a mapping of DN field types → proposed kernel type set; list the
-   residue.
+   *Partially done — see `corpus/M0-type-frequency.md` (42,723 published
+   procedures, current revision only; revision history and records need
+   other sources).*
+2. ~~Type frequency report (M0).~~ **Done — `corpus/M0-type-frequency.md`.**
+   Top 15 types cover 92.9% of 1.8M fields; 18.3% of descriptors are
+   presentation-only; depth is empirically ≤1 with zero nested repetitions.
+3. ~~Mapping of DN field types → proposed kernel type set.~~ **Done — same
+   report.** Proposed scalar set + residue. Two residue items (enum-or-text
+   `otherOption`, hierarchical LinkedDropDownList) resolved from
+   institutional memory as **pre-conditional-logic artifacts**: both desugar
+   to columns + surface visibility rules, so they cost the kernel nothing —
+   but they are ~21k *implicit* conditional rules any M2 rule census must
+   count. Since resolved: format constraints are surface admissibility over
+   plain `text` (§2.6); geometry is a single-Feature scalar with arity
+   `many` (FeatureCollection is a render shape); civilité is an enum block.
+   Remaining residue: referential-backed enums, record-ref semantics.
 4. Enumerate historical revision transitions and hand-classify a sample into
    safe / lossy / breaking; check whether the proposed change-class table
    predicts them.
