@@ -138,10 +138,14 @@ occurrences inside a repetition.
    dependent-enum type, and no new logic-language feature — surface
    visibility already covers it. Same M2 undercount note as residue 1
    (6,486 more implicit rules).
-5. **Record reference.** DossierLink (5.3% of procedures) — a record-id
-   scalar exists in `strata-core`, but cross-record integrity is out of
-   kernel scope; the type is a typed opaque ref with no join semantics.
-   Consistent with "not a database" (§2.1) — say so explicitly.
+5. ~~Record reference.~~ **On ice (institutional memory).** Many DN uses of
+   DossierLink are better served by **multiple surfaces over one schema** —
+   the same case file seen by different actors — rather than by records
+   pointing at records. No `record_ref` scalar until demand is proven from
+   record-side data. Until then a legacy DossierLink imports as `text`
+   holding an opaque id: nothing is lost, and promoting it later to a real
+   type is a checked cast — the reverse (retiring a type) is the expensive
+   direction.
 6. ~~Geometry.~~ **Resolved: first-class scalar = one GeoJSON Feature;
    multiplicity via arity `many`.** Mirrors attachments exactly: a
    list-valued column whose element IDs (GeoJSON's native feature `id`)
@@ -155,11 +159,12 @@ occurrences inside a repetition.
 
 `text`, `boolean`, `integer`, `decimal`, `date`, `datetime`, `enum`
 (declared options, versioned codelist-backed variant per residue 3),
-`attachment`, `record_ref`, `geometry` (one GeoJSON Feature; arity `many`
-for feature sets). Format constraints (phone/email/iban/regex) are surface
-admissibility over `text`, not types (residue 2). Everything else in the
-corpus is: a surface node, a group, arity `many` on one of the above, or a
-§2.7 resolver-fed composite mapping *into* these scalars.
+`attachment`, `geometry` (one GeoJSON Feature; arity `many` for feature
+sets). Format constraints (phone/email/iban/regex) are surface
+admissibility over `text`, not types (residue 2); record references are on
+ice (residue 5). Everything else in the corpus is: a surface node, a
+group, arity `many` on one of the above, or a §2.7 resolver-fed composite
+mapping *into* these scalars.
 
 ## Reproduction
 

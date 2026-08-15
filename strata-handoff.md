@@ -788,6 +788,7 @@ values plus a `_revision` column): JSONL already covers the lossless case.
 |---|---|
 | record fork / merge / rebase (branches) | 10× cost multiplier for a use case that can't yet be named. Real stories (draft vs submitted, prefill-from-record, agent-proposed corrections, post-decision correction) are all served by **revisions + proposed-changes**. |
 | general-purpose record locks | the real need is covered by checkpoints, since defined (§2.8–2.9): freeze entered cells, enumerate expected late writes, reject the rest. Locking beyond that still needs a user story before a design. |
+| record references (`record_ref` scalar, DossierLink-style) | on ice. Many DN uses of DossierLink are better served by multiple surfaces over one schema — same case file, different actors — than by records pointing at records. Legacy links import as `text` holding an opaque id; promoting to a typed ref later is a checked cast. Needs proven demand from record-side data first. |
 | bidirectional cross-instance sync | came up once in ~10 years of DN. Two instances appending to one record's log means concurrent `seq`/`prev` assignment — branching by another name, so the branch cut above applies. What is actually needed is **one-way, one-time migration** of schemas and/or records (§5), which the history export already covers. |
 | workflows, labels, webhooks, GraphQL, document templating | platform, not kernel — separate repo, later year |
 | full event sourcing on records | schemas are few and high-value → full git semantics. Records are millions → current state + append-only revision log + snapshots. Same machinery for both is how second systems get heavy. |
@@ -988,8 +989,9 @@ With access to open DN schema statistics:
    but they are ~21k *implicit* conditional rules any M2 rule census must
    count. Since resolved: format constraints are surface admissibility over
    plain `text` (§2.6); geometry is a single-Feature scalar with arity
-   `many` (FeatureCollection is a render shape); civilité is an enum block.
-   Remaining residue: referential-backed enums, record-ref semantics.
+   `many` (FeatureCollection is a render shape); civilité is an enum block;
+   record references are **on ice** (§6) — multiple surfaces over one
+   schema cover most DN uses. Remaining residue: referential-backed enums.
 4. Enumerate historical revision transitions and hand-classify a sample into
    safe / lossy / breaking; check whether the proposed change-class table
    predicts them.
