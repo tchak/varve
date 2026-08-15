@@ -1,6 +1,6 @@
 # Strata — design handoff
 
-> Working code name. Not committed. Nothing published to crates.io yet.
+> Working code name. Nothing published to crates.io yet.
 
 ## 0. Context
 
