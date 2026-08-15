@@ -561,6 +561,39 @@ Whole-record erasure is what DN does today. Whether intra-record horizons
 (erase the trail, keep the case) are ever actually required decides whether
 either mechanism gets built at all — a §12 question, not a taste question.
 
+## 2.11 Enum options carry identity
+
+**Settled from DN experience.** DN's enum options are bare values, and
+"rename an option without losing selections on existing records" is a
+recurring, unmet demand. The fix is the kernel's own identity principle
+(§3) applied one level down: an option is **`(id, label)`** — cells store
+the id, labels live in the revision, and a rename changes interpretation,
+not data.
+
+- **Rename → free.** Zero records touched, zero cast.
+- **Rules are rename-proof.** Logic rules reference option ids, so renames
+  drop out of the breaking-change set entirely — with bare values, every
+  rule mentioning the option breaks silently.
+- **Removal is precise, not catastrophic.** A removed id follows the
+  `deprecated_since` pattern (§5.5) rather than deletion, and the impact
+  report counts exactly the records holding it.
+- **enum→text projection needs a lens.** The emitted string is the label
+  resolved through the projection's reading revision — existing machinery.
+  CSV mirrors the two-header-row pattern: id authoritative, label
+  cosmetic.
+- **Labels live in the schema, not the surface.** They resemble prompts,
+  but per-surface option labeling is unasked-for complexity; a surface can
+  override presentation later without a kernel change, and schema labels
+  keep exports and migration self-contained.
+- **Codelist foundation.** External codelists are natively `(code,
+  libellé)` — commune codes over renamed municipalities, COG editions. A
+  codelist-backed enum (the remaining M0 residue) becomes the same shape
+  with pairs sourced from a versioned published object instead of declared
+  inline.
+
+Migration from DN: synthesize ids from legacy values (slug or hash), label
+= the original string; existing cells map over mechanically.
+
 ## 3. Change classification
 
 Because column IDs are stable, **cells are revision-agnostic; only their
@@ -574,6 +607,9 @@ interpretation is revision-dependent.**
 | **column moved into or out of a `many` group** | **cast required — probably breaking** |
 | **column retyped** | **cast required** |
 | **arity or cardinality changed** | **cast required** |
+| enum option label edited | free (§2.11) |
+| enum option added | free |
+| enum option removed | flagged — id retained with `deprecated_since`; impact report counts records holding it |
 
 > **Correction, found via §5.5.** "Column moved" is only free when `row_path` is
 > unchanged — i.e. between two `one` groups. Moving into or out of a `many`

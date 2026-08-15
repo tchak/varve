@@ -131,7 +131,10 @@ occurrences inside a repetition.
    options, max = **47,738**) shows administrations stuffing referentials
    into hand-made dropdowns. Argues for enums backed by a published
    codelist (a block-like versioned object) rather than inline options
-   only.
+   only. *Foundation laid: options are `(id, label)` (§2.11 of the
+   handoff), so a codelist-backed enum is the same shape with pairs
+   sourced from a versioned published object. The codelist object itself
+   is the remaining design item.*
 4. ~~Hierarchical enum.~~ **Resolved (institutional memory): same story.**
    LinkedDropDownList predates conditional logic. It desugars to a primary
    enum plus per-primary-value secondary enums under visibility rules. No
