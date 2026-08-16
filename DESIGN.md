@@ -977,6 +977,21 @@ Placement: the solver and enumeration live in `varve-logic`; consumed
 by `varve-impact` (dead rules, unreachable required columns, routing
 shadowing) and by platform tooling for display.
 
+**Extension path: column-to-column comparisons.** The AST already
+represents them (`lt(column(end), column(start))` — atoms compare two
+Terms); the constant-side requirement is a **publication-time policy**,
+not a grammar rule — the depth-1 pattern again. Enabling them later
+changes no stored rule and no wire shape. Solver cost, when it comes:
+conjunctions of order/equality atoms between columns stay polynomial
+(constraint graph, strict-cycle check, union-find); boolean structure
+on top is handled by enumerating atom polarities with the polytime
+check per candidate — lazy-SMT-in-miniature, still no external solver.
+The genuine cost lands on visibility-space enumeration: column-column
+atoms **fuse connected components**, so the per-component budget clause
+stops being theoretical. Likely rollout, from the shape of the demand
+(`date_end ≥ date_start`): enabled for validation predicates first —
+where admissibility barely exercises the solver — before visibility.
+
 **Deferred:** a general `Not` combinator — rejected, not postponed (it
 would silently change imported rule semantics; see the absence-loses
 rule). **To validate against the extracted corpus (§12.5) and feature-
