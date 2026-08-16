@@ -277,6 +277,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-impact"
+version = "0.1.0"
+dependencies = [
+ "strata-core",
+ "strata-projection",
+ "strata-schema",
+ "strata-value",
+]
+
+[[package]]
 name = "strata-projection"
 version = "0.1.0"
 dependencies = [

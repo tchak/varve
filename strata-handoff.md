@@ -1024,7 +1024,12 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
   Avoid `compat` — in Rust that connotes legacy shims. Avoid `migrate` — implies
   one-way and destructive. Avoid `evolve` — implies forward-only.)*
 
-`projection` and `impact` both depend on `schema`; neither depends on the other.
+`projection` and `impact` both depend on `schema`.
+*Correction, found in implementation: `impact` also depends on
+`projection` — counting the records whose cells fail a transition **is**
+running the projection over them, and duplicating the per-cell cast
+execution would drift. The DAG stays acyclic; the reverse direction
+(projection → impact) remains absent.*
 
 **Tier 3**
 - `strata-surface` — presentation + admissibility tree. Depends on schema +
@@ -1067,6 +1072,10 @@ every feature must appear in the corpus to earn its place.
 - **M1** (`projection` + `impact`) — **Falsification.** Can every *historical*
   revision transition be classified? Where DN actually broke or froze dossiers,
   does the impact report predict it? This is the thesis, and it is testable.
+  *Machinery built: `strata-projection` and `strata-impact` implement
+  classification (§3 table), the §2.8 resolver questions, and record
+  assessment, tested on synthetic transitions. The falsification itself
+  awaits the DN revision-history extract (§12.4).*
 
 - **M2** (`logic`) — **Rule expressibility.** Can every existing conditional and
   routing rule be expressed and type-checked? The residue is either a needed
