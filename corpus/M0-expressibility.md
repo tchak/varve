@@ -2,7 +2,7 @@
 
 Output of `cargo run --release -p m0` over the data.gouv.fr snapshot
 `20260815041004-demarches.json` (see `M0-type-frequency.md` for dataset
-provenance). Exit criterion (§8 M0): every procedure expressible; the
+provenance; fetch the current snapshot with `scripts/fetch-corpus.sh`). Exit criterion (§8 M0): every procedure expressible; the
 residue, and why, is the type-system requirements document.
 
 **Result: 42,723 / 42,723 procedures express and validate. Residue: none.**

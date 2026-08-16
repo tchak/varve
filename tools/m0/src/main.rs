@@ -26,10 +26,10 @@ use varve_schema::{
     Schema, validate,
 };
 
-const DEFAULT_CORPUS: &str = concat!(
-    "/private/tmp/claude-501/-Users-tchak-dev-github-tchak-strata/",
-    "8ac7c870-a9ee-4f13-9575-d2de4b8d9c87/scratchpad/demarches.json"
-);
+/// Fetched by `scripts/fetch-corpus.sh` (gitignored). Manifest-relative
+/// so `cargo run -p m0` works from any directory.
+const DEFAULT_CORPUS: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/data/demarches.json");
 
 #[derive(Default)]
 struct Stats {
@@ -416,7 +416,9 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| DEFAULT_CORPUS.to_string());
     eprintln!("reading {path}…");
-    let bytes = std::fs::read(&path).expect("cannot read corpus file");
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+        panic!("cannot read corpus at {path}: {e}\nfetch it with scripts/fetch-corpus.sh")
+    });
     let procedures: Vec<Value> =
         serde_json::from_slice(&bytes).expect("cannot parse corpus JSON");
     drop(bytes);
