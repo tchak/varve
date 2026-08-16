@@ -1,0 +1,9 @@
+[package]
+name = "strata-value"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+strata-core = { path = "../strata-core" }
+strata-schema = { path = "../strata-schema" }

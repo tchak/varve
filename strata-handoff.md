@@ -979,8 +979,11 @@ every feature must appear in the corpus to earn its place.
   system requirements document.
   *Structural half achieved (`corpus/M0-expressibility.md`): all 42,723
   published procedures express and validate with zero residue, via
-  `tools/m0` over `strata-core` + `strata-schema`. Value conformance
-  (`strata-value`) and rule expressibility (M2) remain.*
+  `tools/m0` over `strata-core` + `strata-schema`. `strata-value` exists
+  (cells, items, typed conformance, the five-op diff/patch with
+  diff∘apply round-trip tested, element-level change reports); the corpus
+  carries no records, so value conformance is exercised by tests only
+  until record-side data arrives. Rule expressibility is M2.*
   - Also produce a **type frequency report**: how many real DN fields are SIRET,
     address, date, attachment, free text? Expect a handful of types to cover
     ~90%. This decides which composites are first-class in the kernel vs merely

@@ -95,6 +95,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-value"
+version = "0.1.0"
+dependencies = [
+ "strata-core",
+ "strata-schema",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

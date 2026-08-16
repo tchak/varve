@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/strata-core", "crates/strata-schema", "tools/m0"]
+members = [
+    "crates/strata-core",
+    "crates/strata-schema",
+    "crates/strata-value",
+    "tools/m0",
+]
 resolver = "3"
 
 [workspace.package]
