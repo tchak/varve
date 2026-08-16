@@ -801,6 +801,30 @@ semantics, deliberately:
 > admissibility binary (§2.8 rule 3), makes evaluation total, and
 > imports DN rules without changing their meaning.
 
+Adopted on merit, not heritage — examined against the alternatives:
+
+- **Not an approximation.** With `is_empty`/`is_filled` first-class,
+  any function over `{absent} ∪ values` is expressible — "visible
+  unless explicitly no" is `or(is_empty(x), not_eq(x, "no"))`. The
+  semantics is a *default* plus explicit absence tests, not a
+  restriction; it is exactly as expressive as three-valued logic.
+- **The rival is the famous footgun.** SQL-style three-valued logic
+  (unknown propagation) is the most notorious surprise source in
+  databases; importing it would hand those bugs to form authors.
+  "A comparison is true only when the field is filled with a matching
+  value" is one sentence an author can hold.
+- **Progressive disclosure falls out**: on a pristine record every
+  comparison atom is false, so only unconditioned content shows.
+- **The `unreachable → absent` leg is forced**, not chosen: hidden
+  never deletes (§2.4), so hidden columns retain stale values — any
+  semantics that let conditions read them would have ghost values
+  driving visibility.
+- **The one real footgun** — `not_eq(x, "no")` written expecting it to
+  match unanswered forms — gets a **lint**, not a semantics change:
+  §4.3's solver detects conditions false on pristine records and
+  suggests the `or(is_empty(x), …)` form. Add to the §12.5 checklist:
+  has this pattern generated author confusion in DN support history?
+
 **The AST (v1):**
 
 ```
@@ -889,6 +913,14 @@ total over a repetition ("sum of the amounts"). Design sketch:
   arithmetic (`+ − ×` on number; division needs a total-semantics
   decision — absent from v1 until settled), text concatenation, and
   conditional selection (`if(Expr, ValueExpr, ValueExpr)`).
+- **Value expressions need their own absence rule — and it is not
+  "loses".** Predicates collapse absence to false; values must not
+  silently collapse it to 0 or "". Proposed: scalar operations
+  *propagate* absence (`a + b` with `b` absent is absent), aggregates
+  *skip* absent items (`sum` over a repetition with one unfilled amount
+  sums the filled ones, `count` counts items, `count_filled` counts
+  values). Decide before implementation; silent-zero is exactly the
+  approximate behavior to refuse.
 - **Aggregates cross scopes upward, and only upward**: `count(group)`,
   `sum/min/max(item-scoped column)` yield record-scoped values — the
   "sum of amounts" case. Bounded by the item list, so totality is
