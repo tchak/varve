@@ -1,4 +1,4 @@
-# Varve — design handoff
+# Varve — design document
 
 > A varve is an annual layer of lake sediment: an append-only sequence of
 > timestamped layers whose value is that history can be read back from

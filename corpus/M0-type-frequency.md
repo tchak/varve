@@ -1,6 +1,6 @@
 # M0 type frequency report — DN published procedures
 
-First corpus deliverable (§8 M0, §12.1–12.3 of the handoff).
+First corpus deliverable (§8 M0, §12.1–12.3 of DESIGN.md).
 
 **Source:** data.gouv.fr, "Descriptif des démarches publiées sur
 demarche.numerique.gouv.fr", snapshot `20260815041004-demarches.json.gz`
@@ -18,7 +18,7 @@ records** are in this dataset. §12.4–12.10 need other sources.
 - 30.1% of procedures use at least one repetition; children per repetition:
   median 2, p90 8, max 185
 - Coverage: top 5 types = 60.7% of occurrences, top 10 = 81.2%,
-  **top 15 = 92.9%**, top 20 = 98.3% — the handoff's "a handful of types
+  **top 15 = 92.9%**, top 20 = 98.3% — DESIGN.md's "a handful of types
   cover ~90%" prediction (§8 M0) holds
 
 ## Kernel-type buckets
@@ -126,8 +126,8 @@ occurrences inside a repetition.
    strictness may differ per surface, and a mis-formatted value makes a
    record non-admissible with respect to a surface — never globally
    invalid.
-3. ~~Referential-backed enums.~~ **Resolved: nomenclatures (§2.12 of the
-   handoff).** Pays/région/département/commune/epci (1.5%) are closed
+3. ~~Referential-backed enums.~~ **Resolved: nomenclatures (§2.12 of
+   DESIGN.md).** Pays/région/département/commune/epci (1.5%) are closed
    external codelists — and the enum-size tail (p99 = 367 options, max =
    **47,738**) shows administrations stuffing referentials into hand-made
    dropdowns. A **nomenclature** is a versioned, content-addressed

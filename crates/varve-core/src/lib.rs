@@ -1,4 +1,4 @@
-//! Tier 0 (§7 of the handoff): identifiers, row paths, scalar primitives,
+//! Tier 0 (§7 of DESIGN.md): identifiers, row paths, scalar primitives,
 //! canonical serialization and content hashing. Depends on nothing.
 //!
 //! Deterministic by construction: no IO, no clock, no async.

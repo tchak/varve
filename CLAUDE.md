@@ -13,7 +13,7 @@ as long-lived case files, a pure typed logic language, impact reports),
 not the form builder. (A varve is an annual sediment layer — history read
 back layer by layer.)
 
-`varve-handoff.md` is the design document and single source of truth. The
+`DESIGN.md` is the design document and single source of truth. The
 workspace holds Tier 0–2 crates (`varve-core`, `-schema`, `-value`,
 `-record`, `-projection`, `-impact`) plus `tools/m0`, the corpus harness;
 `corpus/` holds the M0 analyses (all 42,723 published DN procedures
@@ -29,7 +29,7 @@ Use `jj` commands: `jj commit -m`, `jj describe`, `jj log`, `jj diff`,
 `jj git push`. The working copy is always a mutable change; `jj commit`
 finalizes it and opens a new one.
 
-## Conventions in varve-handoff.md
+## Conventions in DESIGN.md
 
 - **Open questions are never deleted.** A resolved §10 question keeps its
   number, gets struck through (`~~...~~`) with a bold **Resolved** note and a
@@ -57,7 +57,7 @@ obscure where things live.
 
 ## Design invariants already decided (do not re-litigate casually)
 
-From the handoff — these constrain any code written here:
+From DESIGN.md — these constrain any code written here:
 
 - Strict crate DAG (§7): Tiers 0–4 are deterministic — no IO, no async, no
   clock (timestamps are inputs). IO first appears in Tier 5.
