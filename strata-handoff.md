@@ -848,6 +848,22 @@ Conflict cases needing declared policy:
 Every aggregation emits an **AggregateReport** listing which columns hit which
 policy. Same shape as the impact report.
 
+> **Implementation notes (`strata-schema::cast`, found while building it).**
+> (1) `Text` is the top of the widening order for every text-renderable
+> scalar, so most retype pairs *have* a join; a join that lands on `Text`
+> with neither input `Text` (e.g. integer ∨ date, colliding inline enums)
+> is tagged **`ViaText`** and must appear in the AggregateReport — that is
+> the "widen to opaque text" policy applied where it is the genuine LUB,
+> reported instead of silent. True `Incompatible` is reserved for
+> attachment/geometry against anything else: split or omit, never coerce.
+> (2) Same-nomenclature enum joins take the higher version on the §2.11
+> assumption that nomenclature versions are **append-only** (removal is
+> deprecation; ids are never deleted). That assumption is now load-bearing
+> and must hold in `strata-revision`'s nomenclature publication rules.
+> (3) A cast is a set of orthogonal properties (lossy / checked /
+> needs-lens), not one class: `decimal-many → integer-one` is lossy *and*
+> checked at once.
+
 ### Compute over the full revision DAG, not the result set
 
 Tempting to aggregate over "revisions actually present in this filter" — do not.

@@ -4,19 +4,15 @@
 //! here knows about `required`, visibility, or admissibility — those are
 //! surface concerns.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use strata_core::{ColumnId, GroupId, NomenclatureId, OptionId};
+pub use strata_schema::NomenclatureTable;
 use strata_schema::{
     Arity, Cardinality, Element, NomenclatureRef, OptionRow, ScalarType, Schema,
 };
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};
-
-/// Published nomenclature rows, keyed by identity. Inline nomenclatures
-/// carry their rows in the schema; published ones are resolved through
-/// this table (they travel in the wire stream like blocks, §2.12).
-pub type NomenclatureTable = BTreeMap<NomenclatureId, Vec<OptionRow>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConformanceError {

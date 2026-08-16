@@ -6,6 +6,13 @@
 
 #![forbid(unsafe_code)]
 
+mod cast;
+
+pub use cast::{
+    Cast, CastClass, CastError, JoinConflict, JoinPath, NomenclatureTable,
+    arity_cast, arity_join, column_cast, column_join, scalar_cast, scalar_join,
+};
+
 use std::collections::HashSet;
 
 use strata_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
