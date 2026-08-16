@@ -898,14 +898,64 @@ total over a repetition ("sum of the amounts"). Design sketch:
   graph. Computed columns are readable by predicates (a visibility rule
   over a computed total is expected usage).
 
+### 4.3 Satisfiability and the visibility space (standing demands)
+
+Two more recurring demands, both served by one small solver, both
+tractable because of a structural gift: **atoms constrain one column
+against constants** (never column-to-column), so satisfiability is
+boolean structure over atoms whose only interactions are per-column.
+Each column gets a small abstract domain — `{absent/empty}` ∪ intervals
+(numbers, dates) or option-id sets (enums) — and the absence-loses rule
+is an asset: absence makes every comparison atom on a column false at
+once, and `is_empty` true. No SMT dependency; property-test the checker
+against brute-force enumeration over small domains.
+
+**Absurdity detection** (beyond typechecking), the findings taxonomy:
+
+- **Never-true** — `and(a == 2, a == 3)`: a dead visibility rule (the
+  column can never appear), a dead routing branch, an ineligibility
+  that never fires.
+- **Always-true**, evaluated over the absence element too —
+  `or(a == true, a == false)` is *not* a tautology, absence falsifies
+  both: a pointless condition, or an ineligibility that blocks every
+  submission.
+- **Redundant conjunct/disjunct** — `a > 3` inside `and(a > 5, …)`:
+  simplification hints.
+- **Routing shadowing** — an earlier group's rule subsumes a later
+  one's; first-match makes the later group unreachable. DN today
+  detects only exact duplicates.
+- **Never-true visibility × required-on-surface** = the "statically
+  unreachable required columns" §7 already promises the impact report —
+  this is the algorithm behind that promise.
+
+**The presentation-tree graph is statically computable.** The visible
+set is a function of the finite atom valuation, propagated through the
+(acyclic) rule DAG: the space of presentation trees is finite,
+enumerable, and pruned by the same satisfiability check (no branch for
+an impossible state). Honest caveat: the global count is a **product
+over connected components** of the dependency graph — exponential in
+the worst case. The product structure is also the display answer:
+conditions cluster into small components (one cascade per topic);
+enumerate each component's reachable states, render one decision tree
+per cluster, never one tree of 2^n leaves. Whether real procedures stay
+small per-component is measurable from the §12.5 extraction — cascade
+depth and component size join the checklist below.
+
+Placement: the solver and enumeration live in `varve-logic`; consumed
+by `varve-impact` (dead rules, unreachable required columns, routing
+shadowing) and by platform tooling for display.
+
 **Deferred:** a general `Not` combinator — rejected, not postponed (it
 would silently change imported rule semantics; see the absence-loses
 rule). **To validate against the extracted corpus (§12.5) and feature-
 request history:** operator frequencies; whether any rule depends on
 the negative-operator-on-absence subtlety; the ~21k desugared implicit
-rules (otherOption, linked dropdowns) counted in; and a census of the
+rules (otherOption, linked dropdowns) counted in; a census of the
 computed-value demands — which operations and aggregates were actually
-asked for fixes the v1 operation set from evidence rather than taste.
+asked for fixes the v1 operation set from evidence rather than taste;
+and condition-graph shape — cascade depth and connected-component size
+— which decides whether §4.3's per-component enumeration is always
+cheap in practice.
 
 ## 5. Wire format
 
