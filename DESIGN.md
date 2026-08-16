@@ -878,14 +878,28 @@ care about document order.
   detection). The kernel evaluates predicates; what a route target *is*
   stays platform-side (§6).
 
-**Typing.** Atoms typecheck against a revision through the existing
-machinery: comparisons on the nine scalars (int/decimal compare through
-the widening), enum equality on option ids (statically checkable
-against the nomenclature, §2.12), `contains` on arity-many enums, field
-projections typechecked against nomenclature extra fields. DN restricts
-conditionability to ~13 types; the kernel allows what the type system
-can compare (everything but attachment/geometry) and lets the corpus
-say whether text/date conditions were ever missed.
+**Typing — the conditionability matrix (settled from demand).** Atoms
+typecheck against a revision through the existing machinery; per scalar
+type, v1 allows:
+
+| type | atoms |
+|---|---|
+| boolean, number (int/decimal via widening), **date, datetime** | full comparisons |
+| enum | `eq`/`not_eq` on option ids (statically checked, §2.12), field projections |
+| enum arity `many` | `contains`/`excludes` |
+| **text** | **presence only** (`is_empty`/`is_filled`) |
+| **attachment, geometry** | **presence only** |
+
+Date/datetime comparisons are **in** — DN lacks them and the demand is
+standing. Text *comparisons* are **out of v1** — free-text equality is
+too easy to author into an impossible condition (case, whitespace,
+accents make exact match near-meaningless); presence checks carry none
+of that risk and stay. Attachment/geometry presence checks go beyond
+DN's conditionable set — also standing demand. All three restrictions
+are **publication-time atom policy, not grammar** (the same relaxation
+path as column-to-column comparisons): text comparisons, if ever
+enabled, arrive with normalized matching, not by lifting the policy
+alone.
 
 **Static analysis → `varve-impact`.** A rule breaks when: a source
 column is removed; a source is retyped so the atom no longer
