@@ -138,6 +138,22 @@ pub mod primitives {
     }
 
     impl Decimal {
+        pub fn from_i64(value: i64) -> Self {
+            Self {
+                mantissa: i128::from(value),
+                scale: 0,
+            }
+        }
+
+        /// Exact-or-nothing: `Some` only for whole numbers fitting i64 —
+        /// no silent truncation (§3 checked cast).
+        pub fn to_i64(&self) -> Option<i64> {
+            if self.scale != 0 {
+                return None;
+            }
+            i64::try_from(self.mantissa).ok()
+        }
+
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
             let (neg, rest) = match s.strip_prefix('-') {
                 Some(rest) => (true, rest),
@@ -205,6 +221,14 @@ pub mod primitives {
         }
     }
 
+    impl Date {
+        /// The injective embedding of the date→datetime widening cast
+        /// (§3): midnight UTC.
+        pub fn at_midnight_utc(&self) -> Instant {
+            Instant::parse(&format!("{self}T00:00:00Z")).expect("valid by construction")
+        }
+    }
+
     impl fmt::Display for Date {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "{}", self.0)
@@ -223,6 +247,13 @@ pub mod primitives {
             s.parse()
                 .map(Self)
                 .map_err(|_| PrimitiveError::Malformed("expected RFC 3339 instant"))
+        }
+
+        /// The lossy datetime→date cast (§3): the UTC calendar date.
+        /// Display is normalized UTC RFC 3339, so the first ten
+        /// characters are exactly the date.
+        pub fn utc_date(&self) -> Date {
+            Date::parse(&self.to_string()[..10]).expect("normalized display")
         }
     }
 

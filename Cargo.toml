@@ -4,6 +4,7 @@ members = [
     "crates/strata-schema",
     "crates/strata-value",
     "crates/strata-record",
+    "crates/strata-projection",
     "tools/m0",
 ]
 resolver = "3"

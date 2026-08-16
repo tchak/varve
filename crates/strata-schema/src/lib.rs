@@ -10,7 +10,8 @@ mod cast;
 
 pub use cast::{
     Cast, CastClass, CastError, JoinConflict, JoinPath, NomenclatureTable,
-    arity_cast, arity_join, column_cast, column_join, scalar_cast, scalar_join,
+    arity_cast, arity_join, column_cast, column_join, nomenclature_rows,
+    scalar_cast, scalar_join,
 };
 
 use std::collections::HashSet;
@@ -139,6 +140,76 @@ pub struct ResolverDeclaration {
 pub struct Schema {
     pub root: Vec<Element>,
     pub resolvers: Vec<ResolverDeclaration>,
+}
+
+/// Everything addressing needs to know about one column: its type,
+/// arity, and **scope** — the chain of `many` groups from the root
+/// (`one` groups contribute nothing, §2.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnInfo {
+    pub ty: ScalarType,
+    pub arity: Arity,
+    pub scope: Vec<GroupId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInfo {
+    pub cardinality: Cardinality,
+    /// Scope *outside* this group.
+    pub parent_scope: Vec<GroupId>,
+}
+
+/// Flat lookup over a schema's tree — what conformance and projection
+/// both need.
+#[derive(Debug, Clone, Default)]
+pub struct SchemaIndex {
+    pub columns: std::collections::BTreeMap<strata_core::ColumnId, ColumnInfo>,
+    pub groups: std::collections::BTreeMap<GroupId, GroupInfo>,
+}
+
+impl SchemaIndex {
+    pub fn build(schema: &Schema) -> Self {
+        fn walk(
+            elements: &[Element],
+            scope: &mut Vec<GroupId>,
+            index: &mut SchemaIndex,
+        ) {
+            for el in elements {
+                match el {
+                    Element::Column(c) => {
+                        index.columns.insert(
+                            c.id.clone(),
+                            ColumnInfo {
+                                ty: c.ty.clone(),
+                                arity: c.arity,
+                                scope: scope.clone(),
+                            },
+                        );
+                    }
+                    Element::Group(g) => {
+                        index.groups.insert(
+                            g.id.clone(),
+                            GroupInfo {
+                                cardinality: g.cardinality,
+                                parent_scope: scope.clone(),
+                            },
+                        );
+                        match g.cardinality {
+                            Cardinality::Many => {
+                                scope.push(g.id.clone());
+                                walk(&g.children, scope, index);
+                                scope.pop();
+                            }
+                            Cardinality::One => walk(&g.children, scope, index),
+                        }
+                    }
+                }
+            }
+        }
+        let mut index = SchemaIndex::default();
+        walk(&schema.root, &mut Vec::new(), &mut index);
+        index
+    }
 }
 
 /// Depth-1 is a policy, not a type (§2.3).

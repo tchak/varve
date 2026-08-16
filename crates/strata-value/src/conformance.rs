@@ -4,12 +4,12 @@
 //! here knows about `required`, visibility, or admissibility — those are
 //! surface concerns.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use strata_core::{ColumnId, GroupId, NomenclatureId, OptionId};
 use strata_schema::{
-    Arity, Cardinality, Element, NomenclatureRef, NomenclatureTable, OptionRow,
-    ScalarType, Schema,
+    Arity, Cardinality, NomenclatureRef, NomenclatureTable, OptionRow,
+    ScalarType, Schema, SchemaIndex,
 };
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};
@@ -35,61 +35,6 @@ pub enum ConformanceError {
     /// parent path does not match the group's scope.
     MisplacedItems(GroupId),
     DuplicateItem(GroupId),
-}
-
-struct ColumnInfo<'a> {
-    ty: &'a ScalarType,
-    arity: Arity,
-    /// Enclosing `many` groups, root-outward. `one` groups contribute
-    /// nothing (§2.5).
-    scope: Vec<GroupId>,
-}
-
-struct GroupInfo {
-    cardinality: Cardinality,
-    /// Scope *outside* this group.
-    parent_scope: Vec<GroupId>,
-}
-
-fn index<'a>(
-    elements: &'a [Element],
-    scope: &mut Vec<GroupId>,
-    columns: &mut HashMap<ColumnId, ColumnInfo<'a>>,
-    groups: &mut HashMap<GroupId, GroupInfo>,
-) {
-    for el in elements {
-        match el {
-            Element::Column(c) => {
-                columns.insert(
-                    c.id.clone(),
-                    ColumnInfo {
-                        ty: &c.ty,
-                        arity: c.arity,
-                        scope: scope.clone(),
-                    },
-                );
-            }
-            Element::Group(g) => {
-                groups.insert(
-                    g.id.clone(),
-                    GroupInfo {
-                        cardinality: g.cardinality,
-                        parent_scope: scope.clone(),
-                    },
-                );
-                match g.cardinality {
-                    Cardinality::Many => {
-                        scope.push(g.id.clone());
-                        index(&g.children, scope, columns, groups);
-                        scope.pop();
-                    }
-                    Cardinality::One => {
-                        index(&g.children, scope, columns, groups);
-                    }
-                }
-            }
-        }
-    }
 }
 
 fn scalar_conforms(
@@ -144,12 +89,10 @@ pub fn check(
     nomenclatures: &NomenclatureTable,
 ) -> Vec<ConformanceError> {
     let mut errors = Vec::new();
-    let mut columns = HashMap::new();
-    let mut groups = HashMap::new();
-    index(&schema.root, &mut Vec::new(), &mut columns, &mut groups);
+    let index = SchemaIndex::build(schema);
 
     for (addr, list) in &values.items {
-        match groups.get(&addr.group) {
+        match index.groups.get(&addr.group) {
             None => errors.push(ConformanceError::UnknownGroup(addr.group.clone())),
             Some(info) => {
                 let parent_groups: Vec<&GroupId> =
@@ -169,7 +112,7 @@ pub fn check(
     }
 
     for (addr, state) in &values.cells {
-        let Some(info) = columns.get(&addr.column) else {
+        let Some(info) = index.columns.get(&addr.column) else {
             errors.push(ConformanceError::UnknownColumn(addr.column.clone()));
             continue;
         };
@@ -208,14 +151,14 @@ pub fn check(
         };
         match (value, info.arity) {
             (CellValue::One(scalar), Arity::One) => {
-                scalar_conforms(scalar, info.ty, &addr.column, nomenclatures, &mut errors);
+                scalar_conforms(scalar, &info.ty, &addr.column, nomenclatures, &mut errors);
             }
             (CellValue::Many(scalars), Arity::Many) => {
                 let mut seen = HashSet::new();
                 for scalar in scalars {
                     scalar_conforms(
                         scalar,
-                        info.ty,
+                        &info.ty,
                         &addr.column,
                         nomenclatures,
                         &mut errors,

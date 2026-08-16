@@ -116,6 +116,21 @@ pub enum CastError {
     UnknownNomenclature(NomenclatureId),
 }
 
+/// The rows an enum's nomenclature reference resolves to: inline rows
+/// directly, published ones through the table.
+pub fn nomenclature_rows<'a>(
+    nref: &'a NomenclatureRef,
+    nomenclatures: &'a NomenclatureTable,
+) -> Result<&'a [OptionRow], CastError> {
+    match nref {
+        NomenclatureRef::Inline(rows) => Ok(rows),
+        NomenclatureRef::Published { id, .. } => nomenclatures
+            .get(id)
+            .map(Vec::as_slice)
+            .ok_or_else(|| CastError::UnknownNomenclature(id.clone())),
+    }
+}
+
 fn option_ids(
     nref: &NomenclatureRef,
     nomenclatures: &NomenclatureTable,
