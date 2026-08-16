@@ -269,14 +269,7 @@ pub mod primitives {
     }
 }
 
-pub mod canonical {
-    //! Canonical serialization and content hashing — deliberately empty.
-    //!
-    //! The canonical encoding is constrained by §2.10 before it exists:
-    //! hashes must commit to salted or encrypted value encodings, never
-    //! plaintext (erasure tolerance). Not needed by the M0 expressibility
-    //! harness; must be designed before anything record-shaped is hashed.
-}
+pub mod canonical;
 
 #[cfg(test)]
 mod tests {

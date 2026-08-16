@@ -669,6 +669,64 @@ models. Rejected: `codelist` (accurate SDMX term, colder), `codebook`
 a ValueSet is a selection from a code system), `taxonomy` (promises
 hierarchy), `registry` (promises mutability and a central authority).
 
+## 2.13 Canonical bytes and content addresses
+
+Settled design for `strata-core::canonical`. Eight decisions:
+
+1. **Two hashing regimes.** Schema-side objects (revisions, blocks,
+   nomenclatures, resolver declarations) hash **plain**: no salts, so
+   identical schemas converge on identical ids on every instance — the
+   point of content addressing. Record-side objects (entries, snapshots)
+   carry personal data and hash as **salted commitments** (§2.10): never
+   plaintext. Salting schema hashes would silently destroy cross-instance
+   schema identity; not salting record hashes would make low-entropy
+   fields brute-forceable after erasure.
+2. **Canonical form is JCS (RFC 8785)** over wire-shaped JSON values. One
+   encoding family for wire and hashing; hash the canonical bytes, never
+   the emitted line (§5).
+3. **Scalar rendering pinned.** Decimals: the normalized `Decimal` string
+   form. Instants: normalized UTC RFC 3339. Geometry coordinates: JCS /
+   ES6 number serialization (implemented and tested against known
+   vectors). Text: hashed as entered — no Unicode normalization. Absent
+   vs `null`: the §5 rule, identically.
+4. **Entries are vector commitments over ops.** The entry's content hash
+   is a plain hash of a body in which each op appears as its **salted
+   per-op commitment** `H(salt_i ‖ canonical(op_i))`. A §2.9-filtered
+   export can disclose some ops (with their salts) and withhold others
+   (commitment only) while the entry hash — and the chain — verify
+   unchanged. Redaction and erasure are the same mechanism at different
+   lifetimes.
+5. **Salts are inputs.** Tier 0 has no randomness: 32-byte salts are
+   generated at Tier 5 append time and passed in, like timestamps. One
+   fresh salt per op. Erasure granularity above per-op (epochs, key
+   hierarchies) stays open per §12.11 — the encoding does not preclude
+   it.
+6. **SHA-256, with an algorithm tag.** Chosen for audit defensibility:
+   the chain's legal weight starts with a primitive on the lists auditors
+   already accept (ANSSI, FIPS, eIDAS-adjacent), plus ecosystem interop
+   (attachments, blob stores, registries) and hardware speed at entry
+   sizes. Every content address carries an algorithm tag so migration
+   stays representable. BLAKE3 stays available to Tier 5 blob internals;
+   kernel addresses are SHA-256.
+7. **Revision identity.** Identity-bearing: types, arity, cardinality,
+   the order of columns and groups (containers are ordered), inline
+   nomenclature rows including labels (a relabel is a new revision,
+   §2.11), resolver declarations. Not identity-bearing: surfaces
+   (separate objects). Canonical shapes (field names, optionals omitted
+   when absent) live in code with test vectors.
+8. **Envelope vs content; actor pseudonymity is a contract.** Envelope —
+   survives redaction, lives as long as the record: `seq`, `prev`, actor
+   (opaque id + kind), timestamp, `authored_against_revision`, content
+   commitment. Content — redactable and erasable: ops, origin (it
+   describes the values), note. Stated deliberately: *who acted when*
+   shares the record's lifetime; *what they wrote* may have a shorter
+   one. This is GDPR-sound only under a kernel contract: **actor ids are
+   pseudonymous references**, and the id→person mapping lives
+   platform-side, separately erasable — deleting the mapping anonymizes
+   every envelope at once without touching a hash. A platform that
+   writes direct identifiers into actor ids has broken the contract, and
+   only whole-record erasure recovers it.
+
 ## 3. Change classification
 
 Because column IDs are stable, **cells are revision-agnostic; only their
@@ -789,9 +847,9 @@ current surface: "hidden never deletes" implies hidden must round-trip.
   whether attachments are bundled or referenced. Import rejects on line 1 or
   commits to the whole stream. Apply into staging, then atomic swap — never
   stream into live tables.
-- **Canonical serialization required** for content-addressed checkpoints. Adopt
-  JCS (RFC 8785) or define one; hash the canonical bytes, never the emitted
-  line.
+- **Canonical serialization required** for content-addressed checkpoints.
+  Settled: JCS (RFC 8785) — the full design is §2.13; hash the canonical
+  bytes, never the emitted line.
 - **No decimals or money in JSON numbers.** Strings for exact decimals,
   RFC 3339 for instants.
 

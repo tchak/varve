@@ -8,3 +8,6 @@ publish.workspace = true
 # Civil dates + RFC 3339 timestamps only: no clock, no tzdb — Tier 0
 # stays deterministic. Never exposed in the public API (newtypes).
 jiff = { version = "0.2", default-features = false, features = ["std"] }
+# §2.13: SHA-256 content addresses, ES6/JCS float rendering. Pure, no IO.
+sha2 = "0.10"
+ryu = "1"
