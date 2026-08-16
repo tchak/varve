@@ -771,6 +771,142 @@ Its own crate. The crown jewel and the highest-risk component.
 
 Fuzzers and a property-test corpus from day one.
 
+### 4.1 First design pass, from the DN implementation
+
+Read from DN's `Logic::` module (`ChampColumnValue` current;
+`ChampValue` legacy, ignored), its visibility evaluation, routing engine
+and ineligibility rules. The extracted expression corpus (§12.5) must
+validate this pass; until then it is grounded in the implementation, not
+the usage.
+
+**What DN's language actually is — smaller than assumed.** A condition
+is `and`/`or` over **atomic comparisons**. Terms are column references,
+constants, and empty. No arithmetic, no predicate nesting inside terms,
+and **no logical negation**: negatives are separate operators (`NotEq`,
+`Exclude`, `NotIn*`). Only ~13 champ types are conditionable — text and
+dates cannot participate at all — and integer/decimal unify into one
+`number` comparison type.
+
+**Absence always loses — and negation is not negation.** DN evaluates a
+hidden, blank, or missing source to nil, and every operator collapses
+nil to **false** — including the negative operators: `NotEq(hidden, x)`
+is *false*, not true. So DN's negatives are not `Not(Eq)`; they are
+independent atoms that also lose on absence. Adopted as kernel
+semantics, deliberately:
+
+> Atoms are two-valued. A source that is absent, empty, or unreachable
+> makes the atom **false** (except `is_empty`, which it makes true).
+> There is **no general `Not` combinator** — negated comparisons are
+> their own atoms with the same absence-loses rule. This keeps
+> admissibility binary (§2.8 rule 3), makes evaluation total, and
+> imports DN rules without changing their meaning.
+
+**The AST (v1):**
+
+```
+Expr  ::= and(Expr…) | or(Expr…) | Atom
+Atom  ::= eq | not_eq | lt | le | gt | ge     (typed comparison)
+        | is_empty | is_filled
+        | contains | excludes                  (arity-many enum)
+        | pending(resolver)                    (§2.8 rule 3)
+Term  ::= column(column_id, field?)            (field: nomenclature
+                                                extra-field projection)
+        | const(typed literal)
+```
+
+`Expr` nests arbitrarily — **settled from institutional memory**: DN's
+single-level and/or is a UI limitation with standing demand against it,
+not a semantic choice. The kernel ships full nesting; DN rules import
+as the degenerate one-level case.
+
+**DN's geo operators dissolve.** `InDepartement(commune_col, "01")` is a
+field projection through the commune nomenclature's extra fields
+(§2.12) followed by `eq`: `eq(column(c, "departement"), "01")`. Four
+special operators become zero; the mechanism already existed.
+
+**Scopes, confirmed exactly.** DN's `champs_for_condition`: an
+item-scoped rule reads its own item's columns plus record columns; a
+record-scoped rule reads record columns only; repetition children
+inherit hiddenness from their group's own visibility. That is §4's
+two-scope model verbatim. Record-scoped rules can never reference
+item-scoped columns (DN's evaluation would silently pick the first row;
+the kernel typechecker rejects it instead).
+
+**Acyclicity is the kernel rule; "upstream only" is a surface rule.**
+DN's editor restricts condition sources to champs *above* the current
+one in document order — a presentation-order constraint that guarantees
+acyclicity. The kernel keeps only the invariant: the dependency graph
+(column → its visibility rule's sources) must be **acyclic**, checked
+at publication like the depth policy (§2.3 style: an error with a
+message, not a type). Evaluation is topological; a hidden source reads
+as absent, so visibility cascades deterministically. Surfaces may
+impose the stronger upstream-only authoring rule; the kernel does not
+care about document order.
+
+**Attachment points, all sharing one AST:**
+
+- **Visibility / requiredness** — per surface node (§2.6).
+- **Ineligibility** — a record-scoped admissibility predicate on the
+  submission surface (+ message): DN blocks submission when it holds.
+  Nothing new in the kernel — it is a surface admissibility rule.
+- **Routing** — an ordered list of record-scoped predicates,
+  first-match wins (DN: per instructor group, with duplicate-rule
+  detection). The kernel evaluates predicates; what a route target *is*
+  stays platform-side (§6).
+
+**Typing.** Atoms typecheck against a revision through the existing
+machinery: comparisons on the nine scalars (int/decimal compare through
+the widening), enum equality on option ids (statically checkable
+against the nomenclature, §2.12), `contains` on arity-many enums, field
+projections typechecked against nomenclature extra fields. DN restricts
+conditionability to ~13 types; the kernel allows what the type system
+can compare (everything but attachment/geometry) and lets the corpus
+say whether text/date conditions were ever missed.
+
+**Static analysis → `varve-impact`.** A rule breaks when: a source
+column is removed; a source is retyped so the atom no longer
+typechecks; an enum constant references a **removed option id** (the
+§2.11/§3 flagged case, now reaching rules); a projected nomenclature
+field disappears. These mirror DN's own rule-error taxonomy
+(`not_available`, `incompatible`, `not_included`) and become the
+"broken rule references" section of the impact report.
+
+### 4.2 Computed values (in scope — strong standing demand)
+
+DN's logic ships predicates only, but the demand for computed values is
+real and strong (institutional memory) — the canonical case being a
+total over a repetition ("sum of the amounts"). Design sketch:
+
+- **A computed column is a schema object**: declared expression, typed
+  target — the resolver-declaration pattern with the record itself as
+  the source. Statically typechecked at publication like a mapping
+  (§2.7).
+- **Virtual, never stored.** A computed cell is a *view*, like group
+  values (§2.5): derived at read, never in the log, never in wire
+  cells, recomputed on import. No staleness, no provenance ambiguity —
+  its origin is its declaration.
+- **Value expressions** extend the AST with typed operations: numeric
+  arithmetic (`+ − ×` on number; division needs a total-semantics
+  decision — absent from v1 until settled), text concatenation, and
+  conditional selection (`if(Expr, ValueExpr, ValueExpr)`).
+- **Aggregates cross scopes upward, and only upward**: `count(group)`,
+  `sum/min/max(item-scoped column)` yield record-scoped values — the
+  "sum of amounts" case. Bounded by the item list, so totality is
+  preserved; no aggregate may appear item-scoped over its own scope.
+- **Acyclicity extends** to computed columns: the publication-time
+  dependency check covers rule sources *and* computed inputs in one
+  graph. Computed columns are readable by predicates (a visibility rule
+  over a computed total is expected usage).
+
+**Deferred:** a general `Not` combinator — rejected, not postponed (it
+would silently change imported rule semantics; see the absence-loses
+rule). **To validate against the extracted corpus (§12.5) and feature-
+request history:** operator frequencies; whether any rule depends on
+the negative-operator-on-absence subtlety; the ~21k desugared implicit
+rules (otherOption, linked dropdowns) counted in; and a census of the
+computed-value demands — which operations and aggregates were actually
+asked for fixes the v1 operation set from evidence rather than taste.
+
 ## 5. Wire format
 
 **Tagged JSONL.** The point is not just streamability — it's that the stream can
