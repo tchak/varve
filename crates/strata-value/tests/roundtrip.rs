@@ -264,6 +264,28 @@ fn remove_item_cascades() {
 }
 
 #[test]
+fn geometry_is_validated_geojson() {
+    use strata_value::{Feature, GeometryError};
+    let point = r#"{"type":"Feature","id":7,"geometry":{"type":"Point","coordinates":[2.35,48.85]},"properties":null}"#;
+    let feature = Feature::parse(point).unwrap();
+    // Numeric GeoJSON ids normalize to text element identity.
+    assert_eq!(feature.id(), Some("7"));
+    // Equality is semantic, not textual.
+    let spaced = point.replace(":", ": ");
+    assert_eq!(feature, Feature::parse(&spaced).unwrap());
+    // A geometry cell holds Features only.
+    assert_eq!(
+        Feature::parse(r#"{"type":"Point","coordinates":[0,0]}"#),
+        Err(GeometryError::NotAFeature)
+    );
+    assert_eq!(
+        Feature::parse(r#"{"type":"FeatureCollection","features":[]}"#),
+        Err(GeometryError::NotAFeature)
+    );
+    assert_eq!(Feature::parse("not json"), Err(GeometryError::Malformed));
+}
+
+#[test]
 fn file_replacement_is_visible_element_wise() {
     let old = CellValue::Many(vec![attachment("f1", "aaa"), attachment("f2", "bbb")]);
     let new = CellValue::Many(vec![attachment("f2", "b-new"), attachment("f3", "ccc")]);

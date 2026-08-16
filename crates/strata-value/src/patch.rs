@@ -8,7 +8,7 @@ use crate::{CellAddr, CellState, ItemsAddr, RecordValues};
 
 /// The op set (§5). A snapshot export never uses more than `Set` and
 /// `AddItem`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Op {
     Set {
         column: ColumnId,
