@@ -716,8 +716,9 @@ Settled design for `strata-core::canonical`. Eight decisions:
    when absent) live in code with test vectors.
 8. **Envelope vs content; actor pseudonymity is a contract.** Envelope —
    survives redaction, lives as long as the record: `seq`, `prev`, actor
-   (opaque id + kind), timestamp, `authored_against_revision`, content
-   commitment. Content — redactable and erasable: ops, origin (it
+   (opaque id + kind), timestamp, `authored_against_revision`,
+   `base_version` (structural — concurrency detection needs it on
+   redacted entries too), content commitment. Content — redactable and erasable: ops, origin (it
    describes the values), note. Stated deliberately: *who acted when*
    shares the record's lifetime; *what they wrote* may have a shorter
    one. This is GDPR-sound only under a kernel contract: **actor ids are

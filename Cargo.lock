@@ -277,6 +277,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-record"
+version = "0.1.0"
+dependencies = [
+ "strata-core",
+ "strata-value",
+]
+
+[[package]]
 name = "strata-schema"
 version = "0.1.0"
 dependencies = [
