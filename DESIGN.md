@@ -1022,9 +1022,7 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
 - `varve-impact` — what does publishing revision N+1 do? Change classification
   (safe / lossy / breaking), broken rule references, statically unreachable
   required columns, count of records whose cells fail the new cast.
-  *(Name not final. Alternatives considered: `resolve`, `transit`, `morphism`.
-  Avoid `compat` — in Rust that connotes legacy shims. Avoid `migrate` — implies
-  one-way and destructive. Avoid `evolve` — implies forward-only.)*
+  *(Name settled — see open question 2.)*
 
 `projection` and `impact` both depend on `schema`.
 *Correction, found in implementation: `impact` also depends on
@@ -1116,7 +1114,23 @@ Only then: `surface`, `store`, service.
    `moraine` (taken on crates.io). Earlier: rejected the `-DB` suffix —
    invites comparison to Dolt/TerminusDB on axes that are lost while
    hiding the actual differentiator.
-2. **`varve-impact` name.** Not settled.
+2. ~~`varve-impact` name.~~ **Resolved: `impact` confirmed.** Three
+   grounds: "change impact analysis" is the discipline's own term for
+   exactly this activity; *étude d'impact* is a formal French
+   administrative instrument, so the name is domain-authentic to its
+   actual audience (the nomenclature/varve argument again); and the
+   crate is named after its artifact — DESIGN.md calls the flagship
+   deliverable "the impact report" throughout, and renaming the crate
+   away from its own output would be a permanent seam. Considered and
+   rejected: `preflight` (best challenger — right tense, but connotes a
+   boolean checklist and undersells the report), `assay` (precise but
+   obscure), `triage` (implies emergency and chosen neglect),
+   `forecast`/`prognosis` (imply estimation; the counts are exact),
+   `audit` (retrospective), `fallout`/`blast-radius` (negative-only —
+   an all-Safe verdict is a common, happy outcome), `tremor` (cute).
+   Earlier rejections hold: `resolve`, `transit`, `morphism`, `compat`
+   (legacy-shim connotation), `migrate` (one-way, destructive),
+   `evolve` (forward-only).
 3. **Attachments / files.** Needs its own design pass. A filename is ambiguous,
    a URL is instance-bound. Cross-instance export needs a manifest + bundle
    format with content-addressed references. Probably its own crate.
