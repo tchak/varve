@@ -829,6 +829,36 @@ mixing both has two sources of truth for the same cells.
 chain-preserving redacted entries — is specified in §2.9 but required by
 nothing on day one.)
 
+### Import modes (settles open question 6)
+
+Modes are distinguished by **stream kind, never by flag** — the two line
+kinds cannot mix (above), so one format can never do both:
+
+- **History import** — `entry` lines: migration. Verify and adopt each
+  record's chain, continue appending (§6: one-way, one-time).
+- **Snapshot import** — `record`/`item` cell lines: **whole-record
+  replace**. A stream is authoritative for the full state of each record
+  it contains; within a record, absent means unset. Finer bulk updates
+  ("these three columns on 10,000 records") use the op form — column-
+  scoped replace declarations are not needed (confirmed from DN
+  practice) and are cut, not deferred.
+- **No in-band unchanged-sentinel, ever.** "Unchanged" is absence (op
+  form) or not-in-stream (snapshot form). CSV is non-importable (above),
+  so the tabular input class that needs sentinels never reaches the
+  kernel. REDCap's `NEW` sentinel is likewise unnecessary: `add_item`
+  ops always carry explicit ids, minted by the Tier 5 importer.
+- **Import is never a side door.** A snapshot import into a live record
+  reduces to `diff(current state, imported state)` appended as an
+  **ordinary log entry** — actor supplied by the importer,
+  `base_version` = current. LWW, conflict detection, provenance,
+  checkpoint enforcement and the audit trail apply to bulk imports
+  exactly as to human edits, with zero import-specific machinery.
+- **The manifest declares record-level intent**: `create-only`,
+  `update-only`, or `upsert`. Unknown ids under update-only and
+  colliding ids under create-only reject the stream on line 1 semantics
+  (§5 constraints) — a typo'd record id fails loudly instead of
+  silently creating a duplicate case file.
+
 ### Stored state on the wire
 
 - key absent from `cells` → absent
@@ -1141,8 +1171,14 @@ Only then: `surface`, `store`, service.
    (§2.3) is the entire accommodation.
 5. **Group-level atomic validation.** What exactly does a published block
    guarantee, and what does violating it produce?
-6. **Import modes.** Full-replace-within-declared-scope vs explicit patch with
-   an unchanged sentinel. Do not let one format do both.
+6. ~~Import modes.~~ **Resolved (§5 "Import modes").** Modes are
+   distinguished by stream kind, never by flag; snapshot import is
+   whole-record replace (column-scoped replace cut — DN practice does
+   not need it; the op form covers partial bulk updates); no in-band
+   sentinels ever (CSV is non-importable, so the input class needing
+   them never reaches the kernel); imports land as ordinary log entries
+   — never a side door; the manifest declares create-only / update-only
+   / upsert so id mismatches fail loudly.
 7. ~~The three deferred-resolution rules in §2.8.~~ **Ratified** (§2.8) —
    version binding at request time, override-wins, pending-readable-by-logic.
 8. **Resolver pluggability.** If the corpus shows a long tail of one-off
