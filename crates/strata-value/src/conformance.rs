@@ -7,9 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use strata_core::{ColumnId, GroupId, NomenclatureId, OptionId};
-pub use strata_schema::NomenclatureTable;
 use strata_schema::{
-    Arity, Cardinality, Element, NomenclatureRef, OptionRow, ScalarType, Schema,
+    Arity, Cardinality, Element, NomenclatureRef, NomenclatureTable, OptionRow,
+    ScalarType, Schema,
 };
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};

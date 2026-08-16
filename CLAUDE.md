@@ -40,6 +40,16 @@ finalizes it and opens a new one.
   features earn their place by appearing in the real DN corpus.
 - Cross-references use § numbers; keep them valid when inserting sections.
 
+## Pre-publish stage: no backward compatibility
+
+Nothing is published (`publish = false` everywhere, gated on M3). Until
+then there is no API stability contract and no backward-compatibility
+concern between crates: **refactor ruthlessly**. Move types to their right
+crate, rename freely, and update all callers in the same change. Never add
+re-exports, aliases, or deprecation shims "for compatibility" — there are
+no external consumers to be compatible with, and shims at this stage only
+obscure where things live.
+
 ## Design invariants already decided (do not re-litigate casually)
 
 From the handoff — these constrain any code written here:

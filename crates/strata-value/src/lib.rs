@@ -12,7 +12,7 @@ mod conformance;
 mod patch;
 mod report;
 
-pub use conformance::{ConformanceError, NomenclatureTable, check};
+pub use conformance::{ConformanceError, check};
 pub use patch::{ApplyError, Op, apply, diff};
 pub use report::{ElementChanges, cell_delta};
 
