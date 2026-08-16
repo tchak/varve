@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "crates/strata-core",
-    "crates/strata-schema",
-    "crates/strata-value",
-    "crates/strata-record",
-    "crates/strata-projection",
-    "crates/strata-impact",
+    "crates/varve-core",
+    "crates/varve-schema",
+    "crates/varve-value",
+    "crates/varve-record",
+    "crates/varve-projection",
+    "crates/varve-impact",
     "tools/m0",
 ]
 resolver = "3"
@@ -16,6 +16,5 @@ proptest = "1"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# Q1: the "strata" name is taken on crates.io, and the guardrail says
-# nothing publishes before M3. Enforced here.
+# Nothing publishes before M3 (§9 guardrail). Enforced here.
 publish = false

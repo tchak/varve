@@ -5,6 +5,6 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-strata-core = { path = "../../crates/strata-core" }
-strata-schema = { path = "../../crates/strata-schema" }
+varve-core = { path = "../../crates/varve-core" }
+varve-schema = { path = "../../crates/varve-schema" }
 serde_json = "1"

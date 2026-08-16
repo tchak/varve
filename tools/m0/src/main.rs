@@ -19,8 +19,8 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use strata_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
-use strata_schema::{
+use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
+use varve_schema::{
     Arity, Cardinality, Column, DepthPolicy, Element, Group, Mapping,
     NomenclatureRef, OptionRow, ResolverDeclaration, ResultField, ScalarType,
     Schema, validate,

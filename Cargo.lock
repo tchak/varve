@@ -242,8 +242,8 @@ name = "m0"
 version = "0.1.0"
 dependencies = [
  "serde_json",
- "strata-core",
- "strata-schema",
+ "varve-core",
+ "varve-schema",
 ]
 
 [[package]]
@@ -476,62 +476,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "strata-core"
-version = "0.1.0"
-dependencies = [
- "jiff",
- "proptest",
- "ryu",
- "sha2",
-]
-
-[[package]]
-name = "strata-impact"
-version = "0.1.0"
-dependencies = [
- "strata-core",
- "strata-projection",
- "strata-schema",
- "strata-value",
-]
-
-[[package]]
-name = "strata-projection"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "strata-core",
- "strata-schema",
- "strata-value",
-]
-
-[[package]]
-name = "strata-record"
-version = "0.1.0"
-dependencies = [
- "strata-core",
- "strata-value",
-]
-
-[[package]]
-name = "strata-schema"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "strata-core",
-]
-
-[[package]]
-name = "strata-value"
-version = "0.1.0"
-dependencies = [
- "geojson",
- "proptest",
- "strata-core",
- "strata-schema",
-]
-
-[[package]]
 name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -603,6 +547,62 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "varve-core"
+version = "0.1.0"
+dependencies = [
+ "jiff",
+ "proptest",
+ "ryu",
+ "sha2",
+]
+
+[[package]]
+name = "varve-impact"
+version = "0.1.0"
+dependencies = [
+ "varve-core",
+ "varve-projection",
+ "varve-schema",
+ "varve-value",
+]
+
+[[package]]
+name = "varve-projection"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "varve-core",
+ "varve-schema",
+ "varve-value",
+]
+
+[[package]]
+name = "varve-record"
+version = "0.1.0"
+dependencies = [
+ "varve-core",
+ "varve-value",
+]
+
+[[package]]
+name = "varve-schema"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "varve-core",
+]
+
+[[package]]
+name = "varve-value"
+version = "0.1.0"
+dependencies = [
+ "geojson",
+ "proptest",
+ "varve-core",
+ "varve-schema",
+]
 
 [[package]]
 name = "version_check"

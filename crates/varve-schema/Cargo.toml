@@ -1,0 +1,11 @@
+[package]
+name = "varve-schema"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+
+[dev-dependencies]
+proptest.workspace = true

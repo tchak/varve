@@ -1,0 +1,9 @@
+[package]
+name = "varve-record"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-value = { path = "../varve-value" }

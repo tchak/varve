@@ -4,18 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-Design-phase repository for **Strata** (provisional name — verify crates.io
-availability before any publish): a generic, embeddable Rust kernel for
-versioned, multi-party case files, extracted from ~10 years of building DN, a
-French public-service platform (administrations publish "procedures"/schemas,
-citizens submit "dossiers"/records). The thesis: the valuable extraction is
-the **versioning kernel** (schema revisions over live records, records as
-long-lived case files, a pure typed logic language, impact reports), not the
-form builder.
+**Varve**: a generic, embeddable Rust kernel for versioned, multi-party
+case files, extracted from ~10 years of building DN, a French
+public-service platform (administrations publish "procedures"/schemas,
+citizens submit "dossiers"/records). The thesis: the valuable extraction
+is the **versioning kernel** (schema revisions over live records, records
+as long-lived case files, a pure typed logic language, impact reports),
+not the form builder. (A varve is an annual sediment layer — history read
+back layer by layer.)
 
-There is no code yet. `strata-handoff.md` is the design document and the
-single source of truth. The Rust workspace starts only after the corpus
-analyses listed in its §12 — do not scaffold crates preemptively.
+`varve-handoff.md` is the design document and single source of truth. The
+workspace holds Tier 0–2 crates (`varve-core`, `-schema`, `-value`,
+`-record`, `-projection`, `-impact`) plus `tools/m0`, the corpus harness;
+`corpus/` holds the M0 analyses (all 42,723 published DN procedures
+express with zero residue). M1 machinery is built and awaits DN
+revision-history data; `varve-logic`, `-surface`, `-revision`, `-wire`
+are not started. Run `cargo test --workspace` (65 tests incl. property
+suites) and `cargo clippy --workspace --all-targets` before committing.
 
 ## Version control: jj, not git
 
@@ -24,7 +29,7 @@ Use `jj` commands: `jj commit -m`, `jj describe`, `jj log`, `jj diff`,
 `jj git push`. The working copy is always a mutable change; `jj commit`
 finalizes it and opens a new one.
 
-## Conventions in strata-handoff.md
+## Conventions in varve-handoff.md
 
 - **Open questions are never deleted.** A resolved §10 question keeps its
   number, gets struck through (`~~...~~`) with a bold **Resolved** note and a

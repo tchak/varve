@@ -1,0 +1,15 @@
+[package]
+name = "varve-value"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+# GeoJSON is JSON: the serde_json here is the domain format's parser, not
+# wire coupling (§9). No geo-types — the kernel never computes geometry.
+geojson = { version = "0.24", default-features = false }
+
+[dev-dependencies]
+proptest.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "varve-impact"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+varve-value = { path = "../varve-value" }
+varve-projection = { path = "../varve-projection" }
