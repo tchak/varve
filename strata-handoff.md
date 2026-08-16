@@ -977,6 +977,10 @@ every feature must appear in the corpus to earn its place.
 - **M0** (`core` + `schema` + `value`) — **Expressibility.** Can every DN
   procedure be expressed? The list of ones that can't, and why, *is* the type
   system requirements document.
+  *Structural half achieved (`corpus/M0-expressibility.md`): all 42,723
+  published procedures express and validate with zero residue, via
+  `tools/m0` over `strata-core` + `strata-schema`. Value conformance
+  (`strata-value`) and rule expressibility (M2) remain.*
   - Also produce a **type frequency report**: how many real DN fields are SIRET,
     address, date, attachment, free text? Expect a handful of types to cover
     ~90%. This decides which composites are first-class in the kernel vs merely

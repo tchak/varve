@@ -1,0 +1,10 @@
+[package]
+name = "m0"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+strata-core = { path = "../../crates/strata-core" }
+strata-schema = { path = "../../crates/strata-schema" }
+serde_json = "1"
