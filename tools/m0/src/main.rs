@@ -491,3 +491,158 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use varve_schema::DepthPolicy;
+
+    fn convert_all(champs: Value) -> (Schema, Stats) {
+        let mut stats = Stats::default();
+        let mut root = Vec::new();
+        let resolvers = {
+            let mut converter = Converter {
+                next_column: 0,
+                next_group: 0,
+                procedure: 1,
+                stats: &mut stats,
+                resolvers: Vec::new(),
+            };
+            for champ in champs.as_array().unwrap() {
+                converter.convert(champ, &mut root);
+            }
+            converter.resolvers
+        };
+        (Schema { root, resolvers }, stats)
+    }
+
+    fn champ(typename: &str) -> Value {
+        json!({"__typename": typename, "label": typename, "required": false})
+    }
+
+    #[test]
+    fn every_known_champ_type_converts_and_validates() {
+        let mut champs: Vec<Value> = [
+            "HeaderSectionChampDescriptor",
+            "ExplicationChampDescriptor",
+            "TextChampDescriptor",
+            "TextareaChampDescriptor",
+            "FormattedChampDescriptor",
+            "PhoneChampDescriptor",
+            "EmailChampDescriptor",
+            "IbanChampDescriptor",
+            "YesNoChampDescriptor",
+            "CheckboxChampDescriptor",
+            "IntegerNumberChampDescriptor",
+            "DecimalNumberChampDescriptor",
+            "NumberChampDescriptor",
+            "DateChampDescriptor",
+            "DatetimeChampDescriptor",
+            "CiviliteChampDescriptor",
+            "PieceJustificativeChampDescriptor",
+            "CarteChampDescriptor",
+            "PaysChampDescriptor",
+            "RegionChampDescriptor",
+            "DepartementChampDescriptor",
+            "CommuneChampDescriptor",
+            "EpciChampDescriptor",
+            "SiretChampDescriptor",
+            "RNAChampDescriptor",
+            "RNFChampDescriptor",
+            "AnnuaireEducationChampDescriptor",
+            "AddressChampDescriptor",
+            "ReferentielChampDescriptor",
+            "COJOChampDescriptor",
+            "PreRempliChampDescriptor",
+            "DossierLinkChampDescriptor",
+        ]
+        .into_iter()
+        .map(champ)
+        .collect();
+        champs.push(json!({
+            "__typename": "DropDownListChampDescriptor",
+            "label": "dd", "options": ["A", "B"], "otherOption": true
+        }));
+        champs.push(json!({
+            "__typename": "MultipleDropDownListChampDescriptor",
+            "label": "mdd", "options": ["A", "B"]
+        }));
+        champs.push(json!({
+            "__typename": "LinkedDropDownListChampDescriptor",
+            "label": "ldd", "options": ["--P--", "p1", "p2"]
+        }));
+        champs.push(json!({
+            "__typename": "RepetitionChampDescriptor",
+            "label": "rep",
+            "champDescriptors": [
+                {"__typename": "TextChampDescriptor", "label": "inner"},
+                {"__typename": "PieceJustificativeChampDescriptor", "label": "files"}
+            ]
+        }));
+
+        let (schema, stats) = convert_all(Value::Array(champs));
+        assert!(stats.residue.is_empty(), "residue: {:?}", stats.residue);
+        assert_eq!(validate(&schema, DepthPolicy::default()), vec![]);
+        assert_eq!(stats.surface_only_dropped, 2);
+        assert_eq!(stats.resolver_declarations, 7);
+        assert_eq!(stats.desugar_other_option, 1);
+        assert_eq!(stats.desugar_linked_dropdown, 1);
+        assert_eq!(stats.desugar_dossier_link, 1);
+        assert_eq!(stats.desugar_pre_rempli, 1);
+        // 7 resolver blocks + 1 repetition.
+        assert_eq!(stats.groups_emitted, 8);
+    }
+
+    #[test]
+    fn linked_dropdown_desugars_per_primary() {
+        let (schema, stats) = convert_all(json!([{
+            "__typename": "LinkedDropDownListChampDescriptor",
+            "label": "pcs",
+            "options": ["--A--", "a1", "a2", "--B--", "b1", "--C--"]
+        }]));
+        // Primary enum + secondaries for A and B; C has none.
+        assert_eq!(schema.root.len(), 3);
+        assert_eq!(stats.linked_orphan_secondaries, 0);
+
+        let (_, stats) = convert_all(json!([{
+            "__typename": "LinkedDropDownListChampDescriptor",
+            "label": "bad",
+            "options": ["orphan", "--A--", "a1"]
+        }]));
+        assert_eq!(stats.linked_orphan_secondaries, 1);
+    }
+
+    #[test]
+    fn other_option_adds_companion_text_column() {
+        let (schema, _) = convert_all(json!([{
+            "__typename": "DropDownListChampDescriptor",
+            "label": "choix", "options": ["A"], "otherOption": true
+        }]));
+        assert_eq!(schema.root.len(), 2);
+        let Element::Column(companion) = &schema.root[1] else {
+            panic!("expected column");
+        };
+        assert_eq!(companion.ty, ScalarType::Text);
+        assert_eq!(companion.label, "choix (autre)");
+    }
+
+    #[test]
+    fn empty_dropdown_is_a_warning_not_an_error() {
+        let (schema, stats) = convert_all(json!([{
+            "__typename": "DropDownListChampDescriptor",
+            "label": "vide", "options": [], "otherOption": false
+        }]));
+        assert_eq!(stats.empty_enums, 1);
+        assert_eq!(validate(&schema, DepthPolicy::default()), vec![]);
+    }
+
+    #[test]
+    fn unknown_typename_is_residue() {
+        let (_, stats) = convert_all(json!([
+            {"__typename": "HologramChampDescriptor", "label": "future"}
+        ]));
+        assert_eq!(stats.residue.len(), 1);
+        assert_eq!(stats.residue[0].1, "HologramChampDescriptor");
+    }
+}
