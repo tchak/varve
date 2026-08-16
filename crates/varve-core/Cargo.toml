@@ -3,6 +3,7 @@ name = "varve-core"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 # Civil dates + RFC 3339 timestamps only: no clock, no tzdb — Tier 0

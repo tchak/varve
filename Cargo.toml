@@ -16,5 +16,6 @@ proptest = "1"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 # Nothing publishes before M3 (§9 guardrail). Enforced here.
 publish = false

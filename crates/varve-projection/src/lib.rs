@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, OptionId};
 use varve_schema::{
-    Arity, Cast, CastError, ColumnInfo, NomenclatureTable, ScalarType, Schema,
+    Arity, CastError, ColumnInfo, NomenclatureTable, ScalarType, Schema,
     SchemaIndex, column_cast, nomenclature_rows,
 };
 use varve_value::{CellState, CellValue, RecordValues, Scalar};

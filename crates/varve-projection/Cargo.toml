@@ -3,6 +3,7 @@ name = "varve-projection"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 varve-core = { path = "../varve-core" }

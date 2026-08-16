@@ -3,6 +3,7 @@ name = "m0"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 varve-core = { path = "../../crates/varve-core" }
