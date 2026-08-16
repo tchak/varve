@@ -349,6 +349,21 @@ mod tests {
     }
 
     #[test]
+    fn es6_extreme_vectors() {
+        // Boundary/extreme values with ES6-certain renderings.
+        let cases: &[(f64, &str)] = &[
+            (1e23, "1e+23"),
+            (5e-324, "5e-324"),
+            (f64::MAX, "1.7976931348623157e+308"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1.2345678901234568e20, "123456789012345680000"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(format_es6_number(*input), *expected);
+        }
+    }
+
+    #[test]
     fn content_hash_roundtrip_and_known_digest() {
         // SHA-256("abc") — FIPS 180 test vector.
         let hash = sha256(&[b"abc"]);
@@ -379,6 +394,32 @@ mod tests {
             commit(&salt_a, &value).unwrap(),
             commit(&salt_a, &value).unwrap()
         );
+    }
+
+    mod props {
+        use super::super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Shortest-round-trip guarantees the ES6 rendering parses
+            /// back to the exact same f64 — for every finite value.
+            #[test]
+            fn es6_rendering_round_trips(bits in any::<u64>()) {
+                let x = f64::from_bits(bits);
+                prop_assume!(x.is_finite());
+                let rendered = format_es6_number(x);
+                prop_assert_eq!(rendered.parse::<f64>().unwrap(), x);
+            }
+
+            /// The canonicalizer never panics and is deterministic over
+            /// arbitrary strings (escaping, non-ASCII, controls).
+            #[test]
+            fn string_canonicalization_is_total(s in "\\PC*") {
+                let v = CanonicalValue::String(s);
+                let once = canonical_bytes(&v).unwrap();
+                prop_assert_eq!(canonical_bytes(&v).unwrap(), once);
+            }
+        }
     }
 
     #[test]

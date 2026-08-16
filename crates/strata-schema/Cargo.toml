@@ -6,3 +6,6 @@ publish.workspace = true
 
 [dependencies]
 strata-core = { path = "../strata-core" }
+
+[dev-dependencies]
+proptest.workspace = true

@@ -8,3 +8,6 @@ publish.workspace = true
 strata-core = { path = "../strata-core" }
 strata-schema = { path = "../strata-schema" }
 strata-value = { path = "../strata-value" }
+
+[dev-dependencies]
+proptest.workspace = true

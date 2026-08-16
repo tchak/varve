@@ -11,3 +11,6 @@ jiff = { version = "0.2", default-features = false, features = ["std"] }
 # §2.13: SHA-256 content addresses, ES6/JCS float rendering. Pure, no IO.
 sha2 = "0.10"
 ryu = "1"
+
+[dev-dependencies]
+proptest.workspace = true
