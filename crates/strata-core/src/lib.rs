@@ -188,112 +188,47 @@ pub mod primitives {
         }
     }
 
-    /// A calendar date, validated (leap years included).
+    /// A calendar date. Wraps `jiff::civil::Date`; jiff never appears in
+    /// the public API, so the backing crate stays swappable.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub struct Date {
-        pub year: i32,
-        pub month: u8,
-        pub day: u8,
-    }
+    pub struct Date(jiff::civil::Date);
 
     impl Date {
+        /// Strict `YYYY-MM-DD`.
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
-            let bytes = s.as_bytes();
-            if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+            if s.len() != 10 {
                 return Err(PrimitiveError::Malformed("expected YYYY-MM-DD"));
             }
-            let year: i32 = s[..4]
-                .parse()
-                .map_err(|_| PrimitiveError::Malformed("bad year"))?;
-            let month: u8 = s[5..7]
-                .parse()
-                .map_err(|_| PrimitiveError::Malformed("bad month"))?;
-            let day: u8 = s[8..10]
-                .parse()
-                .map_err(|_| PrimitiveError::Malformed("bad day"))?;
-            if !(1..=12).contains(&month) {
-                return Err(PrimitiveError::OutOfRange("month"));
-            }
-            if day < 1 || day > days_in_month(year, month) {
-                return Err(PrimitiveError::OutOfRange("day"));
-            }
-            Ok(Self { year, month, day })
+            s.parse()
+                .map(Self)
+                .map_err(|_| PrimitiveError::Malformed("expected YYYY-MM-DD"))
         }
     }
 
-    fn days_in_month(year: i32, month: u8) -> u8 {
-        match month {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-            4 | 6 | 9 | 11 => 30,
-            2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
-            2 => 28,
-            _ => 0,
+    impl fmt::Display for Date {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
         }
     }
 
-    /// An RFC 3339 instant, validated on construction, stored verbatim.
-    ///
-    /// Equality is textual for now: `…Z` and `…+00:00` denote the same
-    /// point in time but compare unequal. Semantic normalization belongs
-    /// to the canonical-serialization pass (see `crate::canonical`).
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-    pub struct Instant(String);
+    /// An RFC 3339 instant. Wraps `jiff::Timestamp`: equality and order
+    /// are *semantic* — `…Z` and `…+00:00` are the same instant. The
+    /// original offset is not retained; `Display` emits the normalized
+    /// UTC form, which is also the canonical wire form (§5).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+    pub struct Instant(jiff::Timestamp);
 
     impl Instant {
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
-            let malformed =
-                || PrimitiveError::Malformed("expected RFC 3339 instant");
-            if s.len() < 20 {
-                return Err(malformed());
-            }
-            Date::parse(&s[..10])?;
-            if !matches!(s.as_bytes()[10], b'T' | b't') {
-                return Err(malformed());
-            }
-            let rest = &s[11..];
-            let time_end = rest
-                .find(['Z', 'z', '+', '-'])
-                .ok_or_else(malformed)?;
-            let (time, offset) = rest.split_at(time_end);
-            let (hms, frac) = match time.split_once('.') {
-                Some((hms, frac)) => (hms, Some(frac)),
-                None => (time, None),
-            };
-            let b = hms.as_bytes();
-            if b.len() != 8 || b[2] != b':' || b[5] != b':' {
-                return Err(malformed());
-            }
-            let hour: u8 = hms[..2].parse().map_err(|_| malformed())?;
-            let minute: u8 = hms[3..5].parse().map_err(|_| malformed())?;
-            let second: u8 = hms[6..8].parse().map_err(|_| malformed())?;
-            if hour > 23 || minute > 59 || second > 60 {
-                return Err(PrimitiveError::OutOfRange("time"));
-            }
-            if let Some(frac) = frac
-                && (frac.is_empty() || !frac.bytes().all(|c| c.is_ascii_digit()))
-            {
-                return Err(malformed());
-            }
-            match offset {
-                "Z" | "z" => {}
-                _ => {
-                    let b = offset.as_bytes();
-                    if b.len() != 6 || !matches!(b[0], b'+' | b'-') || b[3] != b':'
-                    {
-                        return Err(malformed());
-                    }
-                    let oh: u8 = offset[1..3].parse().map_err(|_| malformed())?;
-                    let om: u8 = offset[4..6].parse().map_err(|_| malformed())?;
-                    if oh > 23 || om > 59 {
-                        return Err(PrimitiveError::OutOfRange("offset"));
-                    }
-                }
-            }
-            Ok(Self(s.to_string()))
+            s.parse()
+                .map(Self)
+                .map_err(|_| PrimitiveError::Malformed("expected RFC 3339 instant"))
         }
+    }
 
-        pub fn as_str(&self) -> &str {
-            &self.0
+    impl fmt::Display for Instant {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
         }
     }
 
@@ -319,14 +254,17 @@ pub mod primitives {
             assert!(Date::parse("2023-02-29").is_err());
             assert!(Date::parse("2023-13-01").is_err());
             assert!(Date::parse("2023-1-01").is_err());
+            assert_eq!(Date::parse("2024-02-29").unwrap().to_string(), "2024-02-29");
         }
 
         #[test]
-        fn instant_validates() {
-            assert!(Instant::parse("2026-08-16T12:00:00Z").is_ok());
+        fn instant_equality_is_semantic() {
+            let z = Instant::parse("2026-08-16T12:00:00Z").unwrap();
+            let offset = Instant::parse("2026-08-16T14:00:00+02:00").unwrap();
+            assert_eq!(z, offset);
+            assert_eq!(offset.to_string(), "2026-08-16T12:00:00Z");
             assert!(Instant::parse("2026-08-16T12:00:00.123+02:00").is_ok());
             assert!(Instant::parse("2026-08-16T24:00:00Z").is_err());
-            assert!(Instant::parse("2026-08-16 12:00:00Z").is_err());
         }
     }
 }
