@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 varve-core = { path = "../varve-core" }
 varve-value = { path = "../varve-value" }
+thiserror.workspace = true

@@ -38,12 +38,16 @@ pub enum Op {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ApplyError {
+    #[error("item '{1}' already exists in group '{0}'")]
     ItemExists(GroupId, ItemId),
+    #[error("item '{1}' not found in group '{0}'")]
     UnknownItem(GroupId, ItemId),
+    #[error("index {1} out of bounds in group '{0}'")]
     BadIndex(GroupId, usize),
     /// Reorder is not a permutation of the existing list.
+    #[error("reorder of group '{0}' is not a permutation of its items")]
     BadReorder(GroupId),
 }
 

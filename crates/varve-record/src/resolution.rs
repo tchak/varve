@@ -39,7 +39,8 @@ pub enum ResolutionStatus {
     Abandoned,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("illegal resolution transition {from:?} → {to:?}")]
 pub struct TransitionError {
     pub from: ResolutionStatus,
     pub to: ResolutionStatus,
@@ -96,12 +97,14 @@ pub struct Checkpoint {
     pub expected: Vec<ExpectedResolution>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CheckpointViolation {
     /// The named entry hash is not in this log.
+    #[error("checkpoint names an entry hash not present in this log")]
     UnknownEntry,
     /// A post-checkpoint entry that is not a derived write from the
     /// expected list (§2.8: "anything else is rejected").
+    #[error("entry {seq}: write after checkpoint was not an expected derived write")]
     IllegalWrite { seq: u64 },
 }
 

@@ -30,9 +30,10 @@ pub enum CanonicalValue {
     Object(BTreeMap<String, CanonicalValue>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CanonicalError {
     /// JCS forbids NaN and infinities.
+    #[error("JCS forbids NaN and infinities")]
     NonFiniteNumber,
 }
 
@@ -195,7 +196,8 @@ impl fmt::Display for ContentHash {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not a content hash (expected \"sha256:<64 hex digits>\")")]
 pub struct ParseHashError;
 
 impl std::str::FromStr for ContentHash {

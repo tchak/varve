@@ -111,8 +111,9 @@ pub enum CastClass {
     Forbidden,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CastError {
+    #[error("unknown published nomenclature '{0}'")]
     UnknownNomenclature(NomenclatureId),
 }
 
@@ -218,11 +219,13 @@ pub enum JoinPath {
     ViaText,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum JoinConflict {
     /// No upper bound exists (attachment/geometry against anything else):
     /// §5.5 policy territory — split or omit, never silently coerce.
+    #[error("no type join exists — split or omit (§5.5 policy)")]
     Incompatible,
+    #[error("unknown published nomenclature '{0}'")]
     UnknownNomenclature(NomenclatureId),
 }
 

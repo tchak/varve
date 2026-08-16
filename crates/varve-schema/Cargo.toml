@@ -8,5 +8,7 @@ license.workspace = true
 [dependencies]
 varve-core = { path = "../varve-core" }
 
+thiserror.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true

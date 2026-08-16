@@ -226,75 +226,42 @@ impl Default for DepthPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SchemaError {
     /// §2.3: a validation rule with an error message, never a type.
+    #[error("group '{group}' nests `many` groups to depth {depth}, policy allows {max}")]
     DepthExceeded {
         group: GroupId,
         depth: usize,
         max: usize,
     },
+    #[error("duplicate column id '{0}'")]
     DuplicateColumnId(ColumnId),
+    #[error("duplicate group id '{0}'")]
     DuplicateGroupId(GroupId),
     /// Mapping typecheck failures (§2.7): these are schema-publication
     /// errors, not runtime surprises.
+    #[error("resolver '{resolver}' maps into unknown column '{target}'")]
     UnknownMappingTarget {
         resolver: ResolverId,
         target: ColumnId,
     },
+    #[error("resolver '{resolver}' maps result field '{field}' absent from its declared result type")]
     UnknownMappingField {
         resolver: ResolverId,
         field: String,
     },
+    #[error("resolver '{resolver}': result field '{field}' does not typecheck against column '{target}'")]
     MappingTypeMismatch {
         resolver: ResolverId,
         field: String,
         target: ColumnId,
     },
+    #[error("resolver '{resolver}' reads unknown column '{column}'")]
     UnknownInputColumn {
         resolver: ResolverId,
         column: ColumnId,
     },
-}
-
-impl std::fmt::Display for SchemaError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SchemaError::DepthExceeded { group, depth, max } => write!(
-                f,
-                "group '{group}' nests `many` groups to depth {depth}, \
-                 policy allows {max}"
-            ),
-            SchemaError::DuplicateColumnId(id) => {
-                write!(f, "duplicate column id '{id}'")
-            }
-            SchemaError::DuplicateGroupId(id) => {
-                write!(f, "duplicate group id '{id}'")
-            }
-            SchemaError::UnknownMappingTarget { resolver, target } => write!(
-                f,
-                "resolver '{resolver}' maps into unknown column '{target}'"
-            ),
-            SchemaError::UnknownMappingField { resolver, field } => write!(
-                f,
-                "resolver '{resolver}' maps result field '{field}' absent \
-                 from its declared result type"
-            ),
-            SchemaError::MappingTypeMismatch {
-                resolver,
-                field,
-                target,
-            } => write!(
-                f,
-                "resolver '{resolver}': result field '{field}' does not \
-                 typecheck against column '{target}'"
-            ),
-            SchemaError::UnknownInputColumn { resolver, column } => write!(
-                f,
-                "resolver '{resolver}' reads unknown column '{column}'"
-            ),
-        }
-    }
 }
 
 /// Validate a schema against structural rules and the depth policy.

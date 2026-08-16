@@ -13,22 +13,28 @@ pub struct RecordLog {
     entries: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AppendError {
     /// One salt per op plus one for metadata — counts must line up.
+    #[error("{ops} ops but {salts} op salts (need one per op)")]
     SaltCount { ops: usize, salts: usize },
     /// `base_version` cannot exceed the log's current version.
+    #[error("base_version {base} is ahead of the log (version {version})")]
     BaseVersionAhead { base: u64, version: u64 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChainError {
+    #[error("entry {at}: seq does not match its position")]
     SeqMismatch { at: usize },
+    #[error("entry {at}: prev does not match the preceding entry's hash")]
     PrevMismatch { at: usize },
+    #[error("entry {at}: content commitment does not match content + salts")]
     ContentMismatch { at: usize },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("entry {seq}: {error}")]
 pub struct FoldError {
     pub seq: u64,
     pub error: ApplyError,
@@ -62,10 +68,13 @@ pub struct Snapshot {
     pub state: FoldResult,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SnapshotError {
+    #[error("snapshot point is outside the log")]
     OutOfRange,
+    #[error("snapshot's entry hash does not match the log")]
     HashMismatch,
+    #[error("snapshot's state does not match a refold")]
     StateMismatch,
 }
 

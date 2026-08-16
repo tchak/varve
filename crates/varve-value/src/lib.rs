@@ -62,12 +62,14 @@ pub struct Feature {
     id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GeometryError {
     /// Not parseable as GeoJSON at all.
+    #[error("not parseable as GeoJSON")]
     Malformed,
     /// Valid GeoJSON, but a bare geometry or a FeatureCollection — a
     /// geometry cell holds Features only.
+    #[error("a geometry cell holds Features only, not bare geometries or FeatureCollections")]
     NotAFeature,
 }
 

@@ -13,5 +13,7 @@ jiff = { version = "0.2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 ryu = "1"
 
+thiserror.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true

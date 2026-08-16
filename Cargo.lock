@@ -556,6 +556,7 @@ dependencies = [
  "proptest",
  "ryu",
  "sha2",
+ "thiserror",
 ]
 
 [[package]]
@@ -582,6 +583,7 @@ dependencies = [
 name = "varve-record"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
  "varve-core",
  "varve-value",
 ]
@@ -591,6 +593,7 @@ name = "varve-schema"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "thiserror",
  "varve-core",
 ]
 
@@ -600,6 +603,7 @@ version = "0.1.0"
 dependencies = [
  "geojson",
  "proptest",
+ "thiserror",
  "varve-core",
  "varve-schema",
 ]

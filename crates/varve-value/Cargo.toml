@@ -12,5 +12,7 @@ varve-schema = { path = "../varve-schema" }
 # wire coupling (§9). No geo-types — the kernel never computes geometry.
 geojson = { version = "0.24", default-features = false }
 
+thiserror.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true

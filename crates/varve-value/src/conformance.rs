@@ -14,26 +14,37 @@ use varve_schema::{
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConformanceError {
+    #[error("unknown column '{0}'")]
     UnknownColumn(ColumnId),
     /// The cell's row path does not match the column's scope — the chain
     /// of `many` groups from the root (§2.2).
+    #[error("cell for column '{0}' is addressed outside the column's scope")]
     ScopeMismatch(ColumnId),
     /// A path segment names an item absent from its group's item list.
+    #[error("cell for column '{0}' names an item absent from group '{1}'")]
     UnknownItem(ColumnId, GroupId),
+    #[error("column '{0}': value arity does not match the column arity")]
     ArityMismatch(ColumnId),
+    #[error("column '{0}': value does not match the column type")]
     TypeMismatch(ColumnId),
     /// An enum cell holds an id absent from its nomenclature (§2.11).
+    #[error("column '{0}': option '{1}' is not in the nomenclature")]
     UnknownOption(ColumnId, OptionId),
     /// A published nomenclature is not in the provided table.
+    #[error("column '{0}': published nomenclature '{1}' not provided")]
     UnknownNomenclature(ColumnId, NomenclatureId),
     /// Duplicate element identity inside one `many` cell (§2.4).
+    #[error("column '{0}': duplicate element identity in a `many` cell")]
     DuplicateElement(ColumnId),
+    #[error("unknown group '{0}'")]
     UnknownGroup(GroupId),
     /// An item list for a group that is not cardinality `many`, or whose
     /// parent path does not match the group's scope.
+    #[error("item list for group '{0}' is misplaced (not `many`, or wrong scope)")]
     MisplacedItems(GroupId),
+    #[error("duplicate item in group '{0}'")]
     DuplicateItem(GroupId),
 }
 

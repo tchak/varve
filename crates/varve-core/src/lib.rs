@@ -131,9 +131,11 @@ pub mod primitives {
         scale: u32,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
     pub enum PrimitiveError {
+        #[error("{0}")]
         Malformed(&'static str),
+        #[error("out of range: {0}")]
         OutOfRange(&'static str),
     }
 
