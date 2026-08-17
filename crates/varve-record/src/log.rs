@@ -2,14 +2,18 @@
 
 use std::collections::BTreeMap;
 
+use varve_core::RecordId;
 use varve_core::canonical::ContentHash;
 use varve_value::{ApplyError, CellAddr, Op, RecordValues, apply, diff};
 
 use crate::entry::{Draft, Entry, Envelope, SaltCountMismatch, genesis_hash};
 use crate::Origin;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RecordLog {
+    /// The record this log belongs to: the chain's genesis commits to
+    /// it (§2.9), so entries verify only under this id.
+    record: RecordId,
     entries: Vec<Entry>,
 }
 
@@ -123,15 +127,21 @@ fn derive_provenance(origin: &Origin, current: Option<&Origin>) -> Origin {
 }
 
 impl RecordLog {
-    pub fn new() -> Self {
-        Self::default()
+    /// An empty log for `record`.
+    pub fn new(record: RecordId) -> Self {
+        Self { record, entries: Vec::new() }
     }
 
-    /// Rehydrate a log from stored or transmitted entries — unvalidated:
-    /// callers (Tier 5 load, import) must `verify_chain` before trusting
-    /// it.
-    pub fn from_entries(entries: Vec<Entry>) -> Self {
-        Self { entries }
+    /// Rehydrate `record`'s log from stored or transmitted entries —
+    /// unvalidated: callers (Tier 5 load, import) must `verify_chain`
+    /// before trusting it. Entries transplanted from another record
+    /// fail there: the genesis commits to the id.
+    pub fn from_entries(record: RecordId, entries: Vec<Entry>) -> Self {
+        Self { record, entries }
+    }
+
+    pub fn record(&self) -> &RecordId {
+        &self.record
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -157,7 +167,7 @@ impl RecordLog {
         };
         let content_hash = Entry::content_hash(&content, &draft.salts)?;
         let prev = match self.entries.last() {
-            None => genesis_hash(),
+            None => genesis_hash(&self.record),
             Some(entry) => entry.hash(),
         };
         let entry = Entry {
@@ -183,7 +193,7 @@ impl RecordLog {
     /// tail edits are caught only by a checkpoint or snapshot that pins
     /// the head hash (§2.9).
     pub fn verify_chain(&self) -> Result<(), ChainError> {
-        let mut prev = genesis_hash();
+        let mut prev = genesis_hash(&self.record);
         for (i, entry) in self.entries.iter().enumerate() {
             if entry.envelope.seq != i as u64 {
                 return Err(ChainError::SeqMismatch { at: i });

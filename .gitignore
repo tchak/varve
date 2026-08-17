@@ -1,2 +1,6 @@
 /target
 /corpus/data/
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus
+/fuzz/Cargo.lock

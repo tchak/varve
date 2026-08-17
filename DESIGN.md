@@ -47,7 +47,12 @@ an administration before it publishes a revision.**
 - **Schema** — versioned structure. Deliberately *not* called "table": that
   would promise SQL semantics (joins, FKs) not being delivered.
 - **Revision** — immutable published schema version. Content-addressed.
-  A checkpoint is a tag; the revision is the object.
+  A checkpoint is a tag; the revision is the object. The revision DAG is
+  the set of objects plus a **publication log** of events: publishing a
+  schema whose object already exists (reverting to an earlier revision)
+  creates no new revision — same content, same id — but is an event: it
+  becomes `latest`, following the revisions it was published after.
+  Identity is content; history is the log.
 - **Column** — a typed field. Has an **arity**: `one | many`.
 - **Group** — ordered container of columns. Has a **cardinality**: `one | many`.
 - **Block** — a published, reusable group definition with its own identity and
@@ -490,9 +495,16 @@ millions of records.
 Entries are content-addressed (canonical serialization is already required for
 revision hashing). Content-addressing alone is only *per-entry*
 tamper-evidence; the **chain** comes from `prev` — each entry commits to its
-predecessor's hash. `base_version` cannot serve as that link: concurrent
-entries deliberately share a base (that is how conflict detection works), so
-it is not a linear pointer. `prev` and `seq` are assigned together, at append
+predecessor's hash, and the genesis (`prev` at seq 0) **commits to the
+record's id** (settled 2026-08-17, open question 16): a log verifies only
+under the record it belongs to and cannot be transplanted under another —
+still per-record, nothing global (§2.10). `base_version` is the **log
+version the writer read** before computing its ops — the number of entries
+then present, i.e. the seq its entry would get if nothing intervened; two
+entries touching one cell from the same `base_version` are the §2.9
+conflict. It cannot serve as the chain link: concurrent entries
+deliberately share a base (that is how conflict detection works), so it is
+not a linear pointer. `prev` and `seq` are assigned together, at append
 time, by whoever owns the log.
 
 Snapshots must stay verifiable or they become the tamper hole: a snapshot
@@ -576,6 +588,13 @@ The kernel contributes one pure function — `filter(log, surface) → redacted
 log` — and the platform's only job remains *which surface does this actor
 get*, the same reduction as authorization above. No entry ACLs, and no
 side-table of entry permissions that would fail to travel on migration.
+"Visible in S" here means the surface's **static column set**
+(`Surface::columns()` — the columns S presents at all), not derived
+reachability (§2.4): entry visibility must not flip with record state.
+The function lives in `varve-surface` (which may depend on `varve-record`;
+nothing depends on `varve-surface`, §7) and waits on the redacted-entry
+representation (§2.13 decision 4, open question 14) — specified, not day
+one.
 
 Chain interaction: omitting entries from a filtered history export would
 break `prev` verification. A filtered export therefore uses **redacted
@@ -990,7 +1009,10 @@ Its own crate. The crown jewel and the highest-risk component.
 - Shared by validation, visibility, requiredness, computed values, routing
 - **Statically analysable**: which schema edits break which rules
 
-Fuzzers and a property-test corpus from day one.
+Fuzzers and a property-test corpus from day one: `proptest` suites in
+every crate that has laws to state, and cargo-fuzz targets under `fuzz/`
+(wire reader totality and write∘read fixpoint, logic canonical decode,
+GeoJSON parsing, entry decode) — see README.
 
 ### 4.1 First design pass, from the DN implementation
 
@@ -1065,7 +1087,9 @@ Term  ::= column(column_id, field?)            (field: nomenclature
 `Expr` nests arbitrarily — **settled from institutional memory**: DN's
 single-level and/or is a UI limitation with standing demand against it,
 not a semantic choice. The kernel ships full nesting; DN rules import
-as the degenerate one-level case.
+as the degenerate one-level case. Empty combinators are the identities:
+`and()` is *true*, `or()` is *false* — `and()` is how a surface spells
+"always required", `or()` "never"; both are legal, neither is an error.
 
 **DN's geo operators dissolve.** `InDepartement(commune_col, "01")` is a
 field projection through the commune nomenclature's extra fields
@@ -1547,8 +1571,10 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
   `varve-record`.)*
 
 **Tier 2**
-- `varve-logic` — expression AST, parser, type checker against a revision,
-  total evaluator.
+- `varve-logic` — expression AST (with its canonical JSON form — the wire
+  and hash shape; there is no textual syntax and none is intended, rules
+  are authored structurally and a syntax would be a tool), type checker
+  against a revision, total evaluator, dependency-graph acyclicity.
 - `varve-projection` — records viewed and edited through a revision they
   weren't written on. Casts applied, lossiness reported.
 - `varve-impact` — what does publishing revision N+1 do? Change classification
@@ -1812,6 +1838,16 @@ Only then: `surface`, `store`, service.
     it after the §12.5 rule extraction shows cascade depth and component
     size — the same data that decides whether per-component enumeration
     is always cheap.
+16. ~~Does a record's chain commit to its record id?~~ **Resolved
+    (§2.9, 2026-08-17): yes — genesis = H("varve:genesis:" ‖ record id).**
+    Found by audit: with a global genesis a stored log could be
+    transplanted under another record's id and verify. Settled by design
+    argument: tamper-evidence is the chain's purpose, binding costs one
+    string in the genesis, stays per-record (no global commitment, §2.10
+    intact), and the only thing it constrains — re-minting record ids on
+    migration — §5 already forbids (adoption keeps ids). Considered and
+    rejected: leaving it to the store (the row a log lives in), which
+    would make the chain's meaning depend on storage.
 
 ## 11. Prior art to consult
 

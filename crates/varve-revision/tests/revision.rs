@@ -55,10 +55,16 @@ fn dag_publishes_and_deduplicates() {
         .unwrap();
     assert_eq!(dag.get(&r2).unwrap().parents, vec![r1.clone()]);
     assert_eq!(dag.latest(), Some(&r2));
-    // Republishing the identical schema is a no-op with the same id.
-    let again = dag.publish(schema(vec![column("a", ScalarType::Text)]), vec![]).unwrap();
+    // Republishing r1's schema after r2 is a *revert*: the same object
+    // (content-addressed — no new revision), but a new publication
+    // event: it is `latest` again, following r2.
+    let again = dag.publish(schema(vec![column("a", ScalarType::Text)]), vec![r2.clone()]).unwrap();
     assert_eq!(again, r1);
-    assert_eq!(dag.history().count(), 2);
+    assert_eq!(dag.latest(), Some(&r1));
+    assert_eq!(dag.history().count(), 3);
+    assert_eq!(dag.publications().last().unwrap().parents, vec![r2.clone()]);
+    // The object's own parents are those of its first publication.
+    assert_eq!(dag.get(&r1).unwrap().parents, vec![]);
     // Unknown parents are rejected.
     assert!(dag
         .publish(schema(vec![]), vec![RevisionId::new("nope")])

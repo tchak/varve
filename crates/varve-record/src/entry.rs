@@ -8,15 +8,18 @@ use varve_core::canonical::{
     CanonicalValue, ContentHash, Salt, commit, commit_vector, hash_plain,
 };
 use varve_core::primitives::Instant;
-use varve_core::RevisionId;
+use varve_core::{RecordId, RevisionId};
 use varve_value::Op;
 
 use crate::canon;
 use crate::{Actor, Origin};
 
-/// Fixed chain anchor: `prev` of the entry at seq 0.
-pub fn genesis_hash() -> ContentHash {
-    hash_plain(&CanonicalValue::String("varve:genesis".to_string()))
+/// Chain anchor: `prev` of the entry at seq 0, committing to the
+/// record's id — so a log verifies only under the record it belongs to
+/// and cannot be transplanted under another (§2.9). Still per-record:
+/// nothing global (§2.10).
+pub fn genesis_hash(record: &RecordId) -> ContentHash {
+    hash_plain(&CanonicalValue::String(format!("varve:genesis:{record}")))
         .expect("strings never fail")
 }
 

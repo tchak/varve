@@ -66,11 +66,22 @@ async — timestamps and salts are inputs.
 Version control is [jj](https://github.com/jj-vcs/jj) (colocated git).
 
 ```sh
-cargo test --workspace              # 132 tests, incl. property suites
+cargo test --workspace              # 133 tests, incl. property suites
 cargo clippy --workspace --all-targets
 scripts/fetch-corpus.sh             # download the DN corpus (~124 MB gz)
 cargo run --release -p m0           # M0 harness over the corpus
 ```
+
+Fuzz targets live in `fuzz/` (excluded from the workspace; needs
+`cargo install cargo-fuzz` and a nightly toolchain):
+
+```sh
+cd fuzz && cargo +nightly fuzz run wire_read seeds/wire_read   # also: logic_canon, value_feature, record_entry
+```
+
+`fuzz/seeds/<target>/` holds one valid input per target so a run starts
+inside the grammar; the generated corpora under `fuzz/corpus/` are
+gitignored.
 
 The corpus is public data —
 [Descriptif des démarches publiées](https://www.data.gouv.fr/datasets/descriptif-des-demarches-publiees-sur-demarche-numerique-gouv-fr)

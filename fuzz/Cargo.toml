@@ -1,0 +1,50 @@
+# cargo-fuzz targets (§4: "fuzzers and a property-test corpus from day
+# one"). Excluded from the workspace — run with `cargo +nightly fuzz run
+# <target>` from this directory (`cargo install cargo-fuzz`).
+[package]
+name = "varve-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+varve-core = { path = "../crates/varve-core" }
+varve-logic = { path = "../crates/varve-logic" }
+varve-record = { path = "../crates/varve-record" }
+varve-value = { path = "../crates/varve-value" }
+varve-wire = { path = "../crates/varve-wire" }
+
+[[bin]]
+name = "wire_read"
+path = "fuzz_targets/wire_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "logic_canon"
+path = "fuzz_targets/logic_canon.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "value_feature"
+path = "fuzz_targets/value_feature.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record_entry"
+path = "fuzz_targets/record_entry.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

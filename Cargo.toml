@@ -13,6 +13,8 @@ members = [
     "tools/m0",
 ]
 resolver = "3"
+# cargo-fuzz targets build on nightly with their own profile; see fuzz/.
+exclude = ["fuzz"]
 
 [workspace.dependencies]
 proptest = "1"

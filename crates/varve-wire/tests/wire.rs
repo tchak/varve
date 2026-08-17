@@ -80,7 +80,7 @@ fn schema_lines() -> Vec<Line> {
 }
 
 fn sample_log() -> RecordLog {
-    let mut log = RecordLog::new();
+    let mut log = RecordLog::new(RecordId::new("r1"));
     log.append(draft(0, 0, vec![set("name", "Dupont")])).unwrap();
     log.append(draft(1, 1, vec![set("name", "Durand")])).unwrap();
     log
@@ -385,7 +385,7 @@ fn history_with_an_unsalted_op_is_rejected_at_the_reader() {
     let record = RecordId::new("r1");
     let mut entries = sample_log().entries().to_vec();
     entries[0].content.ops.push(set("name", "MALLORY"));
-    let tampered = RecordLog::from_entries(entries);
+    let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     let bytes = write_history(
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
@@ -456,7 +456,7 @@ fn schema_and_nomenclature_lines_round_trip() {
             }],
         },
         Line::Attachment {
-            hash: varve_record::genesis_hash(),
+            hash: varve_record::genesis_hash(&RecordId::new("r1")),
             byte_size: 1234,
             content_type: "application/pdf".into(),
         },

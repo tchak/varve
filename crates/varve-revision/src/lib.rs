@@ -20,20 +20,33 @@ use std::collections::BTreeMap;
 use varve_core::RevisionId;
 use varve_schema::{Schema, revision_id};
 
-/// The revision DAG of one schema lineage: published, immutable,
-/// content-addressed revisions (§2.1). Records are never "on" a
-/// revision (§2.9) — entries are authored against one, and lookups here
-/// serve reading lenses, projection, and impact.
+/// The revision DAG of one schema lineage (§2.1): **objects** —
+/// immutable, content-addressed revisions — plus a **publication log**
+/// of events. The object is identity; the log is history: publishing a
+/// schema whose object already exists (a revert to an earlier revision)
+/// adds no object but records the event and moves `latest`. Records are
+/// never "on" a revision (§2.9) — entries are authored against one, and
+/// lookups here serve reading lenses, projection, and impact.
 #[derive(Debug, Clone, Default)]
 pub struct RevisionDag {
     revisions: BTreeMap<RevisionId, PublishedRevision>,
-    /// Publication order, oldest first — the aggregate's input order.
-    order: Vec<RevisionId>,
+    /// Publication events, oldest first — the aggregate's input order.
+    /// An id may recur (revert).
+    log: Vec<Publication>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PublishedRevision {
     pub schema: Schema,
+    /// Parents at first publication — the object's place in the DAG.
+    pub parents: Vec<RevisionId>,
+}
+
+/// One publication event: which object became current, following which
+/// revisions. A revert is an event whose object predates its parents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Publication {
+    pub revision: RevisionId,
     pub parents: Vec<RevisionId>,
 }
 
@@ -50,8 +63,9 @@ impl RevisionDag {
 
     /// Publish a schema: its id is its canonical hash — identical
     /// schemas converge on identical ids on every instance (§2.13).
-    /// Publishing the same schema twice is a no-op returning the same
-    /// id.
+    /// Publishing a schema whose revision already exists creates no new
+    /// object but is still an event: it becomes `latest` again (a
+    /// revert), with the parents given here recorded on the event.
     pub fn publish(
         &mut self,
         schema: Schema,
@@ -63,11 +77,10 @@ impl RevisionDag {
             }
         }
         let id = revision_id(&schema);
-        if !self.revisions.contains_key(&id) {
-            self.order.push(id.clone());
-            self.revisions
-                .insert(id.clone(), PublishedRevision { schema, parents });
-        }
+        self.revisions
+            .entry(id.clone())
+            .or_insert_with(|| PublishedRevision { schema, parents: parents.clone() });
+        self.log.push(Publication { revision: id.clone(), parents });
         Ok(id)
     }
 
@@ -75,14 +88,23 @@ impl RevisionDag {
         self.revisions.get(id)
     }
 
+    /// The current revision: the last one published (which may be an
+    /// earlier object, after a revert).
     pub fn latest(&self) -> Option<&RevisionId> {
-        self.order.last()
+        self.log.last().map(|p| &p.revision)
     }
 
-    /// Oldest-first publication history — the §5.5 aggregate input.
+    /// The publication events, oldest first.
+    pub fn publications(&self) -> &[Publication] {
+        &self.log
+    }
+
+    /// Oldest-first publication history — the §5.5 aggregate input. An
+    /// id recurs when it was re-published; the aggregate is over
+    /// objects, so callers that want distinct revisions dedup by id.
     pub fn history(&self) -> impl Iterator<Item = (&RevisionId, &Schema)> {
-        self.order
+        self.log
             .iter()
-            .map(|id| (id, &self.revisions[id].schema))
+            .map(|p| (&p.revision, &self.revisions[&p.revision].schema))
     }
 }

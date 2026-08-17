@@ -74,7 +74,7 @@ pub fn adopt_history(
     let mut outcome = ImportOutcome::default();
     for (record, mut entries) in incoming {
         entries.sort_by_key(|e| e.envelope.seq);
-        let log = RecordLog::from_entries(entries);
+        let log = RecordLog::from_entries(record.clone(), entries);
         log.verify_chain()
             .map_err(|e| ImportError::Chain(record.clone(), e))?;
         let existing = store.get(&record);
@@ -134,7 +134,9 @@ pub fn import_snapshot(
     for r in snapshot_records(stream) {
         let existing = store.contains_key(&r.record);
         check_intent(stream.manifest.intent, existing, &r.record)?;
-        let log = store.entry(r.record.clone()).or_default();
+        let log = store
+            .entry(r.record.clone())
+            .or_insert_with(|| RecordLog::new(r.record.clone()));
         let current = log
             .fold()
             .map_err(|e| ImportError::Append(r.record.clone(), e.seq))?
