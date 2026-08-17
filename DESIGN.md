@@ -794,6 +794,68 @@ v1 list, by dimension:
   currency code (nomenclature-backed), per-currency scale rules, and no
   cross-currency casts ever.
 
+## 2.15 Attachments and blobs (settles open question 3)
+
+An attachment cell element is: **element id** (§2.4 value-internal
+identity, minted at Tier 5 like salts and timestamps), **content hash**
+(a §2.13 `ContentHash` — algorithm-tagged), **filename** (what the
+applicant called it — user data, stored as entered), **content type**
+and **byte size** (verifiable claims about the blob). Nothing else: all
+further metadata lives platform-side, keyed by hash.
+
+- **Blobs hash plain — a deliberate, stated exception** to the
+  record-side salted regime (§2.13): dedup across records is the blob
+  store's design goal (the same certificate uploaded twice, the same
+  INSEE payload for one SIRET — §2.10), and salting would destroy it.
+  The §2.10 residual (a retained hash after blob-only erasure) is
+  accepted, bounded by the record's own retention.
+- **One blob machinery, two clients**: attachments and resolver
+  payloads (§2.7 "design the two together") share the store, the
+  address format, and the GC roots.
+- **The kernel contributes roots, not sweeping**: a pure function
+  `referenced_blobs(record) → set of ContentHash` (attachment cells +
+  snapshot refs in origins). Tier 5 (`varve-files`: blob trait —
+  get/put/has + sweep given roots) does mark-and-sweep. Same shape as
+  `pending_resolutions`: pure enumeration in, scheduler out. This is
+  §2.10's refcounting requirement, made concrete.
+- **Wire**: the `attachment` line describes the *blob* (hash, size,
+  type); filenames stay in cells — two records naming one blob
+  differently is correct, not a conflict. The manifest declares
+  `referenced` or `bundled`; bundled means a **sidecar archive keyed by
+  hash** beside the JSONL stream (settled: streams stay small and
+  text, blobs stay binary). A single self-contained file with chunked
+  base64 blob lines was considered and rejected — ~33% overhead and
+  chunk-assembly machinery for a need DN does not have.
+- **Scan lifecycle is kernel-modeled, mirroring resolutions (§2.8)**:
+  per attachment element, `pending → clean | infected | failed`, driven
+  by a Tier 5 scanner; the kernel provides the pure pending-enumeration.
+  Settled so that surfaces can express "submittable only when scanned"
+  without every platform reimplementing the gate; the corresponding
+  logic atoms (paired, like `pending`/`not_pending`) join §4.1 when
+  the surface work needs them.
+- **Schema-level restrictions — settled**: `Attachment` carries
+  constraints the way numbers carry units: an **accept set of media-type
+  patterns** (`application/pdf`, `image/*` — IANA's vocabulary, not any
+  administration's; empty = unrestricted, so plain attachments stay
+  plain) and a **per-file `max_bytes`**. These are *representability*
+  (a "photo du bien" column **is** an image column — uploading a PDF
+  through another surface would break its meaning, not merely its
+  admissibility), unlike text formats, which are presentation checks
+  and stay surface-side (§2.6). Casts mirror the §2.11 enum rules:
+  broadening the accept set or raising the limit is free; narrowing is
+  **checked**, with the impact report counting the records whose files
+  violate. The kernel checks the cell's *claims* (content type, size)
+  with zero IO; the Tier 5 store verifies claims against bytes at
+  ingest. DN's "natures" (RIB, titre d'identité…) are **document
+  kinds**, not container formats — they become **published blocks**
+  (constrained attachment + label + help), the SIRET/civilité
+  resolution again: the kernel stays international, the French
+  administration ships as content.
+- **Not kernel**: previews and thumbnails, URL signing, storage
+  tiering, retention schedules (platform policy over kernel erasure
+  ops), MIME sniffing and semantic document validation ("is this
+  really a RIB").
+
 ## 3. Change classification
 
 Because column IDs are stable, **cells are revision-agnostic; only their
@@ -813,6 +875,8 @@ interpretation is revision-dependent.**
 | unit changed within a dimension | checked — exact-or-fail on the target representation (§2.14) |
 | unit added or removed | free — pure reinterpretation, reported as a semantic change |
 | unit dimension changed | breaking |
+| attachment accept set broadened / size limit raised | free (§2.15) |
+| attachment accept set narrowed / size limit lowered | checked — impact report counts records whose files violate |
 
 > **Correction, found via §5.5.** "Column moved" is only free when `row_path` is
 > unchanged — i.e. between two `one` groups. Moving into or out of a `many`
@@ -1485,9 +1549,13 @@ Only then: `surface`, `store`, service.
    Earlier rejections hold: `resolve`, `transit`, `morphism`, `compat`
    (legacy-shim connotation), `migrate` (one-way, destructive),
    `evolve` (forward-only).
-3. **Attachments / files.** Needs its own design pass. A filename is ambiguous,
-   a URL is instance-bound. Cross-instance export needs a manifest + bundle
-   format with content-addressed references. Probably its own crate.
+3. ~~Attachments / files.~~ **Resolved (§2.15).** Cell element =
+   id + tagged content hash + filename/type/size; blobs hash plain (a
+   deliberate exception — dedup is the goal); one blob machinery shared
+   with resolver payloads; kernel contributes `referenced_blobs` roots,
+   Tier 5 sweeps; wire bundles as a sidecar archive keyed by hash
+   (single-file base64 rejected); scan lifecycle kernel-modeled like
+   resolutions so admissibility can gate on it.
 4. ~~Depth-1 demand.~~ **Resolved from DN experience.** The corpus cannot
    answer this — DN never supported nested repetition, so no demand signal
    exists in the data. The few requests over the years were refused without
