@@ -475,6 +475,13 @@ pub fn entry_from(v: &CanonicalValue) -> Result<Entry, RecordDecodeError> {
             })
             .collect::<Result<_, _>>()?,
     };
+    if salts.ops.len() != content.ops.len() {
+        return err(format!(
+            "{} ops but {} op salts (need one per op)",
+            content.ops.len(),
+            salts.ops.len()
+        ));
+    }
     let envelope = Envelope {
         seq: u64::try_from(get_int(m, "seq")?).map_err(|_| RecordDecodeError("bad seq".into()))?,
         prev: get_str(m, "prev")?

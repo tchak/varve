@@ -2,9 +2,10 @@ use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, ResolverId, RevisionId, RowPath};
 use varve_record::{
-    Actor, ActorKind, Checkpoint, CheckpointViolation, Derivation, Draft,
-    EntrySalts, ExpectedResolution, Origin, RecordLog, Resolution,
-    ResolutionStatus, pending_resolutions, validate_after_checkpoint,
+    Actor, ActorKind, AppendError, ChainError, Checkpoint, CheckpointViolation,
+    Derivation, Draft, EntrySalts, ExpectedResolution, Origin, RecordLog,
+    Resolution, ResolutionStatus, SaltCountMismatch, pending_resolutions,
+    validate_after_checkpoint,
 };
 use varve_value::{CellAddr, CellState, CellValue, Op, Scalar};
 
@@ -120,6 +121,53 @@ fn tampering_breaks_the_chain() {
     }
     let tampered = RecordLog::from_entries(entries);
     assert!(tampered.verify_chain().is_err());
+}
+
+#[test]
+fn injected_op_without_a_salt_is_detected() {
+    // The commitment is a vector over (op, salt) pairs. An op appended
+    // to a stored entry *without* a salt must not slip outside the
+    // commitment: the chain must reject it, not verify around it.
+    let mut log = RecordLog::new();
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
+        .unwrap();
+    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![set("city", "Lyon")]))
+        .unwrap();
+
+    let mut entries = log.entries().to_vec();
+    entries[0].content.ops.push(set("name", "MALLORY"));
+    let tampered = RecordLog::from_entries(entries);
+    assert_eq!(
+        tampered.verify_chain(),
+        Err(ChainError::SaltCount { at: 0, mismatch: SaltCountMismatch { ops: 2, salts: 1 } })
+    );
+
+    // Same for a tail entry — the last entry is otherwise unanchored.
+    let mut entries = log.entries().to_vec();
+    entries[1].content.ops.push(set("name", "MALLORY"));
+    let tampered = RecordLog::from_entries(entries);
+    assert!(matches!(tampered.verify_chain(), Err(ChainError::SaltCount { at: 1, .. })));
+
+    // And the mirror image: a salt without an op.
+    let mut entries = log.entries().to_vec();
+    entries[0].salts.ops.push(Salt([42; 32]));
+    let tampered = RecordLog::from_entries(entries);
+    assert_eq!(
+        tampered.verify_chain(),
+        Err(ChainError::SaltCount { at: 0, mismatch: SaltCountMismatch { ops: 1, salts: 2 } })
+    );
+}
+
+#[test]
+fn append_refuses_a_salt_count_mismatch() {
+    let mut log = RecordLog::new();
+    let mut d = draft(human("a1"), 0, 0, Origin::Entered, vec![set("a", "1"), set("b", "2")]);
+    d.salts = salts(1);
+    assert_eq!(
+        log.append(d).map(|_| ()),
+        Err(AppendError::SaltCount(SaltCountMismatch { ops: 2, salts: 1 }))
+    );
+    assert_eq!(log.version(), 0);
 }
 
 #[test]

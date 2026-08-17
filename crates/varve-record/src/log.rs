@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use varve_core::canonical::ContentHash;
 use varve_value::{ApplyError, CellAddr, Op, RecordValues, apply, diff};
 
-use crate::entry::{Draft, Entry, Envelope, genesis_hash};
+use crate::entry::{Draft, Entry, Envelope, SaltCountMismatch, genesis_hash};
 use crate::Origin;
 
 #[derive(Debug, Clone, Default)]
@@ -16,8 +16,8 @@ pub struct RecordLog {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AppendError {
     /// One salt per op plus one for metadata — counts must line up.
-    #[error("{ops} ops but {salts} op salts (need one per op)")]
-    SaltCount { ops: usize, salts: usize },
+    #[error(transparent)]
+    SaltCount(#[from] SaltCountMismatch),
     /// `base_version` cannot exceed the log's current version.
     #[error("base_version {base} is ahead of the log (version {version})")]
     BaseVersionAhead { base: u64, version: u64 },
@@ -31,6 +31,10 @@ pub enum ChainError {
     PrevMismatch { at: usize },
     #[error("entry {at}: content commitment does not match content + salts")]
     ContentMismatch { at: usize },
+    /// An op without a salt (or vice versa) can never have been
+    /// committed: the entry is malformed, whatever its hash says.
+    #[error("entry {at}: {mismatch}")]
+    SaltCount { at: usize, mismatch: SaltCountMismatch },
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -100,12 +104,6 @@ impl RecordLog {
     }
 
     pub fn append(&mut self, draft: Draft) -> Result<&Entry, AppendError> {
-        if draft.salts.ops.len() != draft.ops.len() {
-            return Err(AppendError::SaltCount {
-                ops: draft.ops.len(),
-                salts: draft.salts.ops.len(),
-            });
-        }
         if draft.base_version > self.version() {
             return Err(AppendError::BaseVersionAhead {
                 base: draft.base_version,
@@ -117,7 +115,7 @@ impl RecordLog {
             origin: draft.origin,
             note: draft.note,
         };
-        let content_hash = Entry::content_hash(&content, &draft.salts);
+        let content_hash = Entry::content_hash(&content, &draft.salts)?;
         let prev = match self.entries.last() {
             None => genesis_hash(),
             Some(entry) => entry.hash(),
@@ -139,8 +137,11 @@ impl RecordLog {
         Ok(self.entries.last().expect("just pushed"))
     }
 
-    /// Verify seq contiguity, `prev` linkage, and that every content
-    /// commitment matches its content + salts.
+    /// Verify seq contiguity, `prev` linkage, that every op carries a
+    /// salt, and that every content commitment matches its content +
+    /// salts. The tail is unanchored by construction: truncation and
+    /// tail edits are caught only by a checkpoint or snapshot that pins
+    /// the head hash (§2.9).
     pub fn verify_chain(&self) -> Result<(), ChainError> {
         let mut prev = genesis_hash();
         for (i, entry) in self.entries.iter().enumerate() {
@@ -150,7 +151,8 @@ impl RecordLog {
             if entry.envelope.prev != prev {
                 return Err(ChainError::PrevMismatch { at: i });
             }
-            let recomputed = Entry::content_hash(&entry.content, &entry.salts);
+            let recomputed = Entry::content_hash(&entry.content, &entry.salts)
+                .map_err(|mismatch| ChainError::SaltCount { at: i, mismatch })?;
             if recomputed != entry.envelope.content_hash {
                 return Err(ChainError::ContentMismatch { at: i });
             }

@@ -11,7 +11,9 @@ mod entry;
 mod log;
 mod resolution;
 
-pub use entry::{Draft, Entry, EntryContent, EntrySalts, Envelope, genesis_hash};
+pub use entry::{
+    Draft, Entry, EntryContent, EntrySalts, Envelope, SaltCountMismatch, genesis_hash,
+};
 pub use log::{
     AppendError, ChainError, Conflict, FoldError, FoldResult, RecordLog,
     Snapshot, SnapshotError,

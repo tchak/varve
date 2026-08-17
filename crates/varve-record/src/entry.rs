@@ -72,18 +72,35 @@ pub struct Draft {
     pub salts: EntrySalts,
 }
 
+/// Ops and op salts must pair one-to-one. Anything else is refused
+/// rather than committed: an op without a salt would fall outside the
+/// commitment and become invisible to chain verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{ops} ops but {salts} op salts (need one per op)")]
+pub struct SaltCountMismatch {
+    pub ops: usize,
+    pub salts: usize,
+}
+
 impl Entry {
     /// The content commitment: vector commitment over the salted
     /// metadata commitment and one salted commitment per op (§2.13
-    /// decision 4).
-    pub fn content_hash(content: &EntryContent, salts: &EntrySalts) -> ContentHash {
+    /// decision 4). Every op is committed — a salt/op count mismatch
+    /// is an error, never a truncated commitment.
+    pub fn content_hash(
+        content: &EntryContent,
+        salts: &EntrySalts,
+    ) -> Result<ContentHash, SaltCountMismatch> {
+        if content.ops.len() != salts.ops.len() {
+            return Err(SaltCountMismatch { ops: content.ops.len(), salts: salts.ops.len() });
+        }
         let meta = canon::meta(&content.origin, content.note.as_deref());
         let mut parts =
             vec![commit(&salts.meta, &meta).expect("no floats in metadata")];
         for (op, salt) in content.ops.iter().zip(&salts.ops) {
             parts.push(commit(salt, &canon::op(op)).expect("ops canonicalize"));
         }
-        commit_vector(&parts)
+        Ok(commit_vector(&parts))
     }
 
     /// The entry hash: plain hash over the envelope, which includes the

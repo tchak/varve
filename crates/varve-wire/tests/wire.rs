@@ -200,6 +200,23 @@ fn tampered_history_is_rejected_on_import() {
 }
 
 #[test]
+fn history_with_an_unsalted_op_is_rejected_at_the_reader() {
+    // Defense in depth for the chain: an entry line whose `ops` and
+    // `op_salts` disagree in length is malformed on its face — the
+    // reader refuses it before `verify_chain` ever sees it.
+    let record = RecordId::new("r1");
+    let mut entries = sample_log().entries().to_vec();
+    entries[0].content.ops.push(set("name", "MALLORY"));
+    let tampered = RecordLog::from_entries(entries);
+    let bytes = write_history(
+        manifest(Mode::History, Intent::CreateOnly, 1),
+        schema_lines(),
+        &[(record, &tampered)],
+    );
+    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { .. })));
+}
+
+#[test]
 fn reader_fails_fast_and_rejects_mixed_modes() {
     // No header.
     assert!(matches!(
