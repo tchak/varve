@@ -289,6 +289,16 @@ fn typechecker_enforces_the_matrix_and_scopes() {
     let contains = Expr::Atom(Atom::Contains { source: source("tags"), option: OptionId::new("oui") });
     assert_eq!(typecheck(&contains, &s, &noms, record), vec![]);
 
+    // A field projection on a presence atom would be silently ignored:
+    // refused instead.
+    let field_on_presence = Expr::Atom(Atom::IsEmpty {
+        source: ColumnRef { column: ColumnId::new("commune"), field: Some("departement".into()) },
+    });
+    assert!(matches!(
+        typecheck(&field_on_presence, &s, &noms, record).as_slice(),
+        [TypeError::AtomNotAllowed(_)]
+    ));
+
     // Unknown projected field.
     let bad_field = Expr::Atom(Atom::Eq {
         source: ColumnRef {

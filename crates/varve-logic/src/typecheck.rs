@@ -99,6 +99,15 @@ fn check_atom(
         return;
     }
 
+    // A field projection means something only in a comparison (§4.1:
+    // the dissolved geo operators compare a projected field against a
+    // text constant). On a presence or membership atom it would be
+    // silently ignored — two canonically distinct rules, one meaning.
+    if source.field.is_some() && !atom.is_comparison() {
+        errors.push(TypeError::AtomNotAllowed(source.column.clone()));
+        return;
+    }
+
     match atom {
         Atom::IsEmpty { .. } | Atom::IsFilled { .. } => {}
         Atom::Contains { option, .. } | Atom::Excludes { option, .. } => {

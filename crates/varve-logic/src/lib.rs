@@ -100,6 +100,20 @@ impl Atom {
         }
     }
 
+    /// The typed comparisons: the atoms whose source may carry a field
+    /// projection (§4.1).
+    pub fn is_comparison(&self) -> bool {
+        matches!(
+            self,
+            Atom::Eq { .. }
+                | Atom::NotEq { .. }
+                | Atom::Lt { .. }
+                | Atom::Le { .. }
+                | Atom::Gt { .. }
+                | Atom::Ge { .. }
+        )
+    }
+
     fn right_column(&self) -> Option<&ColumnRef> {
         match self {
             Atom::Eq { right, .. }
