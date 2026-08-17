@@ -2,7 +2,7 @@
 //! including random inline enums, where the merge/conflict logic lives.
 
 use proptest::prelude::*;
-use varve_core::OptionId;
+use varve_core::{NomenclatureId, OptionId};
 use varve_schema::{
     Arity, AttachmentConstraints, JoinPath, NomenclatureRef, NomenclatureTable,
     OptionRow, ScalarType, Unit, arity_join, column_join, scalar_cast,
@@ -30,8 +30,30 @@ fn inline_enum() -> impl Strategy<Value = ScalarType> {
     })
 }
 
+fn row(id: &str, label: &str) -> OptionRow {
+    OptionRow { id: OptionId::new(id), label: label.into(), fields: vec![] }
+}
+
+/// The table every law runs against: one published nomenclature in two
+/// append-only versions (§2.11), plus an unrelated one — so joins and
+/// casts between `cog@1`, `cog@2` and `pays@1` are exercised.
+fn table() -> NomenclatureTable {
+    let mut n = NomenclatureTable::new();
+    n.insert(NomenclatureId::new("cog"), 1, vec![row("01", "Ain")]);
+    n.insert(NomenclatureId::new("cog"), 2, vec![row("01", "Ain"), row("02", "Aisne")]);
+    n.insert(NomenclatureId::new("pays"), 1, vec![row("FR", "France")]);
+    n
+}
+
+fn published(id: &str, version: u32) -> ScalarType {
+    ScalarType::Enum(NomenclatureRef::Published { id: NomenclatureId::new(id), version })
+}
+
 fn scalar_type() -> impl Strategy<Value = ScalarType> {
     prop_oneof![
+        Just(published("cog", 1)),
+        Just(published("cog", 2)),
+        Just(published("pays", 1)),
         Just(ScalarType::Text),
         Just(ScalarType::Boolean),
         Just(ScalarType::Integer(None)),
@@ -63,7 +85,7 @@ proptest! {
     /// join(a, a) = a, reached directly.
     #[test]
     fn join_is_idempotent(a in scalar_type()) {
-        let n = NomenclatureTable::new();
+        let n = table();
         let (joined, path) = scalar_join(&a, &a, &n).unwrap();
         prop_assert_eq!(joined, a);
         prop_assert_eq!(path, JoinPath::Direct);
@@ -74,7 +96,7 @@ proptest! {
     /// enum row order).
     #[test]
     fn join_is_commutative(a in scalar_type(), b in scalar_type()) {
-        let n = NomenclatureTable::new();
+        let n = table();
         match (scalar_join(&a, &b, &n), scalar_join(&b, &a, &n)) {
             (Err(_), Err(_)) => {}
             (Ok((ab, pa)), Ok((ba, pb))) => {
@@ -90,7 +112,7 @@ proptest! {
     /// widening. (The generalization of the hand-swept sample test.)
     #[test]
     fn join_is_an_upper_bound(a in scalar_type(), b in scalar_type()) {
-        let n = NomenclatureTable::new();
+        let n = table();
         if let Ok((joined, _)) = scalar_join(&a, &b, &n) {
             for side in [&a, &b] {
                 let cast = scalar_cast(side, &joined, &n).unwrap();
@@ -108,7 +130,7 @@ proptest! {
         a in scalar_type(), b in scalar_type(),
         aa in arity(), ab in arity(),
     ) {
-        let n = NomenclatureTable::new();
+        let n = table();
         prop_assume!(!matches!(
             (&a, &b),
             (ScalarType::Attachment(_) | ScalarType::Geometry, _)

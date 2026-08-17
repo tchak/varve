@@ -77,13 +77,15 @@ impl NomenclatureRegistry {
     }
 
     /// The lookup table consumers pass around (conformance, casts,
-    /// logic): latest version of every nomenclature.
+    /// logic): every version of every nomenclature, so a column bound to
+    /// `N@v` resolves against exactly `v` (§2.12).
     pub fn table(&self) -> NomenclatureTable {
-        self.versions
-            .iter()
-            .filter_map(|(id, versions)| {
-                versions.last().map(|rows| (id.clone(), rows.clone()))
-            })
-            .collect()
+        let mut table = NomenclatureTable::new();
+        for (id, versions) in &self.versions {
+            for (i, rows) in versions.iter().enumerate() {
+                table.insert(id.clone(), i as u32 + 1, rows.clone());
+            }
+        }
+        table
     }
 }

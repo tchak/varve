@@ -93,7 +93,13 @@ fn nomenclature_publication_is_append_only() {
             if removed == vec![OptionId::new("o2"), OptionId::new("o3")]
     ));
     assert_eq!(registry.rows(&id, 1).unwrap().len(), 2);
-    assert_eq!(registry.table()[&id].len(), 3);
+    // The table carries every version: a column bound to v1 resolves
+    // against v1's rows, not the latest (§2.12).
+    let table = registry.table();
+    assert_eq!(table.get(&id, 1).unwrap().len(), 2);
+    assert_eq!(table.get(&id, 2).unwrap().len(), 3);
+    assert!(table.get(&id, 3).is_none());
+    assert_eq!(table.versions(&id).map(|(v, _)| v).collect::<Vec<_>>(), vec![1, 2]);
 }
 
 #[test]

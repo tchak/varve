@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use varve_core::canonical::MAX_SAFE_INTEGER;
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId};
 use varve_schema::{
-    Arity, Cardinality, NomenclatureRef, NomenclatureTable, OptionRow,
-    ScalarType, Schema, SchemaIndex,
+    Arity, Cardinality, CastError, NomenclatureTable, OptionRow, ScalarType, Schema,
+    SchemaIndex, nomenclature_rows,
 };
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};
@@ -33,9 +33,9 @@ pub enum ConformanceError {
     /// An enum cell holds an id absent from its nomenclature (§2.11).
     #[error("column '{0}': option '{1}' is not in the nomenclature")]
     UnknownOption(ColumnId, OptionId),
-    /// A published nomenclature is not in the provided table.
-    #[error("column '{0}': published nomenclature '{1}' not provided")]
-    UnknownNomenclature(ColumnId, NomenclatureId),
+    /// A published nomenclature version is not in the provided table.
+    #[error("column '{0}': published nomenclature '{1}' version {2} not provided")]
+    UnknownNomenclature(ColumnId, NomenclatureId, u32),
     /// Duplicate element identity inside one `many` cell (§2.4).
     #[error("column '{0}': duplicate element identity in a `many` cell")]
     DuplicateElement(ColumnId),
@@ -92,19 +92,14 @@ fn scalar_conforms(
             }
         }
         (Scalar::Enum(option), ScalarType::Enum(nref)) => {
-            let rows: Option<&[OptionRow]> = match nref {
-                NomenclatureRef::Inline(rows) => Some(rows),
-                NomenclatureRef::Published { id, .. } => {
-                    match nomenclatures.get(id) {
-                        Some(rows) => Some(rows),
-                        None => {
-                            errors.push(ConformanceError::UnknownNomenclature(
-                                column.clone(),
-                                id.clone(),
-                            ));
-                            None
-                        }
-                    }
+            // Membership is checked against the version the column
+            // binds (§2.12) — an id added in a later version is not a
+            // member here.
+            let rows: Option<&[OptionRow]> = match nomenclature_rows(nref, nomenclatures) {
+                Ok(rows) => Some(rows),
+                Err(CastError::UnknownNomenclature(id, version)) => {
+                    errors.push(ConformanceError::UnknownNomenclature(column.clone(), id, version));
+                    None
                 }
             };
             if let Some(rows) = rows

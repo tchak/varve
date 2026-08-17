@@ -117,8 +117,8 @@ pub fn aggregate(
                     omitted = true;
                     break;
                 }
-                Err(varve_schema::JoinConflict::UnknownNomenclature(id)) => {
-                    return Err(CastError::UnknownNomenclature(id));
+                Err(varve_schema::JoinConflict::UnknownNomenclature(id, version)) => {
+                    return Err(CastError::UnknownNomenclature(id, version));
                 }
             }
         }

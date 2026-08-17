@@ -307,6 +307,41 @@ fn attachment_claims_are_checked_against_constraints() {
 }
 
 #[test]
+fn enum_membership_is_checked_against_the_bound_nomenclature_version() {
+    // §2.12: a column typed "id from N@v" has a closed id set — v's rows,
+    // not the latest. Same cell, two bindings, two verdicts.
+    use varve_core::NomenclatureId;
+    use varve_schema::{NomenclatureRef, NomenclatureTable, OptionRow};
+    let row = |id: &str| OptionRow { id: OptionId::new(id), label: id.into(), fields: vec![] };
+    let cog = NomenclatureId::new("cog");
+    let mut table = NomenclatureTable::new();
+    table.insert(cog.clone(), 1, vec![row("01")]);
+    table.insert(cog.clone(), 2, vec![row("01"), row("02")]);
+    let bound_to = |version: u32| Schema {
+        root: vec![column(
+            "commune",
+            ScalarType::Enum(NomenclatureRef::Published { id: cog.clone(), version }),
+            Arity::One,
+        )],
+        resolvers: vec![],
+    };
+    let mut v = RecordValues::new();
+    v.cells.insert(
+        CellAddr { column: ColumnId::new("commune"), path: RowPath::root() },
+        one(Scalar::Enum(OptionId::new("02"))),
+    );
+    assert_eq!(check(&v, &bound_to(2), &table), vec![]);
+    assert_eq!(
+        check(&v, &bound_to(1), &table),
+        vec![ConformanceError::UnknownOption(ColumnId::new("commune"), OptionId::new("02"))]
+    );
+    assert_eq!(
+        check(&v, &bound_to(3), &table),
+        vec![ConformanceError::UnknownNomenclature(ColumnId::new("commune"), cog, 3)]
+    );
+}
+
+#[test]
 fn geometry_is_validated_geojson() {
     use varve_value::{Feature, GeometryError};
     let point = r#"{"type":"Feature","id":7,"geometry":{"type":"Point","coordinates":[2.35,48.85]},"properties":null}"#;

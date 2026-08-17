@@ -15,10 +15,44 @@ use varve_core::{NomenclatureId, OptionId};
 
 use crate::{Arity, AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType, Unit};
 
-/// Published nomenclature rows, keyed by identity. Inline nomenclatures
-/// carry their rows in the schema; published ones travel like blocks and
-/// are resolved through this table (§2.12).
-pub type NomenclatureTable = BTreeMap<NomenclatureId, Vec<OptionRow>>;
+/// Published nomenclature rows, keyed by identity **and version**
+/// (§2.12): a column binds `(nomenclature, version, id)`, so every
+/// lookup names the version it was declared against — a closed id set
+/// the checker, casts and conformance can rely on. Inline nomenclatures
+/// carry their rows in the schema; published ones travel like blocks
+/// and are resolved through this table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NomenclatureTable {
+    versions: BTreeMap<NomenclatureId, BTreeMap<u32, Vec<OptionRow>>>,
+}
+
+impl NomenclatureTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register one version's rows. Re-inserting a version replaces it.
+    pub fn insert(&mut self, id: NomenclatureId, version: u32, rows: Vec<OptionRow>) {
+        self.versions.entry(id).or_default().insert(version, rows);
+    }
+
+    /// The rows of exactly this version — never a newer one.
+    pub fn get(&self, id: &NomenclatureId, version: u32) -> Option<&[OptionRow]> {
+        self.versions.get(id)?.get(&version).map(Vec::as_slice)
+    }
+
+    /// Every version known for a nomenclature, ascending.
+    pub fn versions(&self, id: &NomenclatureId) -> impl Iterator<Item = (u32, &[OptionRow])> {
+        self.versions
+            .get(id)
+            .into_iter()
+            .flat_map(|v| v.iter().map(|(n, rows)| (*n, rows.as_slice())))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.versions.is_empty()
+    }
+}
 
 /// How one type reaches another. Properties are orthogonal: an arity +
 /// scalar composition can be lossy *and* checked at once.
@@ -113,38 +147,34 @@ pub enum CastClass {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CastError {
-    #[error("unknown published nomenclature '{0}'")]
-    UnknownNomenclature(NomenclatureId),
+    #[error("unknown published nomenclature '{0}' version {1}")]
+    UnknownNomenclature(NomenclatureId, u32),
 }
 
 /// The rows an enum's nomenclature reference resolves to: inline rows
-/// directly, published ones through the table.
+/// directly, published ones through the table — at the **declared
+/// version**, never a newer one.
 pub fn nomenclature_rows<'a>(
     nref: &'a NomenclatureRef,
     nomenclatures: &'a NomenclatureTable,
 ) -> Result<&'a [OptionRow], CastError> {
     match nref {
         NomenclatureRef::Inline(rows) => Ok(rows),
-        NomenclatureRef::Published { id, .. } => nomenclatures
-            .get(id)
-            .map(Vec::as_slice)
-            .ok_or_else(|| CastError::UnknownNomenclature(id.clone())),
+        NomenclatureRef::Published { id, version } => nomenclatures
+            .get(id, *version)
+            .ok_or_else(|| CastError::UnknownNomenclature(id.clone(), *version)),
     }
 }
 
 fn option_ids(
     nref: &NomenclatureRef,
     nomenclatures: &NomenclatureTable,
-) -> Result<BTreeSet<OptionId>, NomenclatureId> {
-    match nref {
-        NomenclatureRef::Inline(rows) => {
-            Ok(rows.iter().map(|r| r.id.clone()).collect())
-        }
-        NomenclatureRef::Published { id, .. } => nomenclatures
-            .get(id)
-            .map(|rows| rows.iter().map(|r| r.id.clone()).collect())
-            .ok_or_else(|| id.clone()),
-    }
+) -> Result<BTreeSet<OptionId>, (NomenclatureId, u32)> {
+    nomenclature_rows(nref, nomenclatures)
+        .map(|rows| rows.iter().map(|r| r.id.clone()).collect())
+        .map_err(|e| match e {
+            CastError::UnknownNomenclature(id, version) => (id, version),
+        })
 }
 
 /// Every scalar with an unambiguous canonical text rendering widens to
@@ -165,10 +195,10 @@ pub fn scalar_cast(
         // §2.11: id-set comparison. Target superset → free; otherwise
         // cells holding removed ids fail, and are countable exactly.
         (Enum(a), Enum(b)) => {
-            let from_ids =
-                option_ids(a, nomenclatures).map_err(CastError::UnknownNomenclature)?;
-            let to_ids =
-                option_ids(b, nomenclatures).map_err(CastError::UnknownNomenclature)?;
+            let from_ids = option_ids(a, nomenclatures)
+                .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
+            let to_ids = option_ids(b, nomenclatures)
+                .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
             if from_ids.is_subset(&to_ids) {
                 Cast::WIDENING
             } else {
@@ -254,8 +284,8 @@ pub enum JoinConflict {
     /// §5.5 policy territory — split or omit, never silently coerce.
     #[error("no type join exists — split or omit (§5.5 policy)")]
     Incompatible,
-    #[error("unknown published nomenclature '{0}'")]
-    UnknownNomenclature(NomenclatureId),
+    #[error("unknown published nomenclature '{0}' version {1}")]
+    UnknownNomenclature(NomenclatureId, u32),
 }
 
 /// Least upper bound of two scalars in the widening order (§5.5).
@@ -334,8 +364,8 @@ fn enum_join(
             // Different codelists, or inline vs published: both widen to
             // text; verify the table knows any published side first.
             for nref in [x, y] {
-                if let Err(id) = option_ids(nref, nomenclatures) {
-                    return Err(JoinConflict::UnknownNomenclature(id));
+                if let Err((id, version)) = option_ids(nref, nomenclatures) {
+                    return Err(JoinConflict::UnknownNomenclature(id, version));
                 }
             }
             Ok((ScalarType::Text, JoinPath::ViaText))
@@ -494,6 +524,36 @@ mod tests {
     }
 
     #[test]
+    fn published_enum_casts_honour_the_bound_version() {
+        // §2.12: a column binds (nomenclature, version, id). v2 ⊇ v1
+        // (append-only), so v1→v2 is free and v2→v1 is checked — cells
+        // holding ids v1 never had are exactly the countable failures.
+        use ScalarType::Enum;
+        let cog = NomenclatureId::new("cog");
+        let mut n = NomenclatureTable::new();
+        n.insert(cog.clone(), 1, vec![OptionRow { id: OptionId::new("01"), label: "Ain".into(), fields: vec![] }]);
+        n.insert(
+            cog.clone(),
+            2,
+            vec![
+                OptionRow { id: OptionId::new("01"), label: "Ain".into(), fields: vec![] },
+                OptionRow { id: OptionId::new("02"), label: "Aisne".into(), fields: vec![] },
+            ],
+        );
+        let v1 = Enum(NomenclatureRef::Published { id: cog.clone(), version: 1 });
+        let v2 = Enum(NomenclatureRef::Published { id: cog.clone(), version: 2 });
+        assert!(scalar_cast(&v1, &v2, &n).unwrap().is_widening());
+        assert!(scalar_cast(&v2, &v1, &n).unwrap().checked);
+        // Rows resolve at the declared version — never the latest.
+        assert_eq!(nomenclature_rows(&NomenclatureRef::Published { id: cog.clone(), version: 1 }, &n).unwrap().len(), 1);
+        // An unknown *version* is unknown, even when the id is known.
+        assert_eq!(
+            scalar_cast(&v1, &Enum(NomenclatureRef::Published { id: cog.clone(), version: 3 }), &n),
+            Err(CastError::UnknownNomenclature(cog, 3))
+        );
+    }
+
+    #[test]
     fn unknown_published_nomenclature_errors() {
         use ScalarType::Enum;
         let published = Enum(NomenclatureRef::Published {
@@ -503,7 +563,7 @@ mod tests {
         let other = Enum(inline(&[("o1", "x")]));
         assert!(matches!(
             scalar_cast(&published, &other, &no_noms()),
-            Err(CastError::UnknownNomenclature(_))
+            Err(CastError::UnknownNomenclature(..))
         ));
     }
 
