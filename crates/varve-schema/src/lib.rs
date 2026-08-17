@@ -6,9 +6,11 @@
 
 #![forbid(unsafe_code)]
 
+mod canon;
 mod cast;
 mod units;
 
+pub use canon::{revision_id, schema_canonical};
 pub use units::{Dimension, Unit, conversion};
 
 pub use cast::{

@@ -632,6 +632,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "varve-revision"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "varve-core",
+ "varve-schema",
+]
+
+[[package]]
 name = "varve-schema"
 version = "0.1.0"
 dependencies = [

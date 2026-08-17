@@ -1,0 +1,11 @@
+[package]
+name = "varve-revision"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+thiserror.workspace = true
