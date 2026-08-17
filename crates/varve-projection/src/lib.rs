@@ -273,21 +273,21 @@ fn project_scalar(
             };
             Ok(convert_number(Decimal::from_i64(*i), *fu, *tu)
                 .and_then(|d| d.to_i64())
-                .map(|i| (Scalar::Integer(i), false)))
+                .map(|i| (Scalar::Integer(i), unit_dropped(*fu, *tu))))
         }
         (T::Integer(fu), T::Decimal(tu)) => {
             let Scalar::Integer(i) = scalar else {
                 return Ok(None);
             };
             Ok(convert_number(Decimal::from_i64(*i), *fu, *tu)
-                .map(|d| (Scalar::Decimal(d), false)))
+                .map(|d| (Scalar::Decimal(d), unit_dropped(*fu, *tu))))
         }
         (T::Decimal(fu), T::Decimal(tu)) => {
             let Scalar::Decimal(d) = scalar else {
                 return Ok(None);
             };
             Ok(convert_number(d.clone(), *fu, *tu)
-                .map(|d| (Scalar::Decimal(d), false)))
+                .map(|d| (Scalar::Decimal(d), unit_dropped(*fu, *tu))))
         }
         (T::Decimal(fu), T::Integer(tu)) => {
             let Scalar::Decimal(d) = scalar else {
@@ -295,7 +295,7 @@ fn project_scalar(
             };
             Ok(convert_number(d.clone(), *fu, *tu)
                 .and_then(|d| d.to_i64())
-                .map(|i| (Scalar::Integer(i), false)))
+                .map(|i| (Scalar::Integer(i), unit_dropped(*fu, *tu))))
         }
         (T::Date, T::Datetime) => {
             let Scalar::Date(d) = scalar else {
@@ -387,6 +387,12 @@ fn convert_number(
             value.mul_div_exact(num, den)
         }
     }
+}
+
+/// §2.14: removing a unit is lossy — the value's bytes survive, its
+/// meaning does not — so every such cell counts in the lossiness report.
+fn unit_dropped(from: Option<Unit>, to: Option<Unit>) -> bool {
+    from.is_some() && to.is_none()
 }
 
 fn text(

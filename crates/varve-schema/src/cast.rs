@@ -233,14 +233,19 @@ pub fn scalar_cast(
 }
 
 /// §2.14 unit rule, composed onto the representation cast: same unit
-/// defers to the representation; unit added/removed is a free pure
-/// reinterpretation (but never identity — the impact report must see
-/// it); a change within a dimension is exact-or-fail; a dimension
-/// change is no cast at all.
+/// defers to the representation; **unit added** is widening (adds
+/// meaning — the values were always implicitly in that unit; never
+/// identity, so the impact report sees the semantic change); **unit
+/// removed** is lossy (drops meaning); a change within a dimension is
+/// exact-or-fail; a dimension change is no cast at all. The asymmetry
+/// is what makes "widens to" a partial order (§5.5): were both
+/// directions free, `day → none → week` would compose two free casts
+/// into the unit swap the direct cast refuses.
 fn number_cast(repr: Cast, from: Option<Unit>, to: Option<Unit>) -> Cast {
     match (from, to) {
         (a, b) if a == b => repr,
-        (None, Some(_)) | (Some(_), None) => repr.and(Cast::WIDENING),
+        (None, Some(_)) => repr.and(Cast::WIDENING),
+        (Some(_), None) => repr.and(Cast::LOSSY),
         (Some(a), Some(b)) if a.dimension() == b.dimension() => {
             repr.and(Cast::CHECKED)
         }
@@ -325,9 +330,14 @@ pub fn scalar_join(
 /// Same published nomenclature: the higher version, on the §2.11
 /// assumption that nomenclature versions are append-only (removal is
 /// deprecation, ids are never deleted), so the higher version's id set
-/// contains the lower's. Two inline enums merge row-wise when shared ids
-/// agree on labels. Everything else falls back to the genuine upper
-/// bound both sides widen to: `Text`, reported as `ViaText`.
+/// contains the lower's. Two inline enums merge row-wise by id — a
+/// shared id with two labels is a **rename** (§2.11: ids are identity,
+/// labels are interpretation), so the merged row keeps the id and takes
+/// the right-hand label (the aggregate folds history forward, so the
+/// later revision's label wins; the aggregate's own surface takes
+/// labels from the latest revision anyway). Everything else falls back
+/// to the genuine upper bound both sides widen to: `Text`, reported as
+/// `ViaText`.
 fn enum_join(
     x: &NomenclatureRef,
     y: &NomenclatureRef,
@@ -347,12 +357,11 @@ fn enum_join(
         (NomenclatureRef::Inline(xr), NomenclatureRef::Inline(yr)) => {
             let mut merged: Vec<OptionRow> = xr.clone();
             for row in yr {
-                match merged.iter().find(|r| r.id == row.id) {
+                match merged.iter_mut().find(|r| r.id == row.id) {
                     None => merged.push(row.clone()),
-                    Some(existing) if existing.label == row.label => {}
-                    // Same synthesized id, different meaning: these are
-                    // unrelated enums that happen to collide.
-                    Some(_) => return Ok((ScalarType::Text, JoinPath::ViaText)),
+                    // Same id: the right-hand row's label and fields win
+                    // (a rename, not a conflict — §2.11).
+                    Some(existing) => *existing = row.clone(),
                 }
             }
             Ok((
@@ -375,9 +384,11 @@ fn enum_join(
 
 /// Unit side of the number join: equal units keep; Some beats None (a
 /// united column carries the meaning — the unitless side reaches it by
-/// free reinterpretation); two different units have no upper bound in
-/// the widening order (conversion is checked, not widening), so the
-/// genuine LUB is `Text`, reported `ViaText` (§5.5).
+/// widening, and not the reverse: dropping a unit is lossy); two
+/// different units have no upper bound in the widening order
+/// (conversion is checked, not widening; the unitless type is *below*
+/// both, not above), so the genuine LUB is `Text`, reported `ViaText`
+/// (§5.5).
 fn number_join(
     decimal: bool,
     a: Option<Unit>,
@@ -486,9 +497,14 @@ mod tests {
         let month = Integer(Some(Unit::Month));
         assert_eq!(cast(&m, &km_int).class(), CastClass::Checked);
         assert_eq!(cast(&m, &km_dec).class(), CastClass::Checked);
-        // Unit added/removed: free reinterpretation, never identity.
+        // Unit added: widening (never identity); unit removed: lossy —
+        // the asymmetry that keeps "widens to" a partial order (§5.5).
         assert_eq!(cast(&Integer(None), &m).class(), CastClass::Widening);
-        assert_eq!(cast(&m, &Integer(None)).class(), CastClass::Widening);
+        assert_ne!(cast(&Integer(None), &m).class(), CastClass::Identity);
+        assert_eq!(cast(&m, &Integer(None)).class(), CastClass::Lossy);
+        // Two free casts never compose into what the direct cast refuses:
+        // day → none is lossy, so day → none → week is not free.
+        assert_eq!(cast(&Integer(Some(Unit::Day)), &Integer(Some(Unit::Week))).class(), CastClass::Checked);
         // Cross-dimension: no cast (days ↔ months included).
         assert_eq!(cast(&m, &month).class(), CastClass::Forbidden);
         assert_eq!(
@@ -630,9 +646,11 @@ mod tests {
         let (joined, path) = scalar_join(&a, &b, &n).unwrap();
         assert_eq!(path, JoinPath::Direct);
         assert_eq!(joined, b);
-        // Same id, different meaning: unrelated enums → ViaText.
+        // Same id, different label: a rename (§2.11) — ids kept, the
+        // right-hand label wins; both sides widen to the result.
         let c = Enum(inline(&[("o1", "Rouge")]));
-        assert_eq!(scalar_join(&a, &c, &n).unwrap(), (ScalarType::Text, JoinPath::ViaText));
+        assert_eq!(scalar_join(&a, &c, &n).unwrap(), (c.clone(), JoinPath::Direct));
+        assert!(scalar_cast(&a, &c, &n).unwrap().is_widening());
         // Same published nomenclature: higher version (append-only §2.11).
         let v1 = Enum(NomenclatureRef::Published {
             id: NomenclatureId::new("cog"),

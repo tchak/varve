@@ -133,6 +133,15 @@ fn unit_changes_are_named_in_the_report() {
         Some(UnitChange { from: None, to: Some(Unit::Day) })
     );
 
+    // Unit removed: lossy (meaning dropped — §2.14/§5.5), named.
+    let report = classify(&int(Some(Unit::Day)), &int(None), &Default::default()).unwrap();
+    let impact = &report.columns[&ColumnId::new("n")];
+    assert_eq!(impact.class, ChangeClass::Lossy);
+    assert_eq!(
+        impact.unit_change,
+        Some(UnitChange { from: Some(Unit::Day), to: None })
+    );
+
     // Within a dimension: checked, named.
     let report = classify(
         &int(Some(Unit::Metre)),

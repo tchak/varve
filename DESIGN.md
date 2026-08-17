@@ -844,9 +844,16 @@ v1 list, by dimension:
 - **Casts** (§3 rows): same dimension → **exact-or-fail on the target
   representation** (rational conversion; 1500 m → 1.5 km fails into an
   integer column, succeeds into decimal — the no-silent-rounding
-  precedent). Cross-dimension → forbidden. Unit added to or removed
-  from an existing column → values unchanged, a pure reinterpretation —
-  free, but **reported** by the impact report as a semantic change.
+  precedent). Cross-dimension → forbidden. **Unit added** to an existing
+  column → values unchanged, widening (the values were always implicitly
+  in that unit) but never identity — **reported** by the impact report as
+  a semantic change. **Unit removed** → values unchanged, **lossy**: the
+  meaning is dropped, and every cell counts in the lossiness report.
+  *(Corrected 2026-08-17 — both directions were "free". That made the
+  widening relation non-transitive: `day → none → week` composed two free
+  casts into the unit swap the direct cast refuses, and §5.5's "join is
+  the least upper bound" was false. The asymmetry restores the partial
+  order.)*
 - **Logic** (§4.1): constants carry units; the typechecker requires
   dimension match; comparisons across compatible units are computed on
   **exact rationals**, never through decimal rounding — so they are
@@ -955,7 +962,8 @@ interpretation is revision-dependent.**
 | enum option added | free |
 | enum option removed | flagged — id retained with `deprecated_since`; impact report counts records holding it |
 | unit changed within a dimension | checked — exact-or-fail on the target representation (§2.14) |
-| unit added or removed | free — pure reinterpretation, reported as a semantic change |
+| unit added | free — values unchanged, reported as a semantic change (§2.14) |
+| unit removed | lossy — values unchanged, meaning dropped (§2.14) |
 | unit dimension changed | breaking |
 | attachment accept set broadened / size limit raised | free (§2.15) |
 | attachment accept set narrowed / size limit lowered | checked — impact report counts records whose files violate |
@@ -1425,11 +1433,18 @@ policy. Same shape as the impact report.
 > **Implementation notes (`varve-schema::cast`, found while building it).**
 > (1) `Text` is the top of the widening order for every text-renderable
 > scalar, so most retype pairs *have* a join; a join that lands on `Text`
-> with neither input `Text` (e.g. integer ∨ date, colliding inline enums)
-> is tagged **`ViaText`** and must appear in the AggregateReport — that is
-> the "widen to opaque text" policy applied where it is the genuine LUB,
-> reported instead of silent. True `Incompatible` is reserved for
+> with neither input `Text` (e.g. integer ∨ date, two different units of
+> one dimension, inline vs published enums) is tagged **`ViaText`** and
+> must appear in the AggregateReport — that is the "widen to opaque text"
+> policy applied where it is the genuine LUB, reported instead of silent.
+> The tag is a per-step report; the aggregate ORs it over its fold, since
+> the *type* is associative but the path is not. Two inline enums join
+> row-wise by id — a shared id with two labels is a rename (§2.11), so
+> the later label wins, never `Text`. True `Incompatible` is reserved for
 > attachment/geometry against anything else: split or omit, never coerce.
+> The lattice laws (idempotent, commutative, associative, upper bound,
+> **least**) are property-tested; leastness is what forced the §2.14 unit
+> asymmetry.
 > (2) Same-nomenclature enum joins take the higher version on the §2.11
 > assumption that nomenclature versions are **append-only** (removal is
 > deprecation; ids are never deleted). That assumption is now load-bearing

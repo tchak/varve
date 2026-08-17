@@ -58,8 +58,10 @@ fn scalar_type() -> impl Strategy<Value = ScalarType> {
         Just(ScalarType::Boolean),
         Just(ScalarType::Integer(None)),
         Just(ScalarType::Integer(Some(Unit::Day))),
+        Just(ScalarType::Integer(Some(Unit::Week))),
         Just(ScalarType::Integer(Some(Unit::Month))),
         Just(ScalarType::Decimal(None)),
+        Just(ScalarType::Decimal(Some(Unit::Day))),
         Just(ScalarType::Decimal(Some(Unit::Metre))),
         Just(ScalarType::Date),
         Just(ScalarType::Datetime),
@@ -121,6 +123,45 @@ proptest! {
                     "{side:?} does not widen to join {joined:?}"
                 );
             }
+        }
+    }
+
+    /// The join is the *least* upper bound: any common widening target
+    /// of both inputs is reachable from the join by widening. This is
+    /// the §5.5 "dual of the cast table" claim, checked — it fails if
+    /// the widening order is not a partial order (e.g. were unit
+    /// add/remove free both ways).
+    #[test]
+    fn join_is_least(a in scalar_type(), b in scalar_type(), c in scalar_type()) {
+        let n = table();
+        if let Ok((joined, _)) = scalar_join(&a, &b, &n) {
+            let widens = |x: &ScalarType, y: &ScalarType| {
+                scalar_cast(x, y, &n).map(|c| c.is_widening()).unwrap_or(false)
+            };
+            if widens(&a, &c) && widens(&b, &c) {
+                prop_assert!(
+                    widens(&joined, &c),
+                    "{c:?} bounds {a:?} and {b:?} but join {joined:?} does not widen to it"
+                );
+            }
+        }
+    }
+
+    /// Associative up to mutual widening (the path tag is a per-step
+    /// report, ORed by the aggregate; the *type* must not depend on
+    /// fold order).
+    #[test]
+    fn join_is_associative(a in scalar_type(), b in scalar_type(), c in scalar_type()) {
+        let n = table();
+        let left = scalar_join(&a, &b, &n).and_then(|(ab, _)| scalar_join(&ab, &c, &n));
+        let right = scalar_join(&b, &c, &n).and_then(|(bc, _)| scalar_join(&a, &bc, &n));
+        match (left, right) {
+            (Err(_), Err(_)) => {}
+            (Ok((l, _)), Ok((r, _))) => {
+                prop_assert!(scalar_cast(&l, &r, &n).unwrap().is_widening(), "{l:?} vs {r:?}");
+                prop_assert!(scalar_cast(&r, &l, &n).unwrap().is_widening(), "{r:?} vs {l:?}");
+            }
+            (l, r) => prop_assert!(false, "associativity: {l:?} vs {r:?}"),
         }
     }
 

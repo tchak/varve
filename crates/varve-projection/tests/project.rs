@@ -311,7 +311,11 @@ fn unit_conversions_are_exact_or_nothing() {
 }
 
 #[test]
-fn unit_added_or_removed_is_pure_reinterpretation() {
+fn unit_added_is_free_and_unit_removed_is_lossy() {
+    // §2.14 / §5.5: values are unchanged either way — bytes are a pure
+    // reinterpretation — but adding a unit is widening (never identity:
+    // the report shows it) and dropping one is lossy (meaning is lost;
+    // every cell counts).
     use varve_schema::Unit;
     let plain = schema(vec![column("n", ScalarType::Integer(None), Arity::One)]);
     let days = schema(vec![column(
@@ -322,16 +326,16 @@ fn unit_added_or_removed_is_pure_reinterpretation() {
     let mut v = RecordValues::new();
     v.cells.insert(addr("n"), one(Scalar::Integer(12)));
 
-    for (from, to) in [(&plain, &days), (&days, &plain)] {
-        let p = project(&v, from, to, &Default::default()).unwrap();
-        assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
-        assert!(p.report.is_clean());
-        // Not identity: the report shows the reinterpretation.
-        assert_eq!(
-            p.report.columns[&ColumnId::new("n")].status,
-            ColumnStatus::Cast
-        );
-    }
+    let p = project(&v, &plain, &days, &Default::default()).unwrap();
+    assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
+    assert!(p.report.is_clean());
+    assert_eq!(p.report.columns[&ColumnId::new("n")].status, ColumnStatus::Cast);
+
+    let p = project(&v, &days, &plain, &Default::default()).unwrap();
+    assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
+    assert!(!p.report.is_clean());
+    assert_eq!(p.report.columns[&ColumnId::new("n")].cells_lossy, 1);
+    assert_eq!(p.report.columns[&ColumnId::new("n")].status, ColumnStatus::Cast);
 }
 
 #[test]
