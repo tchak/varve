@@ -47,6 +47,14 @@ pub enum ConformanceError {
     MisplacedItems(GroupId),
     #[error("duplicate item in group '{0}'")]
     DuplicateItem(GroupId),
+    /// One state, one encoding (§2.4): a `many` group with no items has
+    /// no item list at all.
+    #[error("group '{0}': an empty item list is not stored — omit it")]
+    EmptyItemList(GroupId),
+    /// One state, one encoding (§2.4): a `many` cell with no elements
+    /// is `Empty`, never a zero-length list.
+    #[error("column '{0}': a zero-length list is not a value — use `Empty`")]
+    EmptyList(ColumnId),
     /// §2.15: the cell's claimed content type violates the column's
     /// accept set.
     #[error("column '{0}': content type '{1}' is not accepted")]
@@ -125,6 +133,9 @@ pub fn check(
     let index = SchemaIndex::build(schema);
 
     for (addr, list) in &values.items {
+        if list.is_empty() {
+            errors.push(ConformanceError::EmptyItemList(addr.group.clone()));
+        }
         match index.groups.get(&addr.group) {
             None => errors.push(ConformanceError::UnknownGroup(addr.group.clone())),
             Some(info) => {
@@ -187,6 +198,9 @@ pub fn check(
                 scalar_conforms(scalar, &info.ty, &addr.column, nomenclatures, &mut errors);
             }
             (CellValue::Many(scalars), Arity::Many) => {
+                if scalars.is_empty() {
+                    errors.push(ConformanceError::EmptyList(addr.column.clone()));
+                }
                 let mut seen = HashSet::new();
                 for scalar in scalars {
                     scalar_conforms(

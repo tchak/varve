@@ -106,8 +106,21 @@ scope.
 
 **Cell state is two orthogonal axes, not one enum:**
 
-- **Stored state** — `absent` (never written) | `empty` (written, blank) |
-  `value`. Intrinsic to the cell; this is what the wire transmits.
+- **Stored state** — `absent` (no stored state: never written, or
+  `unset` since) | `empty` (a blank was written) | `value`. Intrinsic to
+  the cell; this is what the wire transmits. **Settled (was open question
+  13): what separates `empty` from `absent` is provenance, not logic.**
+  An `empty` cell was *set* by an entry, so the fold carries its origin
+  (§2.7 — which actor, entered or derived); an `absent` cell has no
+  origin at all — `unset` removes provenance along with the value. "The
+  applicant saw this field and left it blank" is a fact with an author;
+  "nothing was ever written" is the absence of one. The logic language
+  reads both as absence (§4.1: comparison atoms false, `is_empty` true);
+  diff, audit and provenance are what tell them apart. **One state, one
+  encoding**: an arity-`many` cell with no elements is `empty`, never a
+  zero-length list, and a `many` group with no items has no item list —
+  `apply` refuses to produce either, and conformance and the wire reader
+  refuse them if built by hand.
 - **Reachability** — derived at read time from surface + revision + logic.
   Never stored, never transmitted. It is **surface-relative**: the same cell
   can be reachable on the back-office surface and unreachable on the public
@@ -1294,6 +1307,9 @@ kinds cannot mix (above), so one format can never do both:
 - key present, `null` → empty
 - key present, value → value
 
+One state, one encoding (§2.4): a blank `many` cell is `empty`, never a
+zero-length list; an item list is never empty. The reader refuses both.
+
 Reachability is never serialized — always derived on read from surface +
 revision (§2.4). Stored values are transmitted even when unreachable on every
 current surface: "hidden never deletes" implies hidden must round-trip.
@@ -1693,6 +1709,18 @@ Only then: `surface`, `store`, service.
     construction" is a superseding checkpoint). Reporting rather than
     gating follows from "no permission model": `validate_after_checkpoint`
     is pure; append never consults it.
+13. ~~Absent vs empty.~~ **Resolved (§2.4, 2026-08-17): the distinction
+    is provenance.** Found by audit: §2.4 defined `absent` as "never
+    written" although `unset` returns a cell to absent, and never said
+    what `empty` adds beyond `absent` given that logic reads both as
+    absence — while `Many([])` and empty item lists were further blank
+    encodings with distinct canonical bytes. Settled by design argument
+    from existing machinery: the fold keeps an origin for a `set` blank
+    and drops it on `unset`, so `empty` is a blank with an author and
+    `absent` is the lack of one; the extra encodings are refused (apply,
+    conformance, wire reader) so each state has one canonical form.
+    Collapsing to two states was considered and rejected — it would
+    erase the "left blank by whom" fact that audit and diff rely on.
 
 ## 11. Prior art to consult
 

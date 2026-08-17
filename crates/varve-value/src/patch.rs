@@ -4,7 +4,7 @@
 
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RowPath};
 
-use crate::{CellAddr, CellState, ItemsAddr, RecordValues};
+use crate::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues};
 
 /// The op set (§5). A snapshot export never uses more than `Set` and
 /// `AddItem`.
@@ -49,12 +49,19 @@ pub enum ApplyError {
     /// Reorder is not a permutation of the existing list.
     #[error("reorder of group '{0}' is not a permutation of its items")]
     BadReorder(GroupId),
+    /// A `many` cell with zero elements is `Empty` — one state, one
+    /// encoding (§2.4); a zero-length list is never stored.
+    #[error("column '{0}': a zero-length list is not a value — use `Empty`")]
+    EmptyList(ColumnId),
 }
 
 /// Apply one op. Errors leave `values` unchanged.
 pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
     match op {
         Op::Set { column, path, state } => {
+            if matches!(state, CellState::Value(CellValue::Many(list)) if list.is_empty()) {
+                return Err(ApplyError::EmptyList(column.clone()));
+            }
             values.cells.insert(
                 CellAddr {
                     column: column.clone(),
@@ -81,14 +88,16 @@ pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
                 group: group.clone(),
                 parent: parent.clone(),
             };
-            let list = values.items.entry(addr).or_default();
-            if list.contains(item) {
+            // Validate before touching the map: an error must not leave
+            // an empty item list behind (no empty lists are ever stored).
+            let len = values.items.get(&addr).map_or(0, Vec::len);
+            if values.items.get(&addr).is_some_and(|l| l.contains(item)) {
                 return Err(ApplyError::ItemExists(group.clone(), item.clone()));
             }
-            if *at > list.len() {
+            if *at > len {
                 return Err(ApplyError::BadIndex(group.clone(), *at));
             }
-            list.insert(*at, item.clone());
+            values.items.entry(addr).or_default().insert(*at, item.clone());
             Ok(())
         }
         Op::RemoveItem {

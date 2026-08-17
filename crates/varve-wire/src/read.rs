@@ -250,19 +250,25 @@ fn record_line_from(m: &Obj) -> Result<RecordLine, String> {
     }
     for list in as_arr(get(m, "items")?)? {
         let list = as_obj(list)?;
+        let ids: Vec<ItemId> = as_arr(get(list, "items")?)?
+            .iter()
+            .map(|i| match i {
+                CanonicalValue::String(s) => Ok(ItemId::new(s)),
+                _ => Err("item ids must be strings".to_string()),
+            })
+            .collect::<Result<_, _>>()?;
+        if ids.is_empty() {
+            // One state, one encoding (§2.4): a group with no items has
+            // no item list.
+            return Err("an empty item list is not stored — omit it".to_string());
+        }
         values.items.insert(
             ItemsAddr {
                 group: GroupId::new(get_str(list, "group")?),
                 parent: record_canon::path_from(get(list, "parent")?)
                     .map_err(|e| e.to_string())?,
             },
-            as_arr(get(list, "items")?)?
-                .iter()
-                .map(|i| match i {
-                    CanonicalValue::String(s) => Ok(ItemId::new(s)),
-                    _ => Err("item ids must be strings".to_string()),
-                })
-                .collect::<Result<_, _>>()?,
+            ids,
         );
     }
     Ok(RecordLine {

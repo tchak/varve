@@ -40,7 +40,8 @@ fn state() -> impl Strategy<Value = CellState> {
     prop_oneof![
         Just(CellState::Empty),
         scalar().prop_map(|s| CellState::Value(CellValue::One(s))),
-        proptest::collection::vec(scalar(), 0..3)
+        // Never empty: a blank `many` cell is `Empty` (§2.4).
+        proptest::collection::vec(scalar(), 1..3)
             .prop_map(|v| CellState::Value(CellValue::Many(v))),
     ]
 }
@@ -58,7 +59,8 @@ fn record_values() -> impl Strategy<Value = RecordValues> {
         proptest::collection::btree_map(("[a-z]{1,4}", path()), state(), 0..5),
         proptest::collection::btree_map(
             ("[a-z]{1,3}", path()),
-            proptest::collection::vec("[a-z0-9]{1,3}", 0..3),
+            // Never empty: a group with no items has no item list (§2.4).
+            proptest::collection::vec("[a-z0-9]{1,3}", 1..3),
             0..3,
         ),
     )

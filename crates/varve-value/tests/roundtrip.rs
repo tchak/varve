@@ -5,7 +5,7 @@ use varve_schema::{
     ScalarType, Schema,
 };
 use varve_value::{
-    AttachmentRef, CellAddr, CellState, CellValue, ConformanceError, ItemsAddr,
+    ApplyError, AttachmentRef, CellAddr, CellState, CellValue, ConformanceError, ItemsAddr,
     Op, RecordValues, Scalar, apply, cell_delta, check, diff,
 };
 
@@ -339,6 +339,43 @@ fn enum_membership_is_checked_against_the_bound_nomenclature_version() {
         check(&v, &bound_to(3), &table),
         vec![ConformanceError::UnknownNomenclature(ColumnId::new("commune"), cog, 3)]
     );
+}
+
+#[test]
+fn one_state_one_encoding_no_empty_lists() {
+    // §2.4: a blank `many` cell is `Empty`, never a zero-length list; a
+    // `many` group with no items has no item list. Apply refuses to
+    // produce either, and conformance flags them if built by hand.
+    let mut v = RecordValues::new();
+    let tags = Op::Set {
+        column: ColumnId::new("tags"),
+        path: RowPath::root(),
+        state: CellState::Value(CellValue::Many(vec![])),
+    };
+    assert_eq!(apply(&mut v, &tags), Err(ApplyError::EmptyList(ColumnId::new("tags"))));
+    assert!(v.cells.is_empty());
+
+    // A failing AddItem leaves nothing behind — no `[]` under the group.
+    let bad = Op::AddItem {
+        group: GroupId::new("contacts"),
+        parent: RowPath::root(),
+        item: ItemId::new("c1"),
+        at: 5,
+    };
+    assert_eq!(apply(&mut v, &bad), Err(ApplyError::BadIndex(GroupId::new("contacts"), 5)));
+    assert!(v.items.is_empty());
+    assert_eq!(v, RecordValues::new());
+
+    // Hand-built alternatives are non-conforming.
+    let mut v = RecordValues::new();
+    v.cells.insert(root_cell("tags"), CellState::Value(CellValue::Many(vec![])));
+    v.items.insert(
+        ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() },
+        vec![],
+    );
+    let errors = check(&v, &schema(), &Default::default());
+    assert!(errors.contains(&ConformanceError::EmptyList(ColumnId::new("tags"))));
+    assert!(errors.contains(&ConformanceError::EmptyItemList(GroupId::new("contacts"))));
 }
 
 #[test]

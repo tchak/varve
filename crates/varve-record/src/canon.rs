@@ -314,8 +314,14 @@ pub fn state_from(v: &CanonicalValue) -> Result<CellState, RecordDecodeError> {
         return Ok(CellState::Value(CellValue::One(scalar_from(one)?)));
     }
     if let Some(many) = m.get("many") {
+        let list = as_arr(many)?;
+        if list.is_empty() {
+            // One state, one encoding (§2.4): a blank `many` cell is
+            // `"empty"`, never `{"many":[]}`.
+            return err("a zero-length list is not a value — use \"empty\"");
+        }
         return Ok(CellState::Value(CellValue::Many(
-            as_arr(many)?.iter().map(scalar_from).collect::<Result<_, _>>()?,
+            list.iter().map(scalar_from).collect::<Result<_, _>>()?,
         )));
     }
     err("state must be 'empty', 'one' or 'many'")

@@ -214,6 +214,28 @@ fn record_line_pins_canonical_number_shapes() {
 }
 
 #[test]
+fn reader_refuses_the_alternative_blank_encodings() {
+    // §2.4 one state, one encoding: `{"many":[]}` and an empty item
+    // list are not what the writer emits and are refused on read.
+    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let with = |cells: &str, items: &str| {
+        let mut bytes = header.clone();
+        bytes.extend_from_slice(
+            format!(r#"{{"cells":[{cells}],"id":"r1","items":[{items}],"k":"record","lens":"lens"}}"#)
+                .as_bytes(),
+        );
+        bytes.push(b'\n');
+        bytes
+    };
+    let ok = with(r#"{"column":"tags","path":[],"state":"empty"}"#, "");
+    assert!(read_stream(&ok).is_ok());
+    let empty_many = with(r#"{"column":"tags","path":[],"state":{"many":[]}}"#, "");
+    assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 2, .. })));
+    let empty_items = with("", r#"{"group":"contacts","items":[],"parent":[]}"#);
+    assert!(matches!(read_stream(&empty_items), Err(ReadError::Malformed { line: 2, .. })));
+}
+
+#[test]
 fn intent_makes_id_mismatches_fail_loudly() {
     let record = RecordId::new("r1");
     let bytes = write_history(
