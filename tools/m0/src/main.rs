@@ -428,7 +428,9 @@ fn main() {
     drop(bytes);
     eprintln!("parsed {} procedures", procedures.len());
 
+    let wire_mode = std::env::args().any(|a| a == "--wire");
     let mut stats = Stats::default();
+    let mut schemas: Vec<Schema> = Vec::new();
     for procedure in &procedures {
         let number = procedure["number"].as_i64().unwrap_or(-1);
         stats.procedures += 1;
@@ -457,6 +459,14 @@ fn main() {
                 *stats.validation_errors.entry(key).or_default() += 1;
             }
         }
+        if wire_mode {
+            schemas.push(schema);
+        }
+    }
+
+    if wire_mode {
+        wire_round_trip(&schemas);
+        return;
     }
 
     println!("# M0 expressibility run\n");
@@ -493,6 +503,78 @@ fn main() {
         for (procedure, typename, label) in &stats.residue {
             println!("  procedure {procedure}: {typename} ({label:?})");
         }
+    }
+}
+
+/// M3 (§8): the corpus in and out, byte-stable. Every schema becomes a
+/// `revision` line in one history-mode stream; the stream is read back,
+/// re-emitted, and compared byte for byte; every schema is compared
+/// structurally; and every revision id is recomputed from the decoded
+/// schema and compared to the id on the wire.
+fn wire_round_trip(schemas: &[Schema]) {
+    use varve_schema::revision_id;
+    use varve_wire::{Intent, Line, Manifest, Mode, read_stream, write_lines};
+
+    let mut lines = Vec::with_capacity(schemas.len() + 1);
+    let mut ids = Vec::with_capacity(schemas.len());
+    let mut distinct = std::collections::BTreeSet::new();
+    for schema in schemas {
+        let id = revision_id(schema);
+        distinct.insert(id.clone());
+        ids.push(id.clone());
+        lines.push(Line::Revision { id, schema: schema.clone() });
+    }
+    lines.insert(
+        0,
+        Line::Header(Manifest {
+            format_version: varve_wire::FORMAT_VERSION,
+            source_instance: "dn-corpus".into(),
+            mode: Mode::History,
+            intent: Intent::CreateOnly,
+            revisions: ids.clone(),
+            record_count: 0,
+            attachments_bundled: false,
+        }),
+    );
+
+    let bytes = write_lines(&lines);
+    let stream = read_stream(&bytes).expect("corpus stream must read back");
+    let again = write_lines(&stream.lines);
+
+    let mut schema_mismatches = 0u64;
+    let mut id_mismatches = 0u64;
+    let decoded: Vec<&Line> = stream.lines.iter().skip(1).collect();
+    for (line, original) in decoded.iter().zip(schemas) {
+        let Line::Revision { id, schema } = line else {
+            panic!("expected a revision line");
+        };
+        if schema != original {
+            schema_mismatches += 1;
+        }
+        if revision_id(schema) != *id {
+            id_mismatches += 1;
+        }
+    }
+
+    println!("# M3 corpus round-trip run\n");
+    println!("schemas emitted:        {:>9}", schemas.len());
+    println!("distinct revision ids:  {:>9}", distinct.len());
+    println!("stream bytes:           {:>9}", bytes.len());
+    println!("lines read back:        {:>9}", stream.lines.len());
+    println!("byte-stable re-emit:    {:>9}", if again == bytes { "YES" } else { "NO" });
+    println!("schema mismatches:      {:>9}", schema_mismatches);
+    println!("revision id mismatches: {:>9}", id_mismatches);
+    let ok = again == bytes
+        && schema_mismatches == 0
+        && id_mismatches == 0
+        && decoded.len() == schemas.len();
+    println!();
+    println!(
+        "M3: {}",
+        if ok { "PASS — the corpus round-trips byte-stably" } else { "FAIL" }
+    );
+    if !ok {
+        std::process::exit(1);
     }
 }
 

@@ -39,8 +39,8 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
 |---|---|
 | **M0 — expressibility** | ✅ all 42,723 published DN procedures express and validate with **zero residue** (`corpus/M0-expressibility.md`) |
 | **M1 — falsification** | machinery built (`varve-projection`, `varve-impact`); awaits historical revision data |
-| **M2 — logic language** | not started; awaits the rule corpus |
-| **M3 — wire round-trip** | not started |
+| **M2 — logic language** | predicate core built (`varve-logic`); awaits the rule corpus for falsification |
+| **M3 — wire round-trip** | ✅ all 42,723 schemas round-trip byte-stably through `varve-wire` (`corpus/M3-round-trip.md`); record-side awaits DN data |
 
 ## Layout
 
@@ -66,7 +66,7 @@ async — timestamps and salts are inputs.
 Version control is [jj](https://github.com/jj-vcs/jj) (colocated git).
 
 ```sh
-cargo test --workspace              # 65 tests, incl. property suites
+cargo test --workspace              # 112 tests, incl. property suites
 cargo clippy --workspace --all-targets
 scripts/fetch-corpus.sh             # download the DN corpus (~124 MB gz)
 cargo run --release -p m0           # M0 harness over the corpus

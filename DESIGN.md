@@ -1505,9 +1505,12 @@ every feature must appear in the corpus to earn its place.
   the canonical form); both export modes, the line-1 manifest with
   intent, fail-fast reading, mode-mixing rejection, history import as
   chain adoption (tamper detected on import), snapshot import as an
-  ordinary log entry. Round-trip and reader-totality are property-tested;
-  the corpus run itself (m0 emitting and re-reading all 42,723 schemas)
-  is the remaining M3 step.*
+  ordinary log entry. Round-trip and reader-totality are property-tested.
+  **Corpus run passed** (`corpus/M3-round-trip.md`): all 42,723 schemas
+  emitted, read back and re-emitted byte-identically, every revision id
+  recomputed from the decoded schema — and content-addressing revealed
+  19.7% of procedures are structurally identical to another. Record-side
+  corpus round trip awaits DN record data.*
 
 Only then: `surface`, `store`, service.
 

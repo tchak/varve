@@ -14,12 +14,13 @@ not the form builder. (A varve is an annual sediment layer — history read
 back layer by layer.)
 
 `DESIGN.md` is the design document and single source of truth. The
-workspace holds Tier 0–2 crates (`varve-core`, `-schema`, `-value`,
-`-record`, `-projection`, `-impact`) plus `tools/m0`, the corpus harness;
-`corpus/` holds the M0 analyses (all 42,723 published DN procedures
-express with zero residue). M1 machinery is built and awaits DN
-revision-history data; `varve-logic`, `-surface`, `-revision`, `-wire`
-are not started. Run `cargo test --workspace` (65 tests incl. property
+workspace holds every crate below the IO tier (`varve-core`, `-schema`,
+`-value`, `-logic`, `-projection`, `-impact`, `-record`, `-surface`,
+`-revision`, `-wire`) plus `tools/m0`, the corpus harness; `corpus/`
+holds the analyses (M0: all 42,723 published DN procedures express with
+zero residue; M3: they round-trip byte-stably through the wire). M1 and
+M2 machinery is built and awaits DN-internal data (revision history,
+rule extraction). Run `cargo test --workspace` (112 tests incl. property
 suites) and `cargo clippy --workspace --all-targets` before committing.
 
 ## Version control: jj, not git
