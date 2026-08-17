@@ -36,7 +36,7 @@ fn schema() -> Schema {
     Schema {
         root: vec![
             column("name", ScalarType::Text, Arity::One),
-            column("amount", ScalarType::Decimal, Arity::One),
+            column("amount", ScalarType::Decimal(None), Arity::One),
             column("tags", ScalarType::Enum(tags), Arity::Many),
             column("files", ScalarType::Attachment, Arity::Many),
             Element::Group(Group {

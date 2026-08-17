@@ -48,8 +48,8 @@ fn classification_covers_the_section_3_table() {
     let from = schema(vec![
         column("kept", ScalarType::Text, Arity::One),
         column("gone", ScalarType::Text, Arity::One),
-        column("widened", ScalarType::Integer, Arity::One),
-        column("narrowed", ScalarType::Decimal, Arity::One),
+        column("widened", ScalarType::Integer(None), Arity::One),
+        column("narrowed", ScalarType::Decimal(None), Arity::One),
         column("truncated", ScalarType::Datetime, Arity::One),
         column("broken", ScalarType::Attachment, Arity::Many),
         column("moved", ScalarType::Text, Arity::One),
@@ -57,10 +57,10 @@ fn classification_covers_the_section_3_table() {
     let to = schema(vec![
         column("kept", ScalarType::Text, Arity::One),
         column("new", ScalarType::Boolean, Arity::One),
-        column("widened", ScalarType::Decimal, Arity::One),
-        column("narrowed", ScalarType::Integer, Arity::One),
+        column("widened", ScalarType::Decimal(None), Arity::One),
+        column("narrowed", ScalarType::Integer(None), Arity::One),
         column("truncated", ScalarType::Date, Arity::One),
-        column("broken", ScalarType::Integer, Arity::One),
+        column("broken", ScalarType::Integer(None), Arity::One),
         Element::Group(Group {
             id: GroupId::new("g"),
             label: "g".into(),
@@ -159,8 +159,8 @@ fn resolver_impact_questions() {
 
 #[test]
 fn assessment_turns_checked_into_exact_counts() {
-    let from = schema(vec![column("d", ScalarType::Decimal, Arity::One)]);
-    let to = schema(vec![column("d", ScalarType::Integer, Arity::One)]);
+    let from = schema(vec![column("d", ScalarType::Decimal(None), Arity::One)]);
+    let to = schema(vec![column("d", ScalarType::Integer(None), Arity::One)]);
 
     let record = |s: &str| {
         let mut v = RecordValues::new();

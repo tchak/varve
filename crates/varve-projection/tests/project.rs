@@ -90,12 +90,12 @@ fn added_and_removed_columns_are_free() {
 #[test]
 fn widening_casts_convert_values() {
     let writer = schema(vec![
-        column("n", ScalarType::Integer, Arity::One),
+        column("n", ScalarType::Integer(None), Arity::One),
         column("d", ScalarType::Date, Arity::One),
         column("choice", ScalarType::Enum(options(&[("o1", "Oui")])), Arity::One),
     ]);
     let reader = schema(vec![
-        column("n", ScalarType::Decimal, Arity::One),
+        column("n", ScalarType::Decimal(None), Arity::One),
         column("d", ScalarType::Datetime, Arity::One),
         column("choice", ScalarType::Text, Arity::One),
     ]);
@@ -129,11 +129,11 @@ fn widening_casts_convert_values() {
 #[test]
 fn checked_casts_fail_loudly_per_cell() {
     let writer = schema(vec![
-        column("d", ScalarType::Decimal, Arity::One),
+        column("d", ScalarType::Decimal(None), Arity::One),
         column("choice", ScalarType::Enum(options(&[("o1", "Oui"), ("o2", "Non")])), Arity::One),
     ]);
     let reader = schema(vec![
-        column("d", ScalarType::Integer, Arity::One),
+        column("d", ScalarType::Integer(None), Arity::One),
         column("choice", ScalarType::Enum(options(&[("o1", "Oui")])), Arity::One),
     ]);
     let mut v = RecordValues::new();
@@ -268,6 +268,70 @@ fn items_survive_or_drop_with_their_group() {
     let dropped = project(&v, &writer, &reader_drops, &Default::default()).unwrap();
     assert!(dropped.values.items.is_empty());
     assert_eq!(dropped.report.dropped_item_lists, 1);
+}
+
+#[test]
+fn unit_conversions_are_exact_or_nothing() {
+    use varve_schema::Unit;
+    let metres_int = schema(vec![column(
+        "d",
+        ScalarType::Integer(Some(Unit::Metre)),
+        Arity::One,
+    )]);
+    let km_int = schema(vec![column(
+        "d",
+        ScalarType::Integer(Some(Unit::Kilometre)),
+        Arity::One,
+    )]);
+    let km_dec = schema(vec![column(
+        "d",
+        ScalarType::Decimal(Some(Unit::Kilometre)),
+        Arity::One,
+    )]);
+
+    let mut v = RecordValues::new();
+    v.cells.insert(addr("d"), one(Scalar::Integer(1500)));
+
+    // 1500 m → integer km: 1.5 is not an integer — fails, counted.
+    let p = project(&v, &metres_int, &km_int, &Default::default()).unwrap();
+    assert_eq!(p.report.total_failed(), 1);
+    // 1500 m → decimal km: exactly 1.5.
+    let p = project(&v, &metres_int, &km_dec, &Default::default()).unwrap();
+    assert_eq!(
+        p.values.cells[&addr("d")],
+        one(Scalar::Decimal(Decimal::parse("1.5").unwrap()))
+    );
+    assert!(p.report.is_clean());
+
+    // 2000 m → integer km: exactly 2 — succeeds.
+    let mut v2 = RecordValues::new();
+    v2.cells.insert(addr("d"), one(Scalar::Integer(2000)));
+    let p = project(&v2, &metres_int, &km_int, &Default::default()).unwrap();
+    assert_eq!(p.values.cells[&addr("d")], one(Scalar::Integer(2)));
+}
+
+#[test]
+fn unit_added_or_removed_is_pure_reinterpretation() {
+    use varve_schema::Unit;
+    let plain = schema(vec![column("n", ScalarType::Integer(None), Arity::One)]);
+    let days = schema(vec![column(
+        "n",
+        ScalarType::Integer(Some(Unit::Day)),
+        Arity::One,
+    )]);
+    let mut v = RecordValues::new();
+    v.cells.insert(addr("n"), one(Scalar::Integer(12)));
+
+    for (from, to) in [(&plain, &days), (&days, &plain)] {
+        let p = project(&v, from, to, &Default::default()).unwrap();
+        assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
+        assert!(p.report.is_clean());
+        // Not identity: the report shows the reinterpretation.
+        assert_eq!(
+            p.report.columns[&ColumnId::new("n")].status,
+            ColumnStatus::Cast
+        );
+    }
 }
 
 #[test]

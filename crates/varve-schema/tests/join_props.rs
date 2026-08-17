@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use varve_core::OptionId;
 use varve_schema::{
     Arity, JoinPath, NomenclatureRef, NomenclatureTable, OptionRow, ScalarType,
-    arity_join, column_join, scalar_cast, scalar_join,
+    Unit, arity_join, column_join, scalar_cast, scalar_join,
 };
 
 /// Small id/label alphabets force collisions, merges, and label
@@ -33,8 +33,11 @@ fn scalar_type() -> impl Strategy<Value = ScalarType> {
     prop_oneof![
         Just(ScalarType::Text),
         Just(ScalarType::Boolean),
-        Just(ScalarType::Integer),
-        Just(ScalarType::Decimal),
+        Just(ScalarType::Integer(None)),
+        Just(ScalarType::Integer(Some(Unit::Day))),
+        Just(ScalarType::Integer(Some(Unit::Month))),
+        Just(ScalarType::Decimal(None)),
+        Just(ScalarType::Decimal(Some(Unit::Metre))),
         Just(ScalarType::Date),
         Just(ScalarType::Datetime),
         Just(ScalarType::Attachment),

@@ -7,6 +7,9 @@
 #![forbid(unsafe_code)]
 
 mod cast;
+mod units;
+
+pub use units::{Dimension, Unit, conversion};
 
 pub use cast::{
     Cast, CastClass, CastError, JoinConflict, JoinPath, NomenclatureTable,
@@ -41,8 +44,9 @@ pub enum Cardinality {
 pub enum ScalarType {
     Text,
     Boolean,
-    Integer,
-    Decimal,
+    /// Optional unit (§2.14): plain numbers stay plain.
+    Integer(Option<Unit>),
+    Decimal(Option<Unit>),
     Date,
     Datetime,
     /// Every enum is nomenclature-backed (§2.12).

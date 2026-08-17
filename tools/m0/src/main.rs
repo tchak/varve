@@ -201,11 +201,11 @@ impl<'a> Converter<'a> {
             }
 
             "IntegerNumberChampDescriptor" => {
-                out.push(self.column(label, ScalarType::Integer, Arity::One));
+                out.push(self.column(label, ScalarType::Integer(None), Arity::One));
             }
             // "Number" is DN's legacy numeric champ: decimal-valued.
             "DecimalNumberChampDescriptor" | "NumberChampDescriptor" => {
-                out.push(self.column(label, ScalarType::Decimal, Arity::One));
+                out.push(self.column(label, ScalarType::Decimal(None), Arity::One));
             }
 
             "DateChampDescriptor" => {

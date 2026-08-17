@@ -14,7 +14,7 @@ use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, OptionId};
 use varve_schema::{
     Arity, CastError, ColumnInfo, NomenclatureTable, ScalarType, Schema,
-    SchemaIndex, column_cast, nomenclature_rows,
+    SchemaIndex, Unit, column_cast, conversion, nomenclature_rows,
 };
 use varve_value::{CellState, CellValue, RecordValues, Scalar};
 
@@ -263,17 +263,39 @@ fn project_scalar(
                 Ok(None)
             }
         }
-        (T::Integer, T::Decimal) => {
+        // Number casts: §2.14 unit conversion on exact rationals,
+        // composed with the representation rule — exact-or-nothing at
+        // every step. (Equal types never reach here: the identity arm
+        // above catches them.)
+        (T::Integer(fu), T::Integer(tu)) => {
             let Scalar::Integer(i) = scalar else {
                 return Ok(None);
             };
-            ok(Scalar::Decimal(Decimal::from_i64(*i)))
+            Ok(convert_number(Decimal::from_i64(*i), *fu, *tu)
+                .and_then(|d| d.to_i64())
+                .map(|i| (Scalar::Integer(i), false)))
         }
-        (T::Decimal, T::Integer) => {
+        (T::Integer(fu), T::Decimal(tu)) => {
+            let Scalar::Integer(i) = scalar else {
+                return Ok(None);
+            };
+            Ok(convert_number(Decimal::from_i64(*i), *fu, *tu)
+                .map(|d| (Scalar::Decimal(d), false)))
+        }
+        (T::Decimal(fu), T::Decimal(tu)) => {
             let Scalar::Decimal(d) = scalar else {
                 return Ok(None);
             };
-            Ok(d.to_i64().map(|i| (Scalar::Integer(i), false)))
+            Ok(convert_number(d.clone(), *fu, *tu)
+                .map(|d| (Scalar::Decimal(d), false)))
+        }
+        (T::Decimal(fu), T::Integer(tu)) => {
+            let Scalar::Decimal(d) = scalar else {
+                return Ok(None);
+            };
+            Ok(convert_number(d.clone(), *fu, *tu)
+                .and_then(|d| d.to_i64())
+                .map(|i| (Scalar::Integer(i), false)))
         }
         (T::Date, T::Datetime) => {
             let Scalar::Date(d) = scalar else {
@@ -302,8 +324,10 @@ fn project_scalar(
             }
         }
         (_, T::Text) => ok(Scalar::Text(render_text(scalar)?)),
-        (T::Text, T::Integer) => text(scalar, |s| s.parse().ok().map(Scalar::Integer)),
-        (T::Text, T::Decimal) => {
+        (T::Text, T::Integer(_)) => {
+            text(scalar, |s| s.parse().ok().map(Scalar::Integer))
+        }
+        (T::Text, T::Decimal(_)) => {
             text(scalar, |s| Decimal::parse(s).ok().map(Scalar::Decimal))
         }
         (T::Text, T::Date) => text(scalar, |s| {
@@ -330,6 +354,26 @@ fn project_scalar(
                 .map(|row| (Scalar::Enum(OptionId::new(row.id.as_str())), false)))
         }
         _ => Ok(None),
+    }
+}
+
+/// §2.14: exact unit conversion. Same unit or a pure reinterpretation
+/// (unit added/removed) passes the value through; a within-dimension
+/// change converts on exact rationals or fails; a cross-dimension pair
+/// never gets here (the cast table forbids the column).
+fn convert_number(
+    value: Decimal,
+    from: Option<Unit>,
+    to: Option<Unit>,
+) -> Option<Decimal> {
+    match (from, to) {
+        (None, None) => Some(value),
+        (None, Some(_)) | (Some(_), None) => Some(value),
+        (Some(a), Some(b)) if a == b => Some(value),
+        (Some(a), Some(b)) => {
+            let (num, den) = conversion(a, b)?;
+            value.mul_div_exact(num, den)
+        }
     }
 }
 

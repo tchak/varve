@@ -156,6 +156,46 @@ pub mod primitives {
             i64::try_from(self.mantissa).ok()
         }
 
+        /// Exact `self × num ⁄ den`, or `None` when the result has no
+        /// finite decimal representation (or overflows). The §2.14 unit
+        /// conversion workhorse: exact-or-nothing, never rounds.
+        pub fn mul_div_exact(&self, num: u64, den: u64) -> Option<Decimal> {
+            if den == 0 {
+                return None;
+            }
+            let mut mantissa = self.mantissa.checked_mul(i128::from(num))?;
+            let mut scale = self.scale;
+            let mut den = i128::from(den);
+            let g = gcd(mantissa.unsigned_abs(), den.unsigned_abs());
+            if g > 1 {
+                mantissa /= i128::try_from(g).ok()?;
+                den /= i128::try_from(g).ok()?;
+            }
+            // A finite decimal exists iff the reduced denominator is
+            // 2^a·5^b: clear each factor by scaling the mantissa.
+            while den % 2 == 0 {
+                mantissa = mantissa.checked_mul(5)?;
+                scale += 1;
+                den /= 2;
+            }
+            while den % 5 == 0 {
+                mantissa = mantissa.checked_mul(2)?;
+                scale += 1;
+                den /= 5;
+            }
+            if den != 1 {
+                return None;
+            }
+            while scale > 0 && mantissa % 10 == 0 {
+                mantissa /= 10;
+                scale -= 1;
+            }
+            if mantissa == 0 {
+                scale = 0;
+            }
+            Some(Decimal { mantissa, scale })
+        }
+
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
             let (neg, rest) = match s.strip_prefix('-') {
                 Some(rest) => (true, rest),
@@ -204,6 +244,13 @@ pub mod primitives {
                 write!(f, "{sign}0.{digits:0>scale$}")
             }
         }
+    }
+
+    fn gcd(mut a: u128, mut b: u128) -> u128 {
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a.max(1)
     }
 
     /// A calendar date. Wraps `jiff::civil::Date`; jiff never appears in
@@ -279,6 +326,21 @@ pub mod primitives {
             assert_eq!(Decimal::parse("0.0").unwrap().to_string(), "0");
             assert!(Decimal::parse("1,5").is_err());
             assert!(Decimal::parse("").is_err());
+        }
+
+        #[test]
+        fn mul_div_exact_is_exact_or_nothing() {
+            let d = |s: &str| Decimal::parse(s).unwrap();
+            // 1500 m → km (×1000/1e6)
+            assert_eq!(d("1500").mul_div_exact(1_000, 1_000_000), Some(d("1.5")));
+            // 90 min → h (×1/60)
+            assert_eq!(d("90").mul_div_exact(1, 60), Some(d("1.5")));
+            // 100 min → h: 5/3 has no finite decimal — refused.
+            assert_eq!(d("100").mul_div_exact(1, 60), None);
+            // 2.5 h → min
+            assert_eq!(d("2.5").mul_div_exact(60, 1), Some(d("150")));
+            assert_eq!(d("0").mul_div_exact(1, 60), Some(d("0")));
+            assert_eq!(d("1").mul_div_exact(1, 0), None);
         }
 
         #[test]

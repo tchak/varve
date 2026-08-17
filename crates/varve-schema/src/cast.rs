@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use varve_core::{NomenclatureId, OptionId};
 
-use crate::{Arity, NomenclatureRef, OptionRow, ScalarType};
+use crate::{Arity, NomenclatureRef, OptionRow, ScalarType, Unit};
 
 /// Published nomenclature rows, keyed by identity. Inline nomenclatures
 /// carry their rows in the schema; published ones travel like blocks and
@@ -175,18 +175,38 @@ pub fn scalar_cast(
                 Cast::CHECKED
             }
         }
-        (Integer, Decimal) => Cast::WIDENING,
-        // Exact-or-fail: administrations do not want silent truncation.
-        (Decimal, Integer) => Cast::CHECKED,
+        // Number casts compose the representation rule with the §2.14
+        // unit rule. Exact-or-fail: administrations do not want silent
+        // truncation or rounding.
+        (Integer(fu), Integer(tu)) => number_cast(Cast::IDENTITY, *fu, *tu),
+        (Integer(fu), Decimal(tu)) => number_cast(Cast::WIDENING, *fu, *tu),
+        (Decimal(fu), Decimal(tu)) => number_cast(Cast::IDENTITY, *fu, *tu),
+        (Decimal(fu), Integer(tu)) => number_cast(Cast::CHECKED, *fu, *tu),
         // Injective embedding at midnight UTC; reversible.
         (Date, Datetime) => Cast::WIDENING,
         (Datetime, Date) => Cast::LOSSY,
         (Enum(_), Text) => Cast::WIDENING.with_lens(),
         (a, Text) if widens_to_text(a) => Cast::WIDENING,
         (Text, Enum(_)) => Cast::CHECKED.with_lens(),
-        (Text, Boolean | Integer | Decimal | Date | Datetime) => Cast::CHECKED,
+        (Text, Boolean | Integer(_) | Decimal(_) | Date | Datetime) => Cast::CHECKED,
         _ => Cast::FORBIDDEN,
     })
+}
+
+/// §2.14 unit rule, composed onto the representation cast: same unit
+/// defers to the representation; unit added/removed is a free pure
+/// reinterpretation (but never identity — the impact report must see
+/// it); a change within a dimension is exact-or-fail; a dimension
+/// change is no cast at all.
+fn number_cast(repr: Cast, from: Option<Unit>, to: Option<Unit>) -> Cast {
+    match (from, to) {
+        (a, b) if a == b => repr,
+        (None, Some(_)) | (Some(_), None) => repr.and(Cast::WIDENING),
+        (Some(a), Some(b)) if a.dimension() == b.dimension() => {
+            repr.and(Cast::CHECKED)
+        }
+        _ => Cast::FORBIDDEN,
+    }
 }
 
 /// Arity casts (§3: arity change = cast required). `many → one` is the
@@ -240,7 +260,10 @@ pub fn scalar_join(
         return Ok((a.clone(), JoinPath::Direct));
     }
     match (a, b) {
-        (Integer, Decimal) | (Decimal, Integer) => Ok((Decimal, JoinPath::Direct)),
+        (Integer(a), Integer(b)) => Ok(number_join(false, *a, *b)),
+        (Integer(a), Decimal(b))
+        | (Decimal(a), Integer(b))
+        | (Decimal(a), Decimal(b)) => Ok(number_join(true, *a, *b)),
         (Date, Datetime) | (Datetime, Date) => Ok((Datetime, JoinPath::Direct)),
         (Enum(x), Enum(y)) => enum_join(x, y, nomenclatures),
         (Text, other) | (other, Text) if widens_to_text(other) => {
@@ -306,6 +329,30 @@ fn enum_join(
     }
 }
 
+/// Unit side of the number join: equal units keep; Some beats None (a
+/// united column carries the meaning — the unitless side reaches it by
+/// free reinterpretation); two different units have no upper bound in
+/// the widening order (conversion is checked, not widening), so the
+/// genuine LUB is `Text`, reported `ViaText` (§5.5).
+fn number_join(
+    decimal: bool,
+    a: Option<Unit>,
+    b: Option<Unit>,
+) -> (ScalarType, JoinPath) {
+    let unit = match (a, b) {
+        (None, None) => None,
+        (Some(x), Some(y)) if x == y => Some(x),
+        (Some(u), None) | (None, Some(u)) => Some(u),
+        (Some(_), Some(_)) => return (ScalarType::Text, JoinPath::ViaText),
+    };
+    let ty = if decimal {
+        ScalarType::Decimal(unit)
+    } else {
+        ScalarType::Integer(unit)
+    };
+    (ty, JoinPath::Direct)
+}
+
 /// Arity join: §5.5 "widen to `many` where possible".
 pub fn arity_join(a: Arity, b: Arity) -> Arity {
     if a == Arity::Many || b == Arity::Many {
@@ -353,14 +400,31 @@ mod tests {
         let n = no_noms();
         let cast = |a: &ScalarType, b: &ScalarType| scalar_cast(a, b, &n).unwrap();
         assert_eq!(cast(&Text, &Text).class(), CastClass::Identity);
-        assert_eq!(cast(&Integer, &Decimal).class(), CastClass::Widening);
-        assert_eq!(cast(&Decimal, &Integer).class(), CastClass::Checked);
+        assert_eq!(cast(&Integer(None), &Decimal(None)).class(), CastClass::Widening);
+        assert_eq!(cast(&Decimal(None), &Integer(None)).class(), CastClass::Checked);
         assert_eq!(cast(&Date, &Datetime).class(), CastClass::Widening);
         assert_eq!(cast(&Datetime, &Date).class(), CastClass::Lossy);
-        assert_eq!(cast(&Integer, &Text).class(), CastClass::Widening);
-        assert_eq!(cast(&Text, &Integer).class(), CastClass::Checked);
+        assert_eq!(cast(&Integer(None), &Text).class(), CastClass::Widening);
+        assert_eq!(cast(&Text, &Integer(None)).class(), CastClass::Checked);
         assert_eq!(cast(&Attachment, &Text).class(), CastClass::Forbidden);
         assert_eq!(cast(&Geometry, &Attachment).class(), CastClass::Forbidden);
+
+        // §2.14 unit rows.
+        let m = Integer(Some(Unit::Metre));
+        let km_int = Integer(Some(Unit::Kilometre));
+        let km_dec = Decimal(Some(Unit::Kilometre));
+        let month = Integer(Some(Unit::Month));
+        assert_eq!(cast(&m, &km_int).class(), CastClass::Checked);
+        assert_eq!(cast(&m, &km_dec).class(), CastClass::Checked);
+        // Unit added/removed: free reinterpretation, never identity.
+        assert_eq!(cast(&Integer(None), &m).class(), CastClass::Widening);
+        assert_eq!(cast(&m, &Integer(None)).class(), CastClass::Widening);
+        // Cross-dimension: no cast (days ↔ months included).
+        assert_eq!(cast(&m, &month).class(), CastClass::Forbidden);
+        assert_eq!(
+            cast(&Integer(Some(Unit::Day)), &month).class(),
+            CastClass::Forbidden
+        );
 
         let e = Enum(inline(&[("o1", "Oui")]));
         let to_text = cast(&e, &Text);
@@ -412,8 +476,8 @@ mod tests {
         // Decimal-many → Integer-one: checked (per element) AND lossy
         // (arity) at once — why Cast is properties, not one enum.
         let cast = column_cast(
-            (&Decimal, Arity::Many),
-            (&Integer, Arity::One),
+            (&Decimal(None), Arity::Many),
+            (&Integer(None), Arity::One),
             &n,
         )
         .unwrap();
@@ -426,17 +490,34 @@ mod tests {
         use ScalarType::*;
         let n = no_noms();
         let join = |a: &ScalarType, b: &ScalarType| scalar_join(a, b, &n).unwrap();
-        assert_eq!(join(&Integer, &Decimal), (Decimal, JoinPath::Direct));
+        assert_eq!(join(&Integer(None), &Decimal(None)), (Decimal(None), JoinPath::Direct));
         assert_eq!(join(&Date, &Datetime), (Datetime, JoinPath::Direct));
-        assert_eq!(join(&Integer, &Text), (Text, JoinPath::Direct));
+        assert_eq!(join(&Integer(None), &Text), (Text, JoinPath::Direct));
         // Neither side is text: the LUB is Text but it must be reported.
-        assert_eq!(join(&Integer, &Date), (Text, JoinPath::ViaText));
-        assert_eq!(join(&Boolean, &Integer), (Text, JoinPath::ViaText));
+        assert_eq!(join(&Integer(None), &Date), (Text, JoinPath::ViaText));
+        assert_eq!(join(&Boolean, &Integer(None)), (Text, JoinPath::ViaText));
         assert_eq!(
-            scalar_join(&Attachment, &Integer, &n),
+            scalar_join(&Attachment, &Integer(None), &n),
             Err(JoinConflict::Incompatible)
         );
         assert_eq!(arity_join(Arity::One, Arity::Many), Arity::Many);
+
+        // §2.14 unit joins: Some beats None (free reinterpretation
+        // reaches it); two different units have no upper bound but Text.
+        let day = Integer(Some(Unit::Day));
+        assert_eq!(join(&Integer(None), &day), (day.clone(), JoinPath::Direct));
+        assert_eq!(
+            join(&day, &Decimal(None)),
+            (Decimal(Some(Unit::Day)), JoinPath::Direct)
+        );
+        assert_eq!(
+            join(&day, &Integer(Some(Unit::Week))),
+            (Text, JoinPath::ViaText)
+        );
+        assert_eq!(
+            join(&day, &Integer(Some(Unit::Month))),
+            (Text, JoinPath::ViaText)
+        );
     }
 
     #[test]
@@ -471,8 +552,11 @@ mod tests {
         let samples = [
             Text,
             Boolean,
-            Integer,
-            Decimal,
+            Integer(None),
+            Integer(Some(Unit::Day)),
+            Integer(Some(Unit::Month)),
+            Decimal(None),
+            Decimal(Some(Unit::Metre)),
             Date,
             Datetime,
             Enum(inline(&[("o1", "Oui"), ("o2", "Non")])),

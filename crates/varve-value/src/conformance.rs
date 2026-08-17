@@ -58,8 +58,8 @@ fn scalar_conforms(
     match (scalar, ty) {
         (Scalar::Text(_), ScalarType::Text)
         | (Scalar::Boolean(_), ScalarType::Boolean)
-        | (Scalar::Integer(_), ScalarType::Integer)
-        | (Scalar::Decimal(_), ScalarType::Decimal)
+        | (Scalar::Integer(_), ScalarType::Integer(_))
+        | (Scalar::Decimal(_), ScalarType::Decimal(_))
         | (Scalar::Date(_), ScalarType::Date)
         | (Scalar::Datetime(_), ScalarType::Datetime)
         | (Scalar::Attachment(_), ScalarType::Attachment)

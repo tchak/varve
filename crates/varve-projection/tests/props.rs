@@ -54,7 +54,7 @@ fn mixed_schema() -> Schema {
     Schema {
         root: vec![
             column("t", ScalarType::Text, Arity::One),
-            column("n", ScalarType::Integer, Arity::One),
+            column("n", ScalarType::Integer(None), Arity::One),
             column("choice", ScalarType::Enum(options()), Arity::One),
             column("tags", ScalarType::Enum(options()), Arity::Many),
         ],
@@ -110,8 +110,8 @@ proptest! {
     /// originated narrow: integer → decimal → integer.
     #[test]
     fn integer_decimal_round_trip(n in any::<i64>()) {
-        let int = single("c", ScalarType::Integer);
-        let dec = single("c", ScalarType::Decimal);
+        let int = single("c", ScalarType::Integer(None));
+        let dec = single("c", ScalarType::Decimal(None));
         let mut v = RecordValues::new();
         v.cells.insert(addr("c"), one(Scalar::Integer(n)));
 
@@ -146,7 +146,7 @@ proptest! {
     /// integer → text → integer round-trips through canonical text.
     #[test]
     fn integer_text_round_trip(n in any::<i64>()) {
-        let int = single("c", ScalarType::Integer);
+        let int = single("c", ScalarType::Integer(None));
         let text = single("c", ScalarType::Text);
         let mut v = RecordValues::new();
         v.cells.insert(addr("c"), one(Scalar::Integer(n)));
@@ -162,8 +162,8 @@ proptest! {
     #[test]
     fn decimal_to_integer_never_lies(s in "-?[0-9]{1,15}(\\.[0-9]{1,4})?") {
         let value = Decimal::parse(&s).unwrap();
-        let dec = single("c", ScalarType::Decimal);
-        let int = single("c", ScalarType::Integer);
+        let dec = single("c", ScalarType::Decimal(None));
+        let int = single("c", ScalarType::Integer(None));
         let mut v = RecordValues::new();
         v.cells.insert(addr("c"), one(Scalar::Decimal(value.clone())));
 
