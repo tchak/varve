@@ -1420,6 +1420,13 @@ every feature must appear in the corpus to earn its place.
 - **M2** (`logic`) — **Rule expressibility.** Can every existing conditional and
   routing rule be expressed and type-checked? The residue is either a needed
   language feature or complexity to refuse to carry forward.
+  *Predicate core implemented (`varve-logic`): the §4.1 AST with
+  policy-rejected column-to-column operands, typechecker
+  (conditionability matrix, scope prefix rule, enum membership, unit
+  dimensions), total evaluator with absence-loses semantics and exact
+  rational unit comparison, `sources()`, and the publication-time
+  acyclicity check. Awaiting the §12.5 extraction for falsification;
+  §4.2 computed values and the §4.3 solver are not yet implemented.*
 
 - **M3** (`wire`) — **Round-trip.** The corpus in and out, byte-stable.
 

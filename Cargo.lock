@@ -570,6 +570,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "varve-logic"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "thiserror",
+ "varve-core",
+ "varve-schema",
+ "varve-value",
+]
+
+[[package]]
 name = "varve-projection"
 version = "0.1.0"
 dependencies = [

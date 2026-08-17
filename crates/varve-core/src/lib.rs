@@ -156,6 +156,18 @@ pub mod primitives {
             i64::try_from(self.mantissa).ok()
         }
 
+        /// Magnitude as (integer digits, fraction digits), normalized.
+        fn magnitude(&self) -> (String, String) {
+            let digits = self.mantissa.unsigned_abs().to_string();
+            let scale = self.scale as usize;
+            if digits.len() > scale {
+                let (int, frac) = digits.split_at(digits.len() - scale);
+                (int.to_string(), frac.to_string())
+            } else {
+                ("0".to_string(), format!("{digits:0>scale$}"))
+            }
+        }
+
         /// Exact `self × num ⁄ den`, or `None` when the result has no
         /// finite decimal representation (or overflows). The §2.14 unit
         /// conversion workhorse: exact-or-nothing, never rounds.
@@ -226,6 +238,44 @@ pub mod primitives {
             }
             let scale = if mantissa == 0 { 0 } else { frac.len() as u32 };
             Ok(Self { mantissa, scale })
+        }
+    }
+
+    impl PartialOrd for Decimal {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    /// Total, exact, overflow-free ordering: sign, then integer-part
+    /// length, then digitwise.
+    impl Ord for Decimal {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            use std::cmp::Ordering;
+            let sign = |d: &Decimal| d.mantissa.signum();
+            match sign(self).cmp(&sign(other)) {
+                Ordering::Equal => {}
+                unequal => return unequal,
+            }
+            let (a_int, a_frac) = self.magnitude();
+            let (b_int, b_frac) = other.magnitude();
+            let magnitude = a_int
+                .len()
+                .cmp(&b_int.len())
+                .then_with(|| a_int.cmp(&b_int))
+                .then_with(|| {
+                    let width = a_frac.len().max(b_frac.len());
+                    let mut a = a_frac.clone();
+                    let mut b = b_frac.clone();
+                    a.extend(std::iter::repeat_n('0', width - a_frac.len()));
+                    b.extend(std::iter::repeat_n('0', width - b_frac.len()));
+                    a.cmp(&b)
+                });
+            if self.mantissa < 0 {
+                magnitude.reverse()
+            } else {
+                magnitude
+            }
         }
     }
 

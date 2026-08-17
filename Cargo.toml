@@ -4,6 +4,7 @@ members = [
     "crates/varve-schema",
     "crates/varve-value",
     "crates/varve-record",
+    "crates/varve-logic",
     "crates/varve-projection",
     "crates/varve-impact",
     "tools/m0",
