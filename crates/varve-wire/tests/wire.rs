@@ -348,6 +348,11 @@ fn reader_refuses_the_alternative_blank_encodings() {
     };
     let ok = with(r#""tags":null"#);
     assert!(read_stream(&ok).is_ok());
+    // Two values for one key: a JCS serializer never emits that, and a
+    // stream is authoritative for each cell once — malformed, never
+    // last-wins.
+    let dup = with(r#""tags":null,"tags":{"text":"x"}"#);
+    assert!(matches!(read_stream(&dup), Err(ReadError::Malformed { line: 2, .. })));
     let empty_many = with(r#""tags":[]"#);
     assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 2, .. })));
     // The old wrapped shapes are not the encoding.

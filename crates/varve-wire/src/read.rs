@@ -55,10 +55,15 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
         if raw.trim().is_empty() {
             continue;
         }
-        let json: serde_json::Value =
-            serde_json::from_str(raw).map_err(|_| ReadError::Json { line: line_no })?;
-        let value = to_canonical(&json);
         let malformed = |reason: String| ReadError::Malformed { line: line_no, reason };
+        let value = match serde_json::from_str::<JsonLine>(raw) {
+            Ok(JsonLine(v)) => v,
+            Err(e) if e.classify() == serde_json::error::Category::Data => {
+                // Well-formed JSON the visitor refused: a duplicate key.
+                return Err(malformed(e.to_string()));
+            }
+            Err(_) => return Err(ReadError::Json { line: line_no }),
+        };
 
         let map = match &value {
             CanonicalValue::Object(m) => m,
@@ -192,27 +197,77 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
 
 type Obj = BTreeMap<String, CanonicalValue>;
 
-/// JSON tree → canonical value, under JCS number semantics: every JSON
-/// number denotes a double. An integer literal within ±(2^53 − 1) is an
-/// `Int` (structural counts); anything else — fractional, exponent, or
-/// an integer literal too large for exact representation (ES6 renders
-/// doubles below 1e21 without an exponent, so `5752289928800135000` is
-/// a legitimate coordinate) — is the `Float` it denotes. Decoders that
-/// expect a count reject a `Float`, so no unsafe integer ever reaches
-/// a hash; exact integers travel as strings.
-fn to_canonical(v: &serde_json::Value) -> CanonicalValue {
-    match v {
-        serde_json::Value::Null => CanonicalValue::Null,
-        serde_json::Value::Bool(b) => CanonicalValue::Bool(*b),
-        serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 => CanonicalValue::Int(i),
-            _ => CanonicalValue::Float(n.as_f64().expect("JSON numbers are finite")),
-        },
-        serde_json::Value::String(s) => CanonicalValue::String(s.clone()),
-        serde_json::Value::Array(a) => CanonicalValue::Array(a.iter().map(to_canonical).collect()),
-        serde_json::Value::Object(o) => CanonicalValue::Object(
-            o.iter().map(|(k, v)| (k.clone(), to_canonical(v))).collect(),
-        ),
+/// A JSON line parsed straight into a canonical value, under JCS number
+/// semantics: every JSON number denotes a double. An integer literal
+/// within ±(2^53 − 1) is an `Int` (structural counts); anything else —
+/// fractional, exponent, or an integer literal too large for exact
+/// representation (ES6 renders doubles below 1e21 without an exponent,
+/// so `5752289928800135000` is a legitimate coordinate) — is the
+/// `Float` it denotes. Decoders that expect a count reject a `Float`,
+/// so no unsafe integer ever reaches a hash; exact integers travel as
+/// strings. **Duplicate object keys are refused**: a JCS serializer
+/// never emits them, so a line carrying two values for one key is
+/// malformed — never last-wins.
+struct JsonLine(CanonicalValue);
+
+impl<'de> serde::Deserialize<'de> for JsonLine {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        d.deserialize_any(JsonVisitor).map(JsonLine)
+    }
+}
+
+struct JsonVisitor;
+
+impl<'de> serde::de::Visitor<'de> for JsonVisitor {
+    type Value = CanonicalValue;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("a JSON value")
+    }
+    fn visit_unit<E>(self) -> Result<CanonicalValue, E> {
+        Ok(CanonicalValue::Null)
+    }
+    fn visit_bool<E>(self, b: bool) -> Result<CanonicalValue, E> {
+        Ok(CanonicalValue::Bool(b))
+    }
+    fn visit_i64<E>(self, i: i64) -> Result<CanonicalValue, E> {
+        Ok(if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {
+            CanonicalValue::Int(i)
+        } else {
+            CanonicalValue::Float(i as f64)
+        })
+    }
+    fn visit_u64<E>(self, u: u64) -> Result<CanonicalValue, E> {
+        Ok(if u <= MAX_SAFE_INTEGER as u64 {
+            CanonicalValue::Int(u as i64)
+        } else {
+            CanonicalValue::Float(u as f64)
+        })
+    }
+    fn visit_f64<E>(self, f: f64) -> Result<CanonicalValue, E> {
+        Ok(CanonicalValue::Float(f))
+    }
+    fn visit_str<E>(self, s: &str) -> Result<CanonicalValue, E> {
+        Ok(CanonicalValue::String(s.to_string()))
+    }
+    fn visit_string<E>(self, s: String) -> Result<CanonicalValue, E> {
+        Ok(CanonicalValue::String(s))
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<CanonicalValue, A::Error> {
+        let mut items = Vec::new();
+        while let Some(JsonLine(v)) = seq.next_element()? {
+            items.push(v);
+        }
+        Ok(CanonicalValue::Array(items))
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<CanonicalValue, A::Error> {
+        let mut out = BTreeMap::new();
+        while let Some((key, JsonLine(v))) = map.next_entry::<String, JsonLine>()? {
+            if out.insert(key.clone(), v).is_some() {
+                return Err(serde::de::Error::custom(format!("duplicate key '{key}'")));
+            }
+        }
+        Ok(CanonicalValue::Object(out))
     }
 }
 

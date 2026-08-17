@@ -1,0 +1,3 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":1,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"blank":null,"n":{"integer":"42"},"t":{"text":"xTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"},"gjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjats":[{"option":"a"}]},"id":"r1","k":"record","lens":"lens"}
+{"cells":{"c":{"boolean":true}},"group":"g","id":"i1","k":"item","ord":0,"parent":[],"record":"r1"}

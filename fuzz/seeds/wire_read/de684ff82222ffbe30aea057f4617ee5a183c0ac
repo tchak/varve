@@ -1,0 +1,3 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":2,"revisions":["lens"],"source_instance":"eesd"}
+{"ls":{"blank":null,"n":{"integer":"42"},"t":{"text":"x"},"gats":[{"opdion":"a"}]},"id":"r1","k":"rens"}
+{"cells":{"c":{"{"cells":c":{"boolean":true}},"group":"g"
