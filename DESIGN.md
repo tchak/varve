@@ -264,8 +264,9 @@ sources (commune, pays, département…) collapse further, into nomenclatures
 
 ### Retain the payload, not just the cells
 
-Keep the raw response, content-addressed, keyed by
-`(resolver, resolver_version, input_key, fetched_at)`.
+Keep the raw response, content-addressed — a blob under its plain hash
+(§2.13, §2.15) — with `(resolver, resolver_version, input_key,
+fetched_at)` as the platform-side index over it.
 
 - Mappings change — v2 extracts a field v1 ignored. **Re-map without re-fetch**,
   across a whole table, is only possible if the payload was retained.
@@ -706,14 +707,23 @@ hierarchy), `registry` (promises mutability and a central authority).
 
 Settled design for `varve-core::canonical`. Eight decisions:
 
-1. **Two hashing regimes.** Schema-side objects (revisions, blocks,
-   nomenclatures, resolver declarations) hash **plain**: no salts, so
-   identical schemas converge on identical ids on every instance — the
-   point of content addressing. Record-side objects (entries, snapshots)
+1. **Two hashing regimes — and blobs.** Schema-side objects (revisions,
+   blocks, nomenclatures, resolver declarations) hash **plain**: no
+   salts, so identical schemas converge on identical ids on every
+   instance — the point of content addressing. Record-side **entries**
    carry personal data and hash as **salted commitments** (§2.10): never
    plaintext. Salting schema hashes would silently destroy cross-instance
-   schema identity; not salting record hashes would make low-entropy
-   fields brute-forceable after erasure.
+   schema identity; not salting entry hashes would make low-entropy
+   fields brute-forceable after erasure. **Blobs — attachments and
+   resolver payload snapshots alike — hash plain** (§2.15): dedup across
+   records is the blob store's purpose (§2.10, "the same INSEE payload
+   for one SIRET"), and salting would give every fetch of identical bytes
+   a distinct address. The two regimes compose: a blob's plain address is
+   referenced from *inside* an entry's salted content (`snapshot_ref` in
+   a `derived` origin, attachment elements in cells), so the chain never
+   discloses which blob a record holds, while the store dedups. *(An
+   earlier wording listed snapshots among the salted objects,
+   contradicting §2.10 and §2.15; corrected 2026-08-17.)*
 2. **Canonical form is JCS (RFC 8785)** over wire-shaped JSON values. One
    encoding family for wire and hashing; hash the canonical bytes, never
    the emitted line (§5).
