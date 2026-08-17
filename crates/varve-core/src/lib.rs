@@ -347,17 +347,77 @@ pub mod primitives {
     pub struct Instant(jiff::Timestamp);
 
     impl Instant {
+        /// Strict RFC 3339: `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`,
+        /// uppercase `T`/`Z`, seconds mandatory, no leap second (`:60`
+        /// has no normalized form), no time-zone annotation, and the
+        /// same year range as `Date` (0000–9999) — so a datetime always
+        /// narrows to a date (§3) and never leaves the four-digit year
+        /// the canonical form pins (§2.13). jiff's own parser is more
+        /// liberal (space separators, lowercase, `[Europe/Paris]`
+        /// annotations); those are one instant with several spellings,
+        /// which a strict decoder must refuse.
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
-            s.parse()
-                .map(Self)
-                .map_err(|_| PrimitiveError::Malformed("expected RFC 3339 instant"))
+            const ERR: PrimitiveError = PrimitiveError::Malformed("expected RFC 3339 instant");
+            let b = s.as_bytes();
+            let digits = |range: std::ops::Range<usize>| {
+                b.get(range).is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+            };
+            // Date + 'T' + HH:MM:SS.
+            let ok = b.len() >= 20
+                && digits(0..4)
+                && b[4] == b'-'
+                && digits(5..7)
+                && b[7] == b'-'
+                && digits(8..10)
+                && b[10] == b'T'
+                && digits(11..13)
+                && b[13] == b':'
+                && digits(14..16)
+                && b[16] == b':'
+                && digits(17..19)
+                && &b[17..19] != b"60";
+            if !ok {
+                return Err(ERR);
+            }
+            let mut i = 19;
+            if b[i] == b'.' {
+                let start = i + 1;
+                while i + 1 < b.len() && b[i + 1].is_ascii_digit() {
+                    i += 1;
+                }
+                if i + 1 == start {
+                    return Err(ERR); // a bare '.'
+                }
+                i += 1;
+            }
+            let offset_ok = match b.get(i) {
+                Some(b'Z') => i + 1 == b.len(),
+                Some(b'+' | b'-') => {
+                    i + 6 == b.len() && digits(i + 1..i + 3) && b[i + 3] == b':' && digits(i + 4..i + 6)
+                }
+                _ => false,
+            };
+            if !offset_ok {
+                return Err(ERR);
+            }
+            let ts: jiff::Timestamp = s.parse().map_err(|_| ERR)?;
+            let instant = Self(ts);
+            // Normalizing to UTC can carry a date past 9999 or before
+            // 0000 (an offset near the range's edge): refuse it, the
+            // canonical form has no rendering for it.
+            let rendered = instant.to_string();
+            if rendered.len() < 10 || !rendered.as_bytes()[..4].iter().all(u8::is_ascii_digit) {
+                return Err(ERR);
+            }
+            Ok(instant)
         }
 
         /// The lossy datetime→date cast (§3): the UTC calendar date.
-        /// Display is normalized UTC RFC 3339, so the first ten
-        /// characters are exactly the date.
+        /// Display is normalized UTC RFC 3339 with a four-digit year
+        /// (guaranteed by `parse`), so the first ten characters are
+        /// exactly the date.
         pub fn utc_date(&self) -> Date {
-            Date::parse(&self.to_string()[..10]).expect("normalized display")
+            Date::parse(&self.to_string()[..10]).expect("four-digit year guaranteed by parse")
         }
     }
 
@@ -415,6 +475,33 @@ pub mod primitives {
             assert_eq!(offset.to_string(), "2026-08-16T12:00:00Z");
             assert!(Instant::parse("2026-08-16T12:00:00.123+02:00").is_ok());
             assert!(Instant::parse("2026-08-16T24:00:00Z").is_err());
+        }
+
+        #[test]
+        fn instant_parse_is_strict_rfc_3339_within_the_date_year_range() {
+            // One instant, one spelling: the liberal forms jiff accepts
+            // are refused, so a decoder cannot be fed two texts for one
+            // value.
+            for liberal in [
+                "2026-08-16 12:00:00Z",       // space separator
+                "2026-08-16t12:00:00z",       // lowercase
+                "2026-08-16T12:00Z",          // no seconds
+                "2026-08-16T12:00:00,5Z",     // comma fraction
+                "2026-08-16T12:00:00.Z",      // bare dot
+                "2026-08-16T12:00:00+02:00[Europe/Paris]",
+                "2026-08-16T23:59:60Z",       // leap second: no normalized form
+                "2026-08-16T12:00:00+0200",   // offset without colon
+                "-000001-06-01T00:00:00Z",    // signed six-digit year
+                "+012026-08-16T12:00:00Z",
+                "9999-12-31T23:00:00-02:00",  // normalizes past 9999
+            ] {
+                assert!(Instant::parse(liberal).is_err(), "{liberal} should be refused");
+            }
+            for strict in ["2026-08-16T12:00:00Z", "0000-01-01T00:00:00Z", "9999-12-30T12:00:00.5Z"] {
+                let i = Instant::parse(strict).unwrap();
+                // Never panics, always the first ten characters.
+                assert_eq!(i.utc_date().to_string(), &strict[..10]);
+            }
         }
     }
 }
