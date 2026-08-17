@@ -10,11 +10,13 @@
 #![forbid(unsafe_code)]
 
 mod admissibility;
+mod block;
 mod format;
 mod reach;
 mod validate;
 
 pub use admissibility::{AdmissibilityReport, Finding, admissibility};
+pub use block::{Block, BlockError, IncludeError, included_blocks};
 pub use format::Format;
 pub use reach::{Reachability, reachability};
 pub use validate::{SurfaceError, validate};
