@@ -16,7 +16,7 @@ use varve_core::{ColumnId, OptionId, ResolverId};
 use varve_projection::project;
 use varve_schema::{
     Cast, CastClass, CastError, NomenclatureTable, ResolverDeclaration,
-    ScalarType, Schema, SchemaIndex, column_cast, nomenclature_rows,
+    ScalarType, Schema, SchemaIndex, Unit, column_cast, nomenclature_rows,
 };
 use varve_value::RecordValues;
 
@@ -57,6 +57,17 @@ pub struct ColumnImpact {
     /// For enum transitions that drop options (§2.11): exactly which
     /// ids — the records holding them are the ones that will fail.
     pub removed_options: Vec<OptionId>,
+    /// For number transitions whose unit changed (§2.14): named
+    /// explicitly, because a unit added or removed is a *semantic*
+    /// change even when the cast is free — values unchanged, meaning
+    /// changed — and the report must say so.
+    pub unit_change: Option<UnitChange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitChange {
+    pub from: Option<Unit>,
+    pub to: Option<Unit>,
 }
 
 /// The §2.8 impact questions, answered per resolver.
@@ -125,11 +136,13 @@ pub fn classify(
                 change: ColumnChange::Removed,
                 class: ChangeClass::Safe,
                 removed_options: vec![],
+                unit_change: None,
             },
             Some(tinfo) if finfo.scope != tinfo.scope => ColumnImpact {
                 change: ColumnChange::ScopeMoved,
                 class: ChangeClass::Breaking,
                 removed_options: vec![],
+                unit_change: None,
             },
             Some(tinfo) => {
                 let cast = column_cast(
@@ -139,31 +152,37 @@ pub fn classify(
                 )?;
                 let removed_options =
                     removed_options(&finfo.ty, &tinfo.ty, nomenclatures)?;
+                let unit_change = unit_change(&finfo.ty, &tinfo.ty);
                 match cast.class() {
                     CastClass::Identity => ColumnImpact {
                         change: ColumnChange::Identical,
                         class: ChangeClass::Safe,
                         removed_options,
+                        unit_change,
                     },
                     CastClass::Forbidden => ColumnImpact {
                         change: ColumnChange::Forbidden,
                         class: ChangeClass::Breaking,
                         removed_options,
+                        unit_change,
                     },
                     CastClass::Widening => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Safe,
                         removed_options,
+                        unit_change,
                     },
                     CastClass::Lossy => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Lossy,
                         removed_options,
+                        unit_change,
                     },
                     CastClass::Checked => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Checked,
                         removed_options,
+                        unit_change,
                     },
                 }
             }
@@ -178,6 +197,7 @@ pub fn classify(
                     change: ColumnChange::Added,
                     class: ChangeClass::Safe,
                     removed_options: vec![],
+                    unit_change: None,
                 },
             );
         }
@@ -223,6 +243,18 @@ pub fn assess<'a>(
     }
     report.records = Some(assessment);
     Ok(report)
+}
+
+/// §2.14: name the unit transition whenever both sides are numbers and
+/// the units differ — including add/remove, where the cast is free but
+/// the meaning changed.
+fn unit_change(from: &ScalarType, to: &ScalarType) -> Option<UnitChange> {
+    let unit_of = |ty: &ScalarType| match ty {
+        ScalarType::Integer(u) | ScalarType::Decimal(u) => Some(*u),
+        _ => None,
+    };
+    let (from, to) = (unit_of(from)?, unit_of(to)?);
+    (from != to).then_some(UnitChange { from, to })
 }
 
 fn removed_options(

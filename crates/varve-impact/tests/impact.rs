@@ -119,6 +119,48 @@ fn enum_option_removal_is_named_precisely() {
 }
 
 #[test]
+fn unit_changes_are_named_in_the_report() {
+    use varve_impact::UnitChange;
+    use varve_schema::Unit;
+    let int = |u: Option<Unit>| schema(vec![column("n", ScalarType::Integer(u), Arity::One)]);
+
+    // Unit added: cast is free, but the report names the semantic change.
+    let report = classify(&int(None), &int(Some(Unit::Day)), &Default::default()).unwrap();
+    let impact = &report.columns[&ColumnId::new("n")];
+    assert_eq!(impact.class, ChangeClass::Safe);
+    assert_eq!(
+        impact.unit_change,
+        Some(UnitChange { from: None, to: Some(Unit::Day) })
+    );
+
+    // Within a dimension: checked, named.
+    let report = classify(
+        &int(Some(Unit::Metre)),
+        &int(Some(Unit::Kilometre)),
+        &Default::default(),
+    )
+    .unwrap();
+    let impact = &report.columns[&ColumnId::new("n")];
+    assert_eq!(impact.class, ChangeClass::Checked);
+    assert!(impact.unit_change.is_some());
+
+    // Across dimensions: breaking, named.
+    let report = classify(
+        &int(Some(Unit::Day)),
+        &int(Some(Unit::Month)),
+        &Default::default(),
+    )
+    .unwrap();
+    let impact = &report.columns[&ColumnId::new("n")];
+    assert_eq!(impact.class, ChangeClass::Breaking);
+    assert!(impact.unit_change.is_some());
+
+    // No unit anywhere: no noise.
+    let report = classify(&int(None), &int(None), &Default::default()).unwrap();
+    assert_eq!(report.columns[&ColumnId::new("n")].unit_change, None);
+}
+
+#[test]
 fn resolver_impact_questions() {
     let decl = |id: &str, version: u32, target: &str| ResolverDeclaration {
         id: ResolverId::new(id),
