@@ -730,6 +730,66 @@ Settled design for `varve-core::canonical`. Eight decisions:
    writes direct identifiers into actor ids has broken the contract, and
    only whole-record erasure recovers it.
 
+## 2.14 Units on numbers (settled from standing demand)
+
+A long-wanted DN feature: an **optional unit** on integer/decimal
+columns, with casting across compatible units. Plain numbers stay
+plain.
+
+**Units are a closed kernel set with exact rational ratios** — the cast
+table is kernel semantics, so ratios cannot be user data. The pragmatic
+v1 list, by dimension:
+
+| dimension | units (exact ratios) |
+|---|---|
+| length | mm, cm, m, km |
+| mass | g, kg, t |
+| duration (exact) | minute, hour, day, week (60 / 24 / 7) |
+| duration (calendar) | month, year (12) |
+| area | m², ha, km² |
+| volume | L, m³ (1000) |
+| percent | % (own dimension, no conversions) |
+
+- **Calendar time is deliberately its own dimension**: days ↔ months has
+  no exact ratio, and the kernel refuses the conversion rather than
+  invent a 30. Candidates pending corpus/demand: kWh, kW (energy
+  renovation forms). Extension path as ever: closed set now, additions
+  are new table rows, never user-defined ratios.
+- **Casts** (§3 rows): same dimension → **exact-or-fail on the target
+  representation** (rational conversion; 1500 m → 1.5 km fails into an
+  integer column, succeeds into decimal — the no-silent-rounding
+  precedent). Cross-dimension → forbidden. Unit added to or removed
+  from an existing column → values unchanged, a pure reinterpretation —
+  free, but **reported** by the impact report as a semantic change.
+- **Logic** (§4.1): constants carry units; the typechecker requires
+  dimension match; comparisons across compatible units are computed on
+  **exact rationals**, never through decimal rounding — so they are
+  total and exact even where a storage cast would fail (100 min vs
+  hours compares exactly; it just can't be *stored* as a finite decimal
+  of hours).
+- **Duration is not a scalar either — the demand decomposes.** The
+  value model is number-with-duration-unit; the "duration picker" is a
+  **surface widget** over it, free to accept mixed granularity *within
+  one dimension* (2 h 30 min → 150 min; 3 weeks 2 days → 23 days —
+  exact normalization) and refused across dimensions, same rule as
+  casts. A dedicated duration type's distinctive power is mixing
+  components (`P1M15D`) — and that is exactly the poison: mixed
+  calendar/exact durations are not totally ordered (jiff refuses to
+  compare such spans without an anchor date), which would break the
+  logic language's total exact comparison and smuggle the days↔months
+  fiction back in through the value side. Future date arithmetic in
+  computed values (`date + 6 months`) takes a number-with-unit operand
+  via calendar arithmetic — well-defined even though month lengths
+  vary — still no duration scalar. Jiff's ISO 8601 duration support
+  exists if a wire rendering is ever wanted.
+- **Currency is not a unit — agreed, and on principle**: unit ratios
+  are facts of *definition* (timeless, exact, kernel-pure); exchange
+  rates are facts of *the world* (dated, sourced) — and the kernel
+  never fetches (§2.7), so currency conversion structurally cannot be
+  a cast. Money, if demanded, is a **separate scalar**: exact decimal +
+  currency code (nomenclature-backed), per-currency scale rules, and no
+  cross-currency casts ever.
+
 ## 3. Change classification
 
 Because column IDs are stable, **cells are revision-agnostic; only their
@@ -746,6 +806,9 @@ interpretation is revision-dependent.**
 | enum option label edited | free (§2.11) |
 | enum option added | free |
 | enum option removed | flagged — id retained with `deprecated_since`; impact report counts records holding it |
+| unit changed within a dimension | checked — exact-or-fail on the target representation (§2.14) |
+| unit added or removed | free — pure reinterpretation, reported as a semantic change |
+| unit dimension changed | breaking |
 
 > **Correction, found via §5.5.** "Column moved" is only free when `row_path` is
 > unchanged — i.e. between two `one` groups. Moving into or out of a `many`
@@ -884,7 +947,7 @@ type, v1 allows:
 
 | type | atoms |
 |---|---|
-| boolean, number (int/decimal via widening), **date, datetime** | full comparisons |
+| boolean, number (int/decimal via widening; unit-aware on exact rationals, §2.14), **date, datetime** | full comparisons |
 | enum | `eq`/`not_eq` on option ids (statically checked, §2.12), field projections |
 | enum arity `many` | `contains`/`excludes` |
 | **text** | **presence only** (`is_empty`/`is_filled`) |
