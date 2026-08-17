@@ -257,6 +257,43 @@ impl RecordLog {
         conflicts
     }
 
+    /// §2.15 GC roots: every blob this record's *entire log* references —
+    /// attachment cells in every entry (including superseded values) and
+    /// resolver-payload snapshots in origins. The kernel enumerates
+    /// roots; the Tier 5 store sweeps. Erasure must cover history, so
+    /// this walks the log, not the fold.
+    pub fn referenced_blobs(&self) -> std::collections::BTreeSet<
+        varve_core::canonical::ContentHash,
+    > {
+        use varve_value::{CellValue as V, Scalar};
+        let mut blobs = std::collections::BTreeSet::new();
+        for entry in &self.entries {
+            match &entry.content.origin {
+                crate::Origin::Derived(d)
+                | crate::Origin::Overridden { superseded: Some(d) } => {
+                    blobs.insert(d.snapshot_ref);
+                }
+                _ => {}
+            }
+            for op in &entry.content.ops {
+                if let Op::Set { state, .. } = op
+                    && let varve_value::CellState::Value(value) = state
+                {
+                    let scalars: Vec<&Scalar> = match value {
+                        V::One(s) => vec![s],
+                        V::Many(list) => list.iter().collect(),
+                    };
+                    for scalar in scalars {
+                        if let Scalar::Attachment(a) = scalar {
+                            blobs.insert(a.hash);
+                        }
+                    }
+                }
+            }
+        }
+        blobs
+    }
+
     /// Snapshot at a log point, pinned to the hash of the last entry it
     /// folds — verifiable by refolding (§2.9).
     pub fn snapshot_at(&self, upto: u64) -> Result<Snapshot, SnapshotError> {

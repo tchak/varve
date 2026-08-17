@@ -323,6 +323,18 @@ fn project_scalar(
                 None => Ok(None),
             }
         }
+        // §2.15: constraint changes re-check the claims; a file the
+        // narrowed constraints reject fails the cell, counted.
+        (T::Attachment(_), T::Attachment(to)) => {
+            let Scalar::Attachment(a) = scalar else {
+                return Ok(None);
+            };
+            if to.accepts(&a.content_type) && to.admits_size(a.byte_size) {
+                ok(scalar.clone())
+            } else {
+                Ok(None)
+            }
+        }
         (_, T::Text) => ok(Scalar::Text(render_text(scalar)?)),
         (T::Text, T::Integer(_)) => {
             text(scalar, |s| s.parse().ok().map(Scalar::Integer))

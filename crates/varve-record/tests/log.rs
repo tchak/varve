@@ -196,6 +196,70 @@ fn snapshots_verify_and_detect_tampering() {
 }
 
 #[test]
+fn referenced_blobs_cover_history_and_snapshots() {
+    use varve_core::canonical::{CanonicalValue, hash_plain};
+    use varve_value::AttachmentRef;
+    let blob = |s: &str| hash_plain(&CanonicalValue::String(s.into())).unwrap();
+    let file = |name: &str, content: &str| {
+        Op::Set {
+            column: ColumnId::new("piece"),
+            path: RowPath::root(),
+            state: CellState::Value(CellValue::Many(vec![Scalar::Attachment(
+                AttachmentRef {
+                    id: name.into(),
+                    hash: blob(content),
+                    filename: format!("{name}.pdf"),
+                    content_type: "application/pdf".into(),
+                    byte_size: 10,
+                },
+            )])),
+        }
+    };
+    let mut log = RecordLog::new();
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![file("f1", "v1")]))
+        .unwrap();
+    // The file is replaced — the superseded blob must STILL be a root:
+    // erasure covers history, so GC must not collect what the log
+    // references.
+    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![file("f1", "v2")]))
+        .unwrap();
+    // A derived write carries a snapshot ref.
+    log.append(draft(
+        resolver_actor(),
+        2,
+        2,
+        Origin::Derived(derivation()),
+        vec![set("raison_sociale", "ACME")],
+    ))
+    .unwrap();
+
+    let blobs = log.referenced_blobs();
+    assert!(blobs.contains(&blob("v1")));
+    assert!(blobs.contains(&blob("v2")));
+    assert!(blobs.contains(&derivation().snapshot_ref));
+    assert_eq!(blobs.len(), 3);
+}
+
+#[test]
+fn scan_lifecycle() {
+    use varve_record::{Scan, ScanStatus, pending_scans};
+    let mut scan = Scan {
+        element: "f1".into(),
+        hash: varve_record::genesis_hash(),
+        status: ScanStatus::Pending,
+        attempts: 0,
+    };
+    assert_eq!(pending_scans(std::slice::from_ref(&scan)).len(), 1);
+    scan.transition(ScanStatus::Failed).unwrap();
+    scan.transition(ScanStatus::Pending).unwrap();
+    assert_eq!(scan.attempts, 1);
+    scan.transition(ScanStatus::Clean).unwrap();
+    // Terminal: no rescanning a clean verdict into anything else.
+    assert!(scan.transition(ScanStatus::Pending).is_err());
+    assert!(scan.transition(ScanStatus::Infected).is_err());
+}
+
+#[test]
 fn resolution_lifecycle() {
     let mut resolution = Resolution {
         resolver: ResolverId::new("insee-sirene"),

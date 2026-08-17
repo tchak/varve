@@ -86,7 +86,23 @@ fn scalar_type(ty: &ScalarType) -> CanonicalValue {
         ScalarType::Boolean => simple("boolean"),
         ScalarType::Date => simple("date"),
         ScalarType::Datetime => simple("datetime"),
-        ScalarType::Attachment => simple("attachment"),
+        // §2.15: constraints are identity-bearing — narrowing the
+        // accept set is a revision.
+        ScalarType::Attachment(constraints) => {
+            let mut pairs = vec![("kind", string("attachment"))];
+            if !constraints.accept.is_empty() {
+                pairs.push((
+                    "accept",
+                    CanonicalValue::Array(
+                        constraints.accept.iter().map(string).collect(),
+                    ),
+                ));
+            }
+            if let Some(max) = constraints.max_bytes {
+                pairs.push(("max_bytes", CanonicalValue::Int(max as i64)));
+            }
+            obj(pairs)
+        }
         ScalarType::Geometry => simple("geometry"),
         ScalarType::Integer(unit) | ScalarType::Decimal(unit) => {
             let kind = if matches!(ty, ScalarType::Integer(_)) {

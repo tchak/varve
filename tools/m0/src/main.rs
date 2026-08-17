@@ -272,7 +272,11 @@ impl<'a> Converter<'a> {
             }
 
             "PieceJustificativeChampDescriptor" => {
-                out.push(self.column(label, ScalarType::Attachment, Arity::Many));
+                out.push(self.column(
+                    label,
+                    ScalarType::Attachment(Default::default()),
+                    Arity::Many,
+                ));
             }
 
             "CarteChampDescriptor" => {

@@ -46,6 +46,12 @@ pub enum ConformanceError {
     MisplacedItems(GroupId),
     #[error("duplicate item in group '{0}'")]
     DuplicateItem(GroupId),
+    /// §2.15: the cell's claimed content type violates the column's
+    /// accept set.
+    #[error("column '{0}': content type '{1}' is not accepted")]
+    AttachmentTypeNotAccepted(ColumnId, String),
+    #[error("column '{0}': file exceeds the size limit")]
+    AttachmentTooLarge(ColumnId),
 }
 
 fn scalar_conforms(
@@ -62,8 +68,21 @@ fn scalar_conforms(
         | (Scalar::Decimal(_), ScalarType::Decimal(_))
         | (Scalar::Date(_), ScalarType::Date)
         | (Scalar::Datetime(_), ScalarType::Datetime)
-        | (Scalar::Attachment(_), ScalarType::Attachment)
         | (Scalar::Geometry(_), ScalarType::Geometry) => {}
+        // §2.15: check the claims (type, size) against the schema
+        // constraints — zero IO; the Tier 5 store verifies claims
+        // against bytes at ingest.
+        (Scalar::Attachment(a), ScalarType::Attachment(constraints)) => {
+            if !constraints.accepts(&a.content_type) {
+                errors.push(ConformanceError::AttachmentTypeNotAccepted(
+                    column.clone(),
+                    a.content_type.clone(),
+                ));
+            }
+            if !constraints.admits_size(a.byte_size) {
+                errors.push(ConformanceError::AttachmentTooLarge(column.clone()));
+            }
+        }
         (Scalar::Enum(option), ScalarType::Enum(nref)) => {
             let rows: Option<&[OptionRow]> = match nref {
                 NomenclatureRef::Inline(rows) => Some(rows),

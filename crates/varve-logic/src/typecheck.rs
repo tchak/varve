@@ -173,7 +173,7 @@ fn check_comparison(
         }
         (
             ScalarType::Text
-            | ScalarType::Attachment
+            | ScalarType::Attachment(_)
             | ScalarType::Geometry
             | ScalarType::Enum(_),
             _,

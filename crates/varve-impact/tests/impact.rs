@@ -51,7 +51,7 @@ fn classification_covers_the_section_3_table() {
         column("widened", ScalarType::Integer(None), Arity::One),
         column("narrowed", ScalarType::Decimal(None), Arity::One),
         column("truncated", ScalarType::Datetime, Arity::One),
-        column("broken", ScalarType::Attachment, Arity::Many),
+        column("broken", ScalarType::Attachment(Default::default()), Arity::Many),
         column("moved", ScalarType::Text, Arity::One),
     ]);
     let to = schema(vec![

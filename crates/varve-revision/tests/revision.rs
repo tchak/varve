@@ -172,7 +172,7 @@ fn aggregate_joins_history_and_reports() {
         column("b", ScalarType::Integer(None)),
         column("dropped", ScalarType::Text),
         column("clash", ScalarType::Boolean),
-        column("broken", ScalarType::Attachment),
+        column("broken", ScalarType::Attachment(Default::default())),
     ]);
     let rev2 = schema(vec![
         column("clash", ScalarType::Date),

@@ -53,8 +53,9 @@ pub enum ScalarType {
     Datetime,
     /// Every enum is nomenclature-backed (§2.12).
     Enum(NomenclatureRef),
-    /// One file; multi-file is arity `many` (§2.2).
-    Attachment,
+    /// One file; multi-file is arity `many` (§2.2). Constraints are
+    /// representability (§2.15): a "photo" column *is* an image column.
+    Attachment(AttachmentConstraints),
     /// One GeoJSON Feature; feature sets are arity `many`. A
     /// FeatureCollection is a render shape, not a kernel value.
     Geometry,
@@ -66,6 +67,61 @@ impl ScalarType {
     /// compatibility relation is the cast table (M1).
     pub fn same_constructor(&self, other: &ScalarType) -> bool {
         std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+/// §2.15 schema-level attachment restrictions. The kernel checks the
+/// cell's *claims* (content type, byte size) with zero IO; the Tier 5
+/// store verifies claims against bytes at ingest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttachmentConstraints {
+    /// IANA media-type patterns: exact (`application/pdf`) or wildcard
+    /// subtype (`image/*`). **Empty = unrestricted** — plain
+    /// attachments stay plain.
+    pub accept: Vec<String>,
+    /// Per-file limit; `None` = unlimited.
+    pub max_bytes: Option<u64>,
+}
+
+impl AttachmentConstraints {
+    pub fn accepts(&self, content_type: &str) -> bool {
+        self.accept.is_empty()
+            || self.accept.iter().any(|pattern| pattern_covers(pattern, content_type))
+    }
+
+    pub fn admits_size(&self, byte_size: u64) -> bool {
+        self.max_bytes.is_none_or(|max| byte_size <= max)
+    }
+
+    /// Every file this set admits, the other admits too (semantic
+    /// pattern subsumption — the §2.15 cast/join relation).
+    pub fn covers(&self, other: &AttachmentConstraints) -> bool {
+        let types_ok = self.accept.is_empty()
+            || (!other.accept.is_empty()
+                && other
+                    .accept
+                    .iter()
+                    .all(|p| self.accept.iter().any(|q| pattern_covers(q, p))));
+        let size_ok = match (self.max_bytes, other.max_bytes) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(a), Some(b)) => a >= b,
+        };
+        types_ok && size_ok
+    }
+}
+
+/// `q` covers `p`: exact match, or `q` is a `type/*` wildcard covering
+/// `p`'s type (including `p == q == "type/*"`).
+fn pattern_covers(q: &str, p: &str) -> bool {
+    if q == p {
+        return true;
+    }
+    match q.strip_suffix("/*") {
+        Some(prefix) => p
+            .split_once('/')
+            .is_some_and(|(ty, _)| ty == prefix),
+        None => false,
     }
 }
 

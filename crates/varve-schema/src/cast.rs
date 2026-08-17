@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use varve_core::{NomenclatureId, OptionId};
 
-use crate::{Arity, NomenclatureRef, OptionRow, ScalarType, Unit};
+use crate::{Arity, AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType, Unit};
 
 /// Published nomenclature rows, keyed by identity. Inline nomenclatures
 /// carry their rows in the schema; published ones travel like blocks and
@@ -150,7 +150,7 @@ fn option_ids(
 /// Every scalar with an unambiguous canonical text rendering widens to
 /// `Text`. Attachments and geometry do not — they are not text.
 fn widens_to_text(ty: &ScalarType) -> bool {
-    !matches!(ty, ScalarType::Attachment | ScalarType::Geometry)
+    !matches!(ty, ScalarType::Attachment(_) | ScalarType::Geometry)
 }
 
 /// The cast table between two scalar types (§3).
@@ -170,6 +170,15 @@ pub fn scalar_cast(
             let to_ids =
                 option_ids(b, nomenclatures).map_err(CastError::UnknownNomenclature)?;
             if from_ids.is_subset(&to_ids) {
+                Cast::WIDENING
+            } else {
+                Cast::CHECKED
+            }
+        }
+        // §2.15: broaden free, narrow checked — the enum id-set rules
+        // replayed over media-type patterns and size limits.
+        (Attachment(from), Attachment(to)) => {
+            if to.covers(from) {
                 Cast::WIDENING
             } else {
                 Cast::CHECKED
@@ -260,6 +269,11 @@ pub fn scalar_join(
         return Ok((a.clone(), JoinPath::Direct));
     }
     match (a, b) {
+        // §2.15: union of accepts (either-unrestricted wins), max of
+        // limits — always an upper bound, always Direct.
+        (Attachment(x), Attachment(y)) => {
+            Ok((Attachment(attachment_join(x, y)), JoinPath::Direct))
+        }
         (Integer(a), Integer(b)) => Ok(number_join(false, *a, *b)),
         (Integer(a), Decimal(b))
         | (Decimal(a), Integer(b))
@@ -353,6 +367,26 @@ fn number_join(
     (ty, JoinPath::Direct)
 }
 
+fn attachment_join(
+    a: &AttachmentConstraints,
+    b: &AttachmentConstraints,
+) -> AttachmentConstraints {
+    let accept = if a.accept.is_empty() || b.accept.is_empty() {
+        Vec::new() // unrestricted is the top
+    } else {
+        let mut union: Vec<String> =
+            a.accept.iter().chain(&b.accept).cloned().collect();
+        union.sort();
+        union.dedup();
+        union
+    };
+    let max_bytes = match (a.max_bytes, b.max_bytes) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        _ => None,
+    };
+    AttachmentConstraints { accept, max_bytes }
+}
+
 /// Arity join: §5.5 "widen to `many` where possible".
 pub fn arity_join(a: Arity, b: Arity) -> Arity {
     if a == Arity::Many || b == Arity::Many {
@@ -406,8 +440,14 @@ mod tests {
         assert_eq!(cast(&Datetime, &Date).class(), CastClass::Lossy);
         assert_eq!(cast(&Integer(None), &Text).class(), CastClass::Widening);
         assert_eq!(cast(&Text, &Integer(None)).class(), CastClass::Checked);
-        assert_eq!(cast(&Attachment, &Text).class(), CastClass::Forbidden);
-        assert_eq!(cast(&Geometry, &Attachment).class(), CastClass::Forbidden);
+        assert_eq!(
+            cast(&Attachment(Default::default()), &Text).class(),
+            CastClass::Forbidden
+        );
+        assert_eq!(
+            cast(&Geometry, &Attachment(Default::default())).class(),
+            CastClass::Forbidden
+        );
 
         // §2.14 unit rows.
         let m = Integer(Some(Unit::Metre));
@@ -497,7 +537,7 @@ mod tests {
         assert_eq!(join(&Integer(None), &Date), (Text, JoinPath::ViaText));
         assert_eq!(join(&Boolean, &Integer(None)), (Text, JoinPath::ViaText));
         assert_eq!(
-            scalar_join(&Attachment, &Integer(None), &n),
+            scalar_join(&Attachment(Default::default()), &Integer(None), &n),
             Err(JoinConflict::Incompatible)
         );
         assert_eq!(arity_join(Arity::One, Arity::Many), Arity::Many);
@@ -560,7 +600,11 @@ mod tests {
             Date,
             Datetime,
             Enum(inline(&[("o1", "Oui"), ("o2", "Non")])),
-            Attachment,
+            Attachment(Default::default()),
+            Attachment(AttachmentConstraints {
+                accept: vec!["application/pdf".into()],
+                max_bytes: Some(10_000_000),
+            }),
             Geometry,
         ];
         for a in &samples {

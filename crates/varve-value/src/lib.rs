@@ -38,14 +38,18 @@ pub enum Scalar {
     Geometry(Feature),
 }
 
-/// Content-addressed attachment reference. `id` is the element identity
-/// used by diff (§2.4) — two identical files in one cell stay
-/// distinguishable.
+/// Content-addressed attachment reference (§2.15). `id` is the element
+/// identity used by diff (§2.4) — two identical files in one cell stay
+/// distinguishable. `content_type` and `byte_size` are *claims*,
+/// checked by conformance with zero IO and verified against bytes by
+/// the Tier 5 store at ingest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentRef {
     pub id: String,
-    pub sha256: String,
+    pub hash: varve_core::canonical::ContentHash,
     pub filename: String,
+    pub content_type: String,
+    pub byte_size: u64,
 }
 
 /// One GeoJSON Feature (RFC 7946), validated at construction. A feature

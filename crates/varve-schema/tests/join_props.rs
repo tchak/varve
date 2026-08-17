@@ -4,8 +4,9 @@
 use proptest::prelude::*;
 use varve_core::OptionId;
 use varve_schema::{
-    Arity, JoinPath, NomenclatureRef, NomenclatureTable, OptionRow, ScalarType,
-    Unit, arity_join, column_join, scalar_cast, scalar_join,
+    Arity, AttachmentConstraints, JoinPath, NomenclatureRef, NomenclatureTable,
+    OptionRow, ScalarType, Unit, arity_join, column_join, scalar_cast,
+    scalar_join,
 };
 
 /// Small id/label alphabets force collisions, merges, and label
@@ -40,7 +41,15 @@ fn scalar_type() -> impl Strategy<Value = ScalarType> {
         Just(ScalarType::Decimal(Some(Unit::Metre))),
         Just(ScalarType::Date),
         Just(ScalarType::Datetime),
-        Just(ScalarType::Attachment),
+        Just(ScalarType::Attachment(Default::default())),
+        Just(ScalarType::Attachment(AttachmentConstraints {
+            accept: vec!["application/pdf".into()],
+            max_bytes: Some(1_000),
+        })),
+        Just(ScalarType::Attachment(AttachmentConstraints {
+            accept: vec!["image/*".into()],
+            max_bytes: None,
+        })),
         Just(ScalarType::Geometry),
         inline_enum(),
     ]
@@ -102,8 +111,8 @@ proptest! {
         let n = NomenclatureTable::new();
         prop_assume!(!matches!(
             (&a, &b),
-            (ScalarType::Attachment | ScalarType::Geometry, _)
-                | (_, ScalarType::Attachment | ScalarType::Geometry)
+            (ScalarType::Attachment(_) | ScalarType::Geometry, _)
+                | (_, ScalarType::Attachment(_) | ScalarType::Geometry)
         ) || a == b);
         if let Ok(((ty, arity), _)) = column_join((&a, aa), (&b, ab), &n) {
             prop_assert_eq!(arity, arity_join(aa, ab));

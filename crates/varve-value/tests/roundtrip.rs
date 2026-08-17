@@ -38,7 +38,7 @@ fn schema() -> Schema {
             column("name", ScalarType::Text, Arity::One),
             column("amount", ScalarType::Decimal(None), Arity::One),
             column("tags", ScalarType::Enum(tags), Arity::Many),
-            column("files", ScalarType::Attachment, Arity::Many),
+            column("files", ScalarType::Attachment(Default::default()), Arity::Many),
             Element::Group(Group {
                 id: GroupId::new("contacts"),
                 label: "contacts".into(),
@@ -68,11 +68,14 @@ fn one(scalar: Scalar) -> CellState {
     CellState::Value(CellValue::One(scalar))
 }
 
-fn attachment(id: &str, sha: &str) -> Scalar {
+fn attachment(id: &str, content: &str) -> Scalar {
+    use varve_core::canonical::{CanonicalValue, hash_plain};
     Scalar::Attachment(AttachmentRef {
         id: id.into(),
-        sha256: sha.into(),
+        hash: hash_plain(&CanonicalValue::String(content.into())).unwrap(),
         filename: format!("{id}.pdf"),
+        content_type: "application/pdf".into(),
+        byte_size: 1_000,
     })
 }
 
@@ -261,6 +264,46 @@ fn remove_item_cascades() {
         column: ColumnId::new("email"),
         path: contact_path("i2"),
     }));
+}
+
+#[test]
+fn attachment_claims_are_checked_against_constraints() {
+    use varve_schema::AttachmentConstraints;
+    let constrained = Schema {
+        root: vec![column(
+            "piece",
+            ScalarType::Attachment(AttachmentConstraints {
+                accept: vec!["application/pdf".into(), "image/*".into()],
+                max_bytes: Some(2_000),
+            }),
+            Arity::Many,
+        )],
+        resolvers: vec![],
+    };
+    let cell = |ct: &str, size: u64| {
+        let mut v = RecordValues::new();
+        let mut a = match attachment("f1", "content") {
+            Scalar::Attachment(a) => a,
+            _ => unreachable!(),
+        };
+        a.content_type = ct.into();
+        a.byte_size = size;
+        v.cells.insert(
+            CellAddr { column: ColumnId::new("piece"), path: RowPath::root() },
+            CellState::Value(CellValue::Many(vec![Scalar::Attachment(a)])),
+        );
+        v
+    };
+    // Accepted exactly and by wildcard; within size.
+    assert_eq!(check(&cell("application/pdf", 1_000), &constrained, &Default::default()), vec![]);
+    assert_eq!(check(&cell("image/png", 1_000), &constrained, &Default::default()), vec![]);
+    // Wrong type and oversized: both claims checked, zero IO.
+    let errors = check(&cell("video/mp4", 9_000), &constrained, &Default::default());
+    assert!(errors.contains(&ConformanceError::AttachmentTypeNotAccepted(
+        ColumnId::new("piece"),
+        "video/mp4".into()
+    )));
+    assert!(errors.contains(&ConformanceError::AttachmentTooLarge(ColumnId::new("piece"))));
 }
 
 #[test]

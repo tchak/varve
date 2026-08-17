@@ -51,8 +51,10 @@ fn scalar(s: &Scalar) -> CanonicalValue {
             "attachment",
             obj(vec![
                 ("id", string(&a.id)),
-                ("sha256", string(&a.sha256)),
+                ("hash", string(a.hash)),
                 ("filename", string(&a.filename)),
+                ("content_type", string(&a.content_type)),
+                ("byte_size", CanonicalValue::Int(a.byte_size as i64)),
             ]),
         )]),
         Scalar::Geometry(f) => obj(vec![("geometry", string(f))]),

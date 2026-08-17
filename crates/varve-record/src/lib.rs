@@ -18,8 +18,8 @@ pub use log::{
 };
 pub use resolution::{
     Checkpoint, CheckpointViolation, ExpectedResolution, Resolution,
-    ResolutionStatus, TransitionError, pending_resolutions,
-    validate_after_checkpoint,
+    ResolutionStatus, Scan, ScanStatus, ScanTransitionError, TransitionError,
+    pending_resolutions, pending_scans, validate_after_checkpoint,
 };
 
 use varve_core::ResolverId;
