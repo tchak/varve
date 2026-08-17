@@ -318,3 +318,43 @@ fn ineligibility_and_columns() {
         BTreeSet::from([ColumnId::new("situation")])
     );
 }
+
+#[test]
+fn writable_set_is_what_a_checkpoint_freezes() {
+    // §2.8: a checkpoint taken through a surface freezes the columns
+    // writable there and the groups holding them — read-only columns
+    // and groups with no writable column stay out of the frozen set.
+    let mut read_only = col_node("detail");
+    read_only.write = WritePolicy { writable: false, override_derived: false };
+    let mut ro_role = col_node("role");
+    ro_role.write = WritePolicy { writable: false, override_derived: false };
+    let surf = surface(vec![
+        Node::Column(col_node("situation")),
+        Node::Column(read_only),
+        Node::Group(GroupNode {
+            group: GroupId::new("contacts"),
+            prompt: None,
+            visibility: None,
+            children: vec![Node::Column(ro_role), Node::Column(col_node("precision"))],
+        }),
+    ]);
+    assert_eq!(
+        surf.writable_columns(),
+        BTreeSet::from([ColumnId::new("situation"), ColumnId::new("precision")])
+    );
+    assert_eq!(surf.writable_groups(), BTreeSet::from([GroupId::new("contacts")]));
+
+    // Every column read-only in the group → the group is not writable.
+    let mut ro_precision = col_node("precision");
+    ro_precision.write = WritePolicy { writable: false, override_derived: false };
+    let mut ro_role = col_node("role");
+    ro_role.write = WritePolicy { writable: false, override_derived: false };
+    let frozen_form = surface(vec![Node::Group(GroupNode {
+        group: GroupId::new("contacts"),
+        prompt: None,
+        visibility: None,
+        children: vec![Node::Column(ro_role), Node::Column(ro_precision)],
+    })]);
+    assert!(frozen_form.writable_columns().is_empty());
+    assert!(frozen_form.writable_groups().is_empty());
+}

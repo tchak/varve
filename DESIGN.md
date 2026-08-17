@@ -364,13 +364,37 @@ must include the revision's resolver declarations.
 
 This partially re-opens locks (§6), cleanly:
 
-> **A checkpoint freezes entered cells and enumerates the pending resolutions it
-> expects to be filled.** Late derived writes are legal only if they were on
-> that list. Anything else is rejected.
+> **A checkpoint freezes the cells of the surface it is taken through and
+> enumerates the pending resolutions it expects to be filled.** Between the
+> checkpoint and the one that supersedes it, a write into that frozen set is
+> legal only if it is an expected derived write. Anything else is **reported
+> as a violation**; writes outside the frozen set are not the checkpoint's
+> business.
 
 Defensible legal story — *this is what the applicant declared, these are the
 référentiel lookups still outstanding* — without building general-purpose
 locking.
+
+**Settled (was open question 12): the freeze is surface-scoped, and the
+kernel reports rather than gates.** An earlier wording ("freezes entered
+cells … anything else is rejected") contradicted §2.9: a case file keeps
+being appended to after submission — instructor annotations, third-party
+columns, back-office corrections through their own surfaces. So the frozen
+set is the columns (and the `many` groups holding them) **writable on the
+surface the checkpoint was taken through** — the applicant form — the same
+surface-relativity as reachability (§2.4) and admissibility (§2.6). DN
+practice is exactly this shape: passing to instruction locks the applicant's
+form while *annotations privées* stay writable, and "repasser en
+construction" lifts it — a **superseding checkpoint**, which ends the
+previous one's regime. Consequences: a human override of a derived cell
+inside the frozen set (§2.7 back-office rule) after the checkpoint is a
+*reported* violation — a real legal act the platform must take a new
+checkpoint for, not something the kernel silently permits or forbids; and
+`validate_after_checkpoint(log, checkpoint, superseded_by)` stays a pure
+function that append never consults — the kernel has no permission model
+(§2.9), Tier 5 decides what a violation means. The kernel cannot see
+surfaces, so the platform fills the frozen set from the surface
+(`varve-surface` exposes the writable column and group sets).
 
 ### Wire format
 
@@ -531,7 +555,10 @@ one of `varve-wire`.
 
 > A checkpoint is a named entry hash in the log — the hash, not the seq, is
 > what pins content — plus a reading revision, plus the set of pending
-> resolutions expected to land after it.
+> resolutions expected to land after it, plus the **frozen set**: the columns
+> and `many` groups writable on the surface it was taken through (§2.8).
+> A later checkpoint supersedes it; its regime runs from its entry to the
+> superseding one's.
 
 ## 2.10 Erasure (GDPR) is a kernel design input
 
@@ -1400,7 +1427,7 @@ values plus a `_revision` column): JSONL already covers the lossless case.
 | item | reason |
 |---|---|
 | record fork / merge / rebase (branches) | 10× cost multiplier for a use case that can't yet be named. Real stories (draft vs submitted, prefill-from-record, agent-proposed corrections, post-decision correction) are all served by **revisions + proposed-changes**. |
-| general-purpose record locks | the real need is covered by checkpoints, since defined (§2.8–2.9): freeze entered cells, enumerate expected late writes, reject the rest. Locking beyond that still needs a user story before a design. |
+| general-purpose record locks | the real need is covered by checkpoints, since defined (§2.8–2.9): freeze the checkpointed surface's cells, enumerate expected late writes, report the rest. Locking beyond that still needs a user story before a design. |
 | record references (`record_ref` scalar, DossierLink-style) | on ice. Many DN uses of DossierLink are better served by multiple surfaces over one schema — same case file, different actors — than by records pointing at records. Legacy links import as `text` holding an opaque id; promoting to a typed ref later is a checked cast. Needs proven demand from record-side data first. |
 | bidirectional cross-instance sync | came up once in ~10 years of DN. Two instances appending to one record's log means concurrent `seq`/`prev` assignment — branching by another name, so the branch cut above applies. What is actually needed is **one-way, one-time migration** of schemas and/or records (§5), which the history export already covers. |
 | workflows, labels, webhooks, GraphQL, document templating | platform, not kernel — separate repo, later year |
@@ -1642,6 +1669,20 @@ Only then: `surface`, `store`, service.
     bounded by the referencing records' own retention. Residual choice —
     crypto-shredding vs externalized values for intra-record horizons —
     deferred to corpus data (§12.11).
+12. ~~Checkpoint scope.~~ **Resolved (§2.8, 2026-08-17): surface-scoped
+    freeze; kernel reports, platform enforces.** Found by audit: §2.8's
+    "freezes entered cells … anything else is rejected" and the code that
+    implemented it literally (every non-resolver write after a checkpoint
+    flagged) contradicted §2.9's multi-actor case file and §2.7's
+    back-office override. Three candidates were weighed — freeze the
+    surface's writable set; freeze the cells present at the checkpoint
+    regardless of surface; pin only, no freeze — and settled by design
+    argument (freeze what the checkpointed surface could write, the same
+    surface-relativity as reachability and admissibility) plus DN practice
+    (instruction locks the applicant form, annotations stay open, "back to
+    construction" is a superseding checkpoint). Reporting rather than
+    gating follows from "no permission model": `validate_after_checkpoint`
+    is pure; append never consults it.
 
 ## 11. Prior art to consult
 

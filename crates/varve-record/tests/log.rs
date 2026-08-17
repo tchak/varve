@@ -333,10 +333,14 @@ fn resolution_lifecycle() {
 }
 
 #[test]
-fn checkpoint_rejects_unexpected_late_writes() {
+fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
+    use std::collections::BTreeSet;
     let mut log = RecordLog::new();
     log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
         .unwrap();
+    // Taken through the applicant form: `name`, `raison_sociale`,
+    // `adresse` and the repetition `g1` are frozen; the instructor's
+    // `annotation` column is not on that surface.
     let checkpoint = Checkpoint {
         name: "submission".into(),
         entry: log.entries()[0].hash(),
@@ -345,9 +349,14 @@ fn checkpoint_rejects_unexpected_late_writes() {
             resolver: ResolverId::new("insee-sirene"),
             scope: RowPath::root(),
         }],
+        frozen_columns: ["name", "raison_sociale", "adresse"]
+            .into_iter()
+            .map(ColumnId::new)
+            .collect(),
+        frozen_groups: [GroupId::new("g1")].into_iter().collect(),
     };
 
-    // Expected late derived write: legal.
+    // Expected late derived write into the frozen set: legal.
     log.append(draft(
         resolver_actor(),
         1,
@@ -356,28 +365,62 @@ fn checkpoint_rejects_unexpected_late_writes() {
         vec![set("raison_sociale", "ACME SARL")],
     ))
     .unwrap();
-    assert_eq!(validate_after_checkpoint(&log, &checkpoint), vec![]);
-
-    // A human edit after the checkpoint: rejected.
-    log.append(draft(human("a1"), 2, 2, Origin::Entered, vec![set("name", "X")]))
+    // An instructor annotating: outside the frozen set, not the
+    // checkpoint's business (§2.9 — the record stays a case file).
+    log.append(draft(human("instructor"), 2, 2, Origin::Entered, vec![set("annotation", "ok")]))
         .unwrap();
+    assert_eq!(validate_after_checkpoint(&log, &checkpoint, None), vec![]);
+
+    // A human edit into the frozen set — even mixed with a legal
+    // annotation write: reported, naming the frozen columns touched.
+    log.append(draft(
+        human("a1"),
+        3,
+        3,
+        Origin::Entered,
+        vec![set("name", "X"), set("annotation", "still fine")],
+    ))
+    .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &checkpoint),
-        vec![CheckpointViolation::IllegalWrite { seq: 2 }]
+        validate_after_checkpoint(&log, &checkpoint, None),
+        vec![CheckpointViolation::IllegalWrite {
+            seq: 3,
+            columns: [ColumnId::new("name")].into_iter().collect(),
+            groups: BTreeSet::new(),
+        }]
     );
 
-    // A derived write from a resolver NOT on the expected list: rejected.
+    // A derived write from a resolver NOT on the expected list, and an
+    // item added to a frozen repetition by a human: both reported.
     let mut other = derivation();
     other.source = ResolverId::new("ban-address");
     log.append(draft(
         resolver_actor(),
-        3,
-        3,
+        4,
+        4,
         Origin::Derived(other),
         vec![set("adresse", "1 rue de la Paix")],
     ))
     .unwrap();
-    assert_eq!(validate_after_checkpoint(&log, &checkpoint).len(), 2);
+    log.append(draft(
+        human("a1"),
+        5,
+        5,
+        Origin::Entered,
+        vec![Op::AddItem {
+            group: GroupId::new("g1"),
+            parent: RowPath::root(),
+            item: ItemId::new("i9"),
+            at: 0,
+        }],
+    ))
+    .unwrap();
+    let violations = validate_after_checkpoint(&log, &checkpoint, None);
+    assert_eq!(violations.len(), 3);
+    assert!(matches!(
+        &violations[2],
+        CheckpointViolation::IllegalWrite { seq: 5, groups, .. } if groups.contains(&GroupId::new("g1"))
+    ));
 
     // Out-of-scope derived write (targets outside the expected scope).
     let scoped = Checkpoint {
@@ -388,10 +431,35 @@ fn checkpoint_rejects_unexpected_late_writes() {
                 item: ItemId::new("i1"),
             }),
         }],
-        ..checkpoint
+        ..checkpoint.clone()
     };
     assert!(
-        validate_after_checkpoint(&log, &scoped)
-            .contains(&CheckpointViolation::IllegalWrite { seq: 1 })
+        validate_after_checkpoint(&log, &scoped, None)
+            .iter()
+            .any(|v| matches!(v, CheckpointViolation::IllegalWrite { seq: 1, .. }))
+    );
+
+    // A superseding checkpoint (back to construction) ends this one's
+    // regime: entries after it are its business, not ours.
+    let reopened = Checkpoint {
+        name: "reopened".into(),
+        entry: log.entries()[2].hash(),
+        expected: vec![],
+        frozen_columns: BTreeSet::new(),
+        frozen_groups: BTreeSet::new(),
+        ..checkpoint.clone()
+    };
+    assert_eq!(validate_after_checkpoint(&log, &checkpoint, Some(&reopened)), vec![]);
+    assert_eq!(validate_after_checkpoint(&log, &reopened, None), vec![]);
+    // A superseding checkpoint must come after this one.
+    let earlier = Checkpoint { entry: varve_record::genesis_hash(), ..reopened.clone() };
+    assert_eq!(
+        validate_after_checkpoint(&log, &checkpoint, Some(&earlier)),
+        vec![CheckpointViolation::UnknownSupersedingEntry]
+    );
+    let unknown = Checkpoint { entry: varve_record::genesis_hash(), ..checkpoint.clone() };
+    assert_eq!(
+        validate_after_checkpoint(&log, &unknown, None),
+        vec![CheckpointViolation::UnknownEntry]
     );
 }

@@ -4,9 +4,11 @@
 //! contributes pure functions; a Tier 5 scheduler drives retries
 //! without the kernel knowing about queues or clocks.
 
+use std::collections::BTreeSet;
+
 use varve_core::canonical::ContentHash;
 use varve_core::primitives::Instant;
-use varve_core::{ResolverId, RevisionId, RowPath};
+use varve_core::{ColumnId, GroupId, ResolverId, RevisionId, RowPath};
 use varve_value::Op;
 
 use crate::log::RecordLog;
@@ -139,13 +141,30 @@ pub struct ExpectedResolution {
 
 /// §2.9: a named entry hash (the hash, not the seq, pins content), plus
 /// a reading revision, plus the pending resolutions expected to land
-/// after it.
+/// after it, plus the **frozen set** — what the checkpoint freezes.
+///
+/// The freeze is **surface-scoped** (§2.8, settled): the frozen set is
+/// the columns (and the `many` groups holding them) that were writable
+/// on the surface the checkpoint was taken through — the applicant
+/// form. Everything else on the record — annotation columns, third-
+/// party columns — stays open to its own surfaces, which is what makes
+/// the record a case file (§2.9) rather than a frozen submission. A
+/// later checkpoint supersedes this one (DN's "back to construction").
+///
+/// The kernel derives nothing here (it cannot see surfaces); a
+/// platform fills `frozen_*` from the surface (`varve-surface`
+/// exposes `writable_columns`/`writable_groups`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkpoint {
     pub name: String,
     pub entry: ContentHash,
     pub reading_revision: RevisionId,
     pub expected: Vec<ExpectedResolution>,
+    /// Columns frozen by this checkpoint.
+    pub frozen_columns: BTreeSet<ColumnId>,
+    /// `many` groups frozen by this checkpoint: adding, removing or
+    /// reordering their items is a write into the frozen set.
+    pub frozen_groups: BTreeSet<GroupId>,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -153,43 +172,92 @@ pub enum CheckpointViolation {
     /// The named entry hash is not in this log.
     #[error("checkpoint names an entry hash not present in this log")]
     UnknownEntry,
-    /// A post-checkpoint entry that is not a derived write from the
-    /// expected list (§2.8: "anything else is rejected").
-    #[error("entry {seq}: write after checkpoint was not an expected derived write")]
-    IllegalWrite { seq: u64 },
+    /// The superseding checkpoint's entry hash is not in this log, or
+    /// precedes this checkpoint's.
+    #[error("superseding checkpoint names an entry hash not after this checkpoint")]
+    UnknownSupersedingEntry,
+    /// A post-checkpoint entry wrote into the frozen set and was not an
+    /// expected derived write (§2.8). Names the frozen columns and
+    /// groups the entry touched.
+    #[error("entry {seq}: write into the frozen set after checkpoint was not an expected derived write")]
+    IllegalWrite {
+        seq: u64,
+        columns: BTreeSet<ColumnId>,
+        groups: BTreeSet<GroupId>,
+    },
 }
 
-/// §2.8: a checkpoint freezes entered cells and enumerates the pending
-/// resolutions it expects. Late derived writes are legal only if they
-/// were on that list.
+/// §2.8: a checkpoint freezes the cells of its surface and enumerates
+/// the pending resolutions it expects. Between this checkpoint and the
+/// one superseding it (or the end of the log), a write into the frozen
+/// set is legal only if it is an expected derived write; writes outside
+/// the frozen set are not the checkpoint's business.
+///
+/// Pure and reporting, never gating: the platform decides what to do
+/// with a violation (§2.9 — the kernel has no permission model; append
+/// never consults checkpoints).
 pub fn validate_after_checkpoint(
     log: &RecordLog,
     checkpoint: &Checkpoint,
+    superseded_by: Option<&Checkpoint>,
 ) -> Vec<CheckpointViolation> {
-    let Some(position) = log
-        .entries()
-        .iter()
-        .position(|e| e.hash() == checkpoint.entry)
-    else {
+    let entries = log.entries();
+    let Some(position) = entries.iter().position(|e| e.hash() == checkpoint.entry) else {
         return vec![CheckpointViolation::UnknownEntry];
+    };
+    let end = match superseded_by {
+        None => entries.len(),
+        Some(next) => match entries.iter().position(|e| e.hash() == next.entry) {
+            // The superseding entry itself is written under the old
+            // checkpoint's regime; the new regime starts after it.
+            Some(p) if p > position => p + 1,
+            _ => return vec![CheckpointViolation::UnknownSupersedingEntry],
+        },
     };
 
     let mut violations = Vec::new();
-    for entry in &log.entries()[position + 1..] {
-        let legal = entry.envelope.actor.kind == ActorKind::Resolver
+    for entry in &entries[position + 1..end] {
+        let (columns, groups) = frozen_touched(&entry.content.ops, checkpoint);
+        if columns.is_empty() && groups.is_empty() {
+            continue; // Outside the frozen set: not this checkpoint's business.
+        }
+        let expected = entry.envelope.actor.kind == ActorKind::Resolver
             && match &entry.content.origin {
                 Origin::Derived(d) => checkpoint.expected.iter().any(|exp| {
                     exp.resolver == d.source && ops_within(&entry.content.ops, &exp.scope)
                 }),
                 _ => false,
             };
-        if !legal {
+        if !expected {
             violations.push(CheckpointViolation::IllegalWrite {
                 seq: entry.envelope.seq,
+                columns,
+                groups,
             });
         }
     }
     violations
+}
+
+/// The frozen columns and groups these ops write into.
+fn frozen_touched(ops: &[Op], checkpoint: &Checkpoint) -> (BTreeSet<ColumnId>, BTreeSet<GroupId>) {
+    let mut columns = BTreeSet::new();
+    let mut groups = BTreeSet::new();
+    for op in ops {
+        match op {
+            Op::Set { column, .. } | Op::Unset { column, .. } => {
+                if checkpoint.frozen_columns.contains(column) {
+                    columns.insert(column.clone());
+                }
+            }
+            Op::AddItem { group, .. } | Op::RemoveItem { group, .. } | Op::Reorder { group, .. } => {
+                if checkpoint.frozen_groups.contains(group) {
+                    groups.insert(group.clone());
+                }
+            }
+        }
+    }
+    (columns, groups)
 }
 
 /// Every op targets cells at or below the expected scope.

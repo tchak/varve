@@ -194,4 +194,42 @@ impl Surface {
         walk(&self.nodes, &mut out);
         out
     }
+
+    /// The columns writable through this surface — what a checkpoint
+    /// taken through it freezes (§2.8: the freeze is surface-scoped;
+    /// `varve-record::Checkpoint::frozen_columns`).
+    pub fn writable_columns(&self) -> BTreeSet<ColumnId> {
+        column_entries(self)
+            .into_iter()
+            .filter(|e| e.node.write.writable)
+            .map(|e| e.node.column.clone())
+            .collect()
+    }
+
+    /// The groups whose items can be added, removed or reordered
+    /// through this surface: every group node holding at least one
+    /// writable column (`Checkpoint::frozen_groups`).
+    pub fn writable_groups(&self) -> BTreeSet<GroupId> {
+        fn walk(nodes: &[Node], out: &mut BTreeSet<GroupId>) -> bool {
+            let mut any = false;
+            for node in nodes {
+                any |= match node {
+                    Node::Column(c) => c.write.writable,
+                    Node::Group(g) => {
+                        let inner = walk(&g.children, out);
+                        if inner {
+                            out.insert(g.group.clone());
+                        }
+                        inner
+                    }
+                    Node::Section(s) => walk(&s.children, out),
+                    Node::Note(_) => false,
+                };
+            }
+            any
+        }
+        let mut out = BTreeSet::new();
+        walk(&self.nodes, &mut out);
+        out
+    }
 }
