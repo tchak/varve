@@ -5,16 +5,34 @@
 use proptest::prelude::*;
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RevisionId, RowPath};
-use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues, Scalar};
+use varve_value::{CellAddr, CellState, CellValue, Feature, ItemsAddr, RecordValues, Scalar};
 use varve_wire::{Intent, Line, Manifest, Mode, RecordLine, read_stream, write_lines};
+
+/// Geometry with the numbers JCS rendering has to get right: negative
+/// zero, integral doubles, large and tiny exponents, numeric ids,
+/// property numbers.
+fn geometry() -> impl Strategy<Value = Scalar> {
+    (any::<f64>(), any::<f64>(), any::<i32>(), any::<bool>()).prop_map(|(x, y, id, props)| {
+        let finite = |f: f64| if f.is_finite() { f } else { 0.5 };
+        let text = format!(
+            r#"{{"type":"Feature","id":{id},"geometry":{{"type":"Point","coordinates":[{},{}]}},"properties":{}}}"#,
+            finite(x),
+            finite(y),
+            if props { r#"{"n":-0.0,"m":1e300,"k":1.5e-7}"# } else { "null" }
+        );
+        Scalar::Geometry(Box::new(Feature::parse(&text).unwrap()))
+    })
+}
 
 fn scalar() -> impl Strategy<Value = Scalar> {
     prop_oneof![
         "\\PC{0,8}".prop_map(Scalar::Text),
         any::<bool>().prop_map(Scalar::Boolean),
+        // Full i64 range: exact integers travel as strings (§2.13).
         any::<i64>().prop_map(Scalar::Integer),
         any::<i32>().prop_map(|n| Scalar::Decimal(Decimal::from_i64(n.into()))),
         "[a-z0-9]{1,5}".prop_map(|s| Scalar::Enum(OptionId::new(s))),
+        geometry(),
     ]
 }
 
@@ -90,10 +108,10 @@ proptest! {
     /// M3: read ∘ write is identity, and the bytes are stable.
     #[test]
     fn snapshot_streams_round_trip(lines in snapshot_stream()) {
-        let bytes = write_lines(&lines);
+        let bytes = write_lines(&lines).unwrap();
         let stream = read_stream(&bytes).unwrap();
         prop_assert_eq!(&stream.lines, &lines);
-        prop_assert_eq!(write_lines(&stream.lines), bytes);
+        prop_assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
     }
 
     /// The reader never panics on arbitrary input.

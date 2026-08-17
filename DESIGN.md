@@ -690,11 +690,22 @@ Settled design for `varve-core::canonical`. Eight decisions:
 2. **Canonical form is JCS (RFC 8785)** over wire-shaped JSON values. One
    encoding family for wire and hashing; hash the canonical bytes, never
    the emitted line (§5).
-3. **Scalar rendering pinned.** Decimals: the normalized `Decimal` string
-   form. Instants: normalized UTC RFC 3339. Geometry coordinates: JCS /
-   ES6 number serialization (implemented and tested against known
-   vectors). Text: hashed as entered — no Unicode normalization. Absent
-   vs `null`: the §5 rule, identically.
+3. **Scalar rendering pinned.** Exact numbers are **strings**: integers
+   as their decimal digits, decimals as the normalized `Decimal` string
+   form — a JSON number is an IEEE double under JCS, so it cannot carry
+   a full i64, and a verifier in any other language would round it.
+   JSON numbers in canonical form are reserved for structural counts,
+   bounded to the JCS-safe range (|n| ≤ 2^53 − 1; larger is a
+   serialization *error*, never a rounding — the §2.14 no-silent-rounding
+   precedent) and for geometry. Instants: normalized UTC RFC 3339.
+   Geometry: the Feature embedded as a JSON **value** — never a
+   stringified blob — with every number a double rendered per ES6
+   (`1.0` → `1`, `-0.0` → `0`; implemented and tested against known
+   vectors); feature equality is equality of that canonical form. Text:
+   hashed as entered — no Unicode normalization. Absent vs `null`: the
+   §5 rule, identically. *(Corrected 2026-08-17, before any record hash
+   existed: geometry had been committed as a stringified serde rendering
+   and integers as full-range JSON numbers.)*
 4. **Entries are vector commitments over ops.** The entry's content hash
    is a plain hash of a body in which each op appears as its **salted
    per-op commitment** `H(salt_i ‖ canonical(op_i))`. A §2.9-filtered
@@ -1264,8 +1275,10 @@ current surface: "hidden never deletes" implies hidden must round-trip.
 - **Canonical serialization required** for content-addressed checkpoints.
   Settled: JCS (RFC 8785) — the full design is §2.13; hash the canonical
   bytes, never the emitted line.
-- **No decimals or money in JSON numbers.** Strings for exact decimals,
-  RFC 3339 for instants.
+- **No exact numbers in JSON numbers.** Strings for integers and exact
+  decimals (JCS numbers are doubles — §2.13 decision 3), RFC 3339 for
+  instants; JSON numbers carry only JCS-safe structural counts and
+  geometry coordinates.
 
 ### CSV
 

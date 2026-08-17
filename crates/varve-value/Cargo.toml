@@ -11,6 +11,11 @@ varve-schema = { path = "../varve-schema" }
 # GeoJSON is JSON: the serde_json here is the domain format's parser, not
 # wire coupling (§9). No geo-types — the kernel never computes geometry.
 geojson = { version = "0.24", default-features = false }
+# Same parser, named directly: a Feature's canonical form (§2.13) is
+# built from its JSON tree, so the tree type must be nameable here.
+# `float_roundtrip`: correctly-rounded float parsing, so read ∘ write is
+# identity on geometry coordinates (the default parser is best-effort).
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 thiserror.workspace = true
 

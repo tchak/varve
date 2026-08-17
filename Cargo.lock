@@ -668,6 +668,7 @@ version = "0.1.0"
 dependencies = [
  "geojson",
  "proptest",
+ "serde_json",
  "thiserror",
  "varve-core",
  "varve-schema",

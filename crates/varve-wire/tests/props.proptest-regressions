@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a395c3674b144f2baf51ccbe99e01790000c3b3b8b53c3d6e4fc0e3b9fe34e99 # shrinks to lines = [Header(Manifest { format_version: 1, source_instance: "gen", mode: Snapshot, intent: Upsert, revisions: [RevisionId("lens")], record_count: 1, attachments_bundled: false }), Record(RecordLine { record: RecordId("a"), lens: RevisionId("lens"), values: RecordValues { cells: {CellAddr { column: ColumnId("a"), path: RowPath([]) }: Value(Many([Geometry(Feature { canonical: Object({"geometry": Object({"coordinates": Array([Float(5.0321931358567165e-180), Float(0.0)]), "type": String("Point")}), "id": Float(0.0), "properties": Null, "type": String("Feature")}), id: Some("0") })]))}, items: {} } })]
+cc 587da77e4c8d1d3ac424da7831e64494a3a48e15cb85ff7c5106c3837693f05f # shrinks to lines = [Header(Manifest { format_version: 1, source_instance: "gen", mode: Snapshot, intent: Upsert, revisions: [RevisionId("lens")], record_count: 1, attachments_bundled: false }), Record(RecordLine { record: RecordId("a"), lens: RevisionId("lens"), values: RecordValues { cells: {CellAddr { column: ColumnId("a"), path: RowPath([]) }: Value(Many([Geometry(Feature { canonical: Object({"geometry": Object({"coordinates": Array([Float(5.752289928800135e18), Float(0.0)]), "type": String("Point")}), "id": Float(0.0), "properties": Null, "type": String("Feature")}), id: Some("0") })]))}, items: {} } })]

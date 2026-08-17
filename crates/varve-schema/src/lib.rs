@@ -24,6 +24,7 @@ pub use cast::{
 
 use std::collections::HashSet;
 
+use varve_core::canonical::MAX_SAFE_INTEGER;
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
 
 /// Column arity (§2.2): a `many` column holds a list *value* and
@@ -304,6 +305,11 @@ pub enum SchemaError {
     DuplicateColumnId(ColumnId),
     #[error("duplicate group id '{0}'")]
     DuplicateGroupId(GroupId),
+    /// Sizes ride the canonical form as JSON numbers, which are JCS
+    /// doubles (§2.13): a limit beyond 2^53 − 1 bytes is not
+    /// representable — and not a real limit.
+    #[error("column '{0}': attachment max_bytes exceeds the JCS-safe integer range")]
+    MaxBytesUnrepresentable(ColumnId),
     /// Mapping typecheck failures (§2.7): these are schema-publication
     /// errors, not runtime surprises.
     #[error("resolver '{resolver}' maps into unknown column '{target}'")]
@@ -350,6 +356,11 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                 Element::Column(c) => {
                     if !column_ids.insert(c.id.clone()) {
                         errors.push(SchemaError::DuplicateColumnId(c.id.clone()));
+                    }
+                    if let ScalarType::Attachment(constraints) = &c.ty
+                        && constraints.max_bytes.is_some_and(|m| m > MAX_SAFE_INTEGER as u64)
+                    {
+                        errors.push(SchemaError::MaxBytesUnrepresentable(c.id.clone()));
                     }
                     columns.push((c.id.clone(), c.ty.clone()));
                 }

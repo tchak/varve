@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use varve_core::canonical::{CanonicalValue, ContentHash};
+use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
 use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, RecordId, RevisionId};
 use varve_record::canon as record_canon;
 use varve_schema::{option_row_from_canonical, schema_from_canonical};
@@ -145,13 +145,21 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
 
 type Obj = BTreeMap<String, CanonicalValue>;
 
+/// JSON tree → canonical value, under JCS number semantics: every JSON
+/// number denotes a double. An integer literal within ±(2^53 − 1) is an
+/// `Int` (structural counts); anything else — fractional, exponent, or
+/// an integer literal too large for exact representation (ES6 renders
+/// doubles below 1e21 without an exponent, so `5752289928800135000` is
+/// a legitimate coordinate) — is the `Float` it denotes. Decoders that
+/// expect a count reject a `Float`, so no unsafe integer ever reaches
+/// a hash; exact integers travel as strings.
 fn to_canonical(v: &serde_json::Value) -> CanonicalValue {
     match v {
         serde_json::Value::Null => CanonicalValue::Null,
         serde_json::Value::Bool(b) => CanonicalValue::Bool(*b),
         serde_json::Value::Number(n) => match n.as_i64() {
-            Some(i) => CanonicalValue::Int(i),
-            None => CanonicalValue::Float(n.as_f64().unwrap_or(f64::NAN)),
+            Some(i) if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 => CanonicalValue::Int(i),
+            _ => CanonicalValue::Float(n.as_f64().expect("JSON numbers are finite")),
         },
         serde_json::Value::String(s) => CanonicalValue::String(s.clone()),
         serde_json::Value::Array(a) => CanonicalValue::Array(a.iter().map(to_canonical).collect()),

@@ -1,10 +1,11 @@
 //! Canonical (JSON-shaped) forms of ops, states and origins — the bytes
 //! that per-op commitments commit to (§2.13 decision 4).
 //!
-//! Scalars are pre-rendered per §2.13 decision 3: decimals and instants
-//! as their normalized strings. Geometry commits to its deterministic
-//! serialized form (key-sorted); unifying that rendering with JCS float
-//! rules across producers is the wire pass's job.
+//! Scalars are pre-rendered per §2.13 decision 3: exact numbers
+//! (integers, decimals) and instants as their normalized strings — JSON
+//! numbers are JCS doubles and cannot carry a full i64. Geometry is
+//! embedded as its canonical JSON value (numbers as doubles, ES6
+//! rendering), never as a stringified blob.
 
 use std::collections::BTreeMap;
 
@@ -42,7 +43,7 @@ fn scalar(s: &Scalar) -> CanonicalValue {
     match s {
         Scalar::Text(v) => obj(vec![("text", string(v))]),
         Scalar::Boolean(v) => obj(vec![("boolean", CanonicalValue::Bool(*v))]),
-        Scalar::Integer(v) => obj(vec![("integer", CanonicalValue::Int(*v))]),
+        Scalar::Integer(v) => obj(vec![("integer", string(v))]),
         Scalar::Decimal(v) => obj(vec![("decimal", string(v))]),
         Scalar::Date(v) => obj(vec![("date", string(v))]),
         Scalar::Datetime(v) => obj(vec![("datetime", string(v))]),
@@ -57,7 +58,7 @@ fn scalar(s: &Scalar) -> CanonicalValue {
                 ("byte_size", CanonicalValue::Int(a.byte_size as i64)),
             ]),
         )]),
-        Scalar::Geometry(f) => obj(vec![("geometry", string(f))]),
+        Scalar::Geometry(f) => obj(vec![("geometry", f.to_canonical().clone())]),
     }
 }
 
@@ -166,7 +167,7 @@ pub fn meta(origin: &Origin, note: Option<&str>) -> CanonicalValue {
 // Decoding (the wire's parse direction, §5) plus whole-entry encoding.
 // Strict and total. Round-trip is a tested law.
 
-use varve_core::canonical::{ContentHash, Salt};
+use varve_core::canonical::{ContentHash, MAX_SAFE_INTEGER, Salt};
 use varve_core::primitives::{Date, Decimal, Instant};
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, ResolverId, RevisionId};
 use varve_value::{AttachmentRef, Feature};
@@ -204,10 +205,13 @@ fn get_str(m: &Obj, key: &str) -> Result<String, RecordDecodeError> {
     }
 }
 
+/// Structural counts ride as JSON numbers, so they must be JCS-safe;
+/// the wire reader already refuses larger ones — this keeps the decoder
+/// total on its own.
 fn get_int(m: &Obj, key: &str) -> Result<i64, RecordDecodeError> {
     match m.get(key) {
-        Some(CanonicalValue::Int(i)) => Ok(*i),
-        _ => err(format!("missing integer '{key}'")),
+        Some(CanonicalValue::Int(i)) if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 => Ok(*i),
+        _ => err(format!("missing JCS-safe integer '{key}'")),
     }
 }
 
@@ -256,10 +260,15 @@ pub fn scalar_from(v: &CanonicalValue) -> Result<Scalar, RecordDecodeError> {
             CanonicalValue::Bool(b) => Scalar::Boolean(*b),
             _ => return err("boolean must be a bool"),
         },
-        "integer" => match inner {
-            CanonicalValue::Int(i) => Scalar::Integer(*i),
-            _ => return err("integer must be an int"),
-        },
+        // Exact integer as a string: strict — the text must be the
+        // normalized rendering (no `+`, no leading zeros, no `-0`).
+        "integer" => {
+            let t = text(inner)?;
+            match t.parse::<i64>() {
+                Ok(i) if i.to_string() == t => Scalar::Integer(i),
+                _ => return err("integer must be a normalized decimal string"),
+            }
+        }
         "decimal" => Scalar::Decimal(
             Decimal::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?,
         ),
@@ -283,9 +292,9 @@ pub fn scalar_from(v: &CanonicalValue) -> Result<Scalar, RecordDecodeError> {
                     .map_err(|_| RecordDecodeError("bad byte_size".into()))?,
             }))
         }
-        "geometry" => Scalar::Geometry(
-            Feature::parse(&text(inner)?).map_err(|e| RecordDecodeError(format!("{e:?}")))?,
-        ),
+        "geometry" => Scalar::Geometry(Box::new(
+            Feature::from_canonical(inner).map_err(|e| RecordDecodeError(e.to_string()))?,
+        )),
         other => return err(format!("unknown scalar kind '{other}'")),
     })
 }

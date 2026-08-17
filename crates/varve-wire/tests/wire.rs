@@ -9,7 +9,7 @@ use varve_schema::{
 };
 use varve_value::{CellAddr, CellState, CellValue, Op, RecordValues, Scalar};
 use varve_wire::{
-    ImportError, Intent, Line, Manifest, Mode, ReadError, RecordLine,
+    ImportError, Intent, Line, Manifest, Mode, ReadError, RecordLine, WriteError,
     SnapshotImportRequest, adopt_history, import_snapshot, read_stream, test_salts,
     write_history, write_lines, write_snapshot,
 };
@@ -95,11 +95,11 @@ fn history_round_trip_is_byte_stable_and_verifiable() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &log)],
-    );
+    ).unwrap();
 
     let stream = read_stream(&bytes).unwrap();
     // Re-emitting the parsed lines yields the identical bytes.
-    assert_eq!(write_lines(&stream.lines), bytes);
+    assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
 
     // Adopt on a fresh instance: the chain verifies and continues.
     let mut store = BTreeMap::new();
@@ -126,9 +126,9 @@ fn snapshot_round_trip_and_import_as_log_entry() {
             lens: revision_id(&schema()),
             values: folded.clone(),
         }],
-    );
+    ).unwrap();
     let stream = read_stream(&bytes).unwrap();
-    assert_eq!(write_lines(&stream.lines), bytes);
+    assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
 
     // Import into an empty store: one entry, a patch against empty,
     // whose fold equals the exported state — and it is an ORDINARY log
@@ -152,13 +152,75 @@ fn snapshot_round_trip_and_import_as_log_entry() {
 }
 
 #[test]
+fn record_line_pins_canonical_number_shapes() {
+    // §2.13 decisions 2–3, as test vectors: exact integers are strings
+    // (a JSON number is a JCS double and cannot carry a full i64);
+    // geometry is embedded as a JSON value with ES6 numbers, never a
+    // stringified blob. Changing these bytes changes every record hash.
+    let mut values = RecordValues::new();
+    values.cells.insert(
+        CellAddr { column: ColumnId::new("n"), path: RowPath::root() },
+        CellState::Value(CellValue::One(Scalar::Integer(i64::MAX))),
+    );
+    values.cells.insert(
+        CellAddr { column: ColumnId::new("g"), path: RowPath::root() },
+        CellState::Value(CellValue::One(Scalar::Geometry(Box::new(
+            varve_value::Feature::parse(
+                r#"{"type":"Feature","id":1,"geometry":{"type":"Point","coordinates":[-0.0,2.5,1e21]},"properties":null}"#,
+            )
+            .unwrap(),
+        )))),
+    );
+    let line = Line::Record(RecordLine {
+        record: RecordId::new("r1"),
+        lens: RevisionId::new("lens"),
+        values,
+    });
+    let text = String::from_utf8(write_lines(std::slice::from_ref(&line)).unwrap()).unwrap();
+    assert_eq!(
+        text,
+        concat!(
+            r#"{"cells":["#,
+            r#"{"column":"g","path":[],"state":{"one":{"geometry":{"geometry":{"coordinates":[0,2.5,1e+21],"type":"Point"},"id":1,"properties":null,"type":"Feature"}}}},"#,
+            r#"{"column":"n","path":[],"state":{"one":{"integer":"9223372036854775807"}}}"#,
+            r#"],"id":"r1","items":[],"k":"record","lens":"lens"}"#,
+            "\n"
+        )
+    );
+    // And it reads back to the same line.
+    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let mut bytes = header;
+    bytes.extend_from_slice(text.as_bytes());
+    let stream = read_stream(&bytes).unwrap();
+    assert_eq!(stream.lines[1], line);
+
+    // A structural count that is not a JCS-safe integer is refused —
+    // it can never have been produced by a JCS serializer.
+    let bad = text.replace(r#""integer":"9223372036854775807""#, r#""integer":"007""#);
+    let mut bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    bytes.extend_from_slice(bad.as_bytes());
+    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 2, .. })));
+    // Nor can the writer produce one: a count beyond the safe range is
+    // a `WriteError`, not a rounded number and not a panic.
+    assert!(matches!(
+        write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 9007199254740993))]),
+        Err(WriteError { line: 1, .. })
+    ));
+    // And on the read side a too-large count literal is a double, which
+    // is not a count.
+    let bad = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let bad = String::from_utf8(bad).unwrap().replace(r#""record_count":1"#, r#""record_count":9007199254740993"#);
+    assert!(matches!(read_stream(bad.as_bytes()), Err(ReadError::Malformed { line: 1, .. })));
+}
+
+#[test]
 fn intent_makes_id_mismatches_fail_loudly() {
     let record = RecordId::new("r1");
     let bytes = write_history(
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    );
+    ).unwrap();
     let stream = read_stream(&bytes).unwrap();
     // create-only into a store that already has r1: rejected.
     let mut store = BTreeMap::from([(record.clone(), sample_log())]);
@@ -172,7 +234,7 @@ fn intent_makes_id_mismatches_fail_loudly() {
         manifest(Mode::History, Intent::UpdateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    );
+    ).unwrap();
     let stream = read_stream(&bytes).unwrap();
     let mut empty = BTreeMap::new();
     assert!(matches!(
@@ -188,7 +250,7 @@ fn tampered_history_is_rejected_on_import() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    );
+    ).unwrap();
     // Rewrite a value inside the exported bytes.
     let text = String::from_utf8(bytes).unwrap().replace("Dupont", "Martin");
     let stream = read_stream(text.as_bytes()).unwrap();
@@ -212,7 +274,7 @@ fn history_with_an_unsalted_op_is_rejected_at_the_reader() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record, &tampered)],
-    );
+    ).unwrap();
     assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { .. })));
 }
 
@@ -230,7 +292,7 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
             Mode::History,
             Intent::Upsert,
             0
-        ))]))
+        ))]).unwrap())
         .unwrap()
         .trim_end()
     );
@@ -238,7 +300,7 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
     // Unsupported version.
     let mut m = manifest(Mode::History, Intent::Upsert, 0);
     m.format_version = 99;
-    let bytes = write_lines(&[Line::Header(m)]);
+    let bytes = write_lines(&[Line::Header(m)]).unwrap();
     assert!(matches!(read_stream(&bytes), Err(ReadError::UnsupportedVersion(99))));
 
     // A record line in a history stream: two sources of truth, rejected.
@@ -249,14 +311,14 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
             lens: RevisionId::new("x"),
             values: RecordValues::new(),
         }),
-    ]);
+    ]).unwrap();
     assert!(matches!(
         read_stream(&mixed),
         Err(ReadError::ModeMismatch { line: 2, .. })
     ));
 
     // Manifest count disagrees with the stream.
-    let short = write_lines(&[Line::Header(manifest(Mode::History, Intent::Upsert, 3))]);
+    let short = write_lines(&[Line::Header(manifest(Mode::History, Intent::Upsert, 3))]).unwrap();
     assert!(matches!(
         read_stream(&short),
         Err(ReadError::RecordCountMismatch { expected: 3, got: 0 })
@@ -283,10 +345,10 @@ fn schema_and_nomenclature_lines_round_trip() {
             content_type: "application/pdf".into(),
         },
     ];
-    let bytes = write_lines(&lines);
+    let bytes = write_lines(&lines).unwrap();
     let stream = read_stream(&bytes).unwrap();
     assert_eq!(stream.lines, lines);
-    assert_eq!(write_lines(&stream.lines), bytes);
+    assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
     // A cell address round-trips too (record line with items).
     let mut values = RecordValues::new();
     values.cells.insert(
@@ -298,6 +360,6 @@ fn schema_and_nomenclature_lines_round_trip() {
         lens: revision_id(&schema()),
         values,
     });
-    let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1)), rec.clone()]);
+    let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1)), rec.clone()]).unwrap();
     assert_eq!(read_stream(&bytes).unwrap().lines[1], rec);
 }

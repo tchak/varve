@@ -21,7 +21,7 @@ pub use import::{
 };
 pub use line::{Intent, Line, Manifest, Mode, RecordLine};
 pub use read::{ReadError, Stream, read_stream};
-pub use write::{write_history, write_lines, write_snapshot};
+pub use write::{WriteError, write_history, write_lines, write_snapshot};
 
 /// Format version carried on line 1 (§5: fail fast on line 1).
 pub const FORMAT_VERSION: u32 = 1;

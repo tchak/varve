@@ -14,7 +14,7 @@ thiserror.workspace = true
 # The wire is JSON: serde_json is the format parser here (§9 — wire types
 # only). Emitted lines are JCS canonical bytes from varve-core, so the
 # writer never depends on serde_json's output shape.
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [dev-dependencies]
 proptest.workspace = true

@@ -13,14 +13,25 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+/// The largest integer a JSON number can carry exactly under RFC 8785:
+/// JCS numbers are IEEE 754 doubles, so 2^53 − 1 (ES6
+/// `Number.MAX_SAFE_INTEGER`) bounds `CanonicalValue::Int`.
+pub const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
+
 /// A JSON-shaped value ready for canonicalization.
 ///
-/// Kernel scalars arrive pre-rendered per §2.13: decimals and instants
-/// as their normalized strings. `Float` exists for geometry coordinates.
+/// Kernel scalars arrive pre-rendered per §2.13: exact numbers
+/// (integers, decimals) and instants as their normalized strings. JSON
+/// numbers are reserved for JCS-safe structural counts (`Int`) and
+/// geometry numbers (`Float`).
 #[derive(Debug, Clone, PartialEq)]
 pub enum CanonicalValue {
     Null,
     Bool(bool),
+    /// A JCS-safe integer: |i| ≤ [`MAX_SAFE_INTEGER`]. Anything larger
+    /// is not representable as an RFC 8785 number (a verifier in any
+    /// other language would round it) and errors at serialization —
+    /// full-range i64 travels as a string (`Scalar::Integer`).
     Int(i64),
     /// Serialized per ES6 `Number::toString` (JCS). NaN and infinities
     /// are not representable and error at serialization.
@@ -35,6 +46,10 @@ pub enum CanonicalError {
     /// JCS forbids NaN and infinities.
     #[error("JCS forbids NaN and infinities")]
     NonFiniteNumber,
+    /// JCS numbers are doubles: integers beyond ±(2^53 − 1) cannot be
+    /// serialized exactly and are refused rather than rounded.
+    #[error("integer {0} is outside the JCS-safe range (|i| ≤ 2^53 − 1)")]
+    UnsafeInteger(i64),
 }
 
 /// RFC 8785 canonical bytes.
@@ -48,7 +63,14 @@ fn write_value(value: &CanonicalValue, out: &mut String) -> Result<(), Canonical
     match value {
         CanonicalValue::Null => out.push_str("null"),
         CanonicalValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        CanonicalValue::Int(i) => out.push_str(&i.to_string()),
+        CanonicalValue::Int(i) => {
+            if i.unsigned_abs() > MAX_SAFE_INTEGER as u64 {
+                return Err(CanonicalError::UnsafeInteger(*i));
+            }
+            // Within the safe range the ES6 rendering of an integral
+            // double is its plain decimal digits.
+            out.push_str(&i.to_string());
+        }
         CanonicalValue::Float(f) => {
             if !f.is_finite() {
                 return Err(CanonicalError::NonFiniteNumber);
@@ -278,6 +300,31 @@ mod tests {
 
     fn bytes(value: &CanonicalValue) -> String {
         String::from_utf8(canonical_bytes(value).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn integers_are_jcs_safe_or_refused() {
+        // Within ±(2^53 − 1) an integer renders as its digits — the same
+        // bytes ES6 produces for the integral double.
+        assert_eq!(bytes(&CanonicalValue::Int(MAX_SAFE_INTEGER)), "9007199254740991");
+        assert_eq!(bytes(&CanonicalValue::Int(-MAX_SAFE_INTEGER)), "-9007199254740991");
+        assert_eq!(bytes(&CanonicalValue::Int(0)), "0");
+        assert_eq!(
+            bytes(&CanonicalValue::Int(MAX_SAFE_INTEGER)),
+            bytes(&CanonicalValue::Float(MAX_SAFE_INTEGER as f64))
+        );
+        // Beyond it, a double cannot hold the value: refuse, never round.
+        for i in [MAX_SAFE_INTEGER + 1, -(MAX_SAFE_INTEGER + 1), i64::MAX, i64::MIN + 1] {
+            assert_eq!(
+                canonical_bytes(&CanonicalValue::Int(i)),
+                Err(CanonicalError::UnsafeInteger(i))
+            );
+        }
+        // i64::MIN: `abs` would overflow — must still be refused cleanly.
+        assert_eq!(
+            canonical_bytes(&CanonicalValue::Int(i64::MIN)),
+            Err(CanonicalError::UnsafeInteger(i64::MIN))
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! `CanonicalValue` (§2.13, §5 — hash the canonical bytes, never the
 //! emitted line; here they are the same bytes).
 
-use varve_core::canonical::{CanonicalValue, canonical_bytes};
+use varve_core::canonical::{CanonicalError, CanonicalValue, canonical_bytes};
 use varve_record::canon as record_canon;
 use varve_schema::{option_row_canonical, schema_canonical};
 
@@ -115,17 +115,29 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
     }
 }
 
+/// A line whose canonical form is not JCS-representable. Only reachable
+/// with unvalidated data — a structural count or size claim beyond
+/// 2^53 − 1 (schema validation and conformance bound those) — never
+/// with floats, which come only from parsed GeoJSON and are finite.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("line {line}: {error}")]
+pub struct WriteError {
+    /// 1-based line index in the stream.
+    pub line: usize,
+    pub error: CanonicalError,
+}
+
 /// Serialize lines to JSONL bytes: one canonical JSON object per line,
 /// `\n`-terminated. Deterministic by construction.
-pub fn write_lines(lines: &[Line]) -> Vec<u8> {
+pub fn write_lines(lines: &[Line]) -> Result<Vec<u8>, WriteError> {
     let mut out = Vec::new();
-    for line in lines {
+    for (index, line) in lines.iter().enumerate() {
         let bytes = canonical_bytes(&line_canonical(line))
-            .expect("wire lines carry no floats (geometry is a string)");
+            .map_err(|error| WriteError { line: index + 1, error })?;
         out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
-    out
+    Ok(out)
 }
 
 /// A history export: manifest, schema-side lines, then every record's
@@ -134,7 +146,7 @@ pub fn write_history(
     manifest: Manifest,
     schema_lines: Vec<Line>,
     records: &[(varve_core::RecordId, &varve_record::RecordLog)],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, WriteError> {
     debug_assert_eq!(manifest.mode, Mode::History);
     let mut lines = vec![Line::Header(manifest)];
     lines.extend(schema_lines);
@@ -153,7 +165,7 @@ pub fn write_snapshot(
     manifest: Manifest,
     schema_lines: Vec<Line>,
     records: Vec<RecordLine>,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, WriteError> {
     debug_assert_eq!(manifest.mode, Mode::Snapshot);
     let mut lines = vec![Line::Header(manifest)];
     lines.extend(schema_lines);

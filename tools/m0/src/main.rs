@@ -537,9 +537,9 @@ fn wire_round_trip(schemas: &[Schema]) {
         }),
     );
 
-    let bytes = write_lines(&lines);
+    let bytes = write_lines(&lines).expect("corpus schemas are JCS-representable");
     let stream = read_stream(&bytes).expect("corpus stream must read back");
-    let again = write_lines(&stream.lines);
+    let again = write_lines(&stream.lines).expect("corpus schemas are JCS-representable");
 
     let mut schema_mismatches = 0u64;
     let mut id_mismatches = 0u64;

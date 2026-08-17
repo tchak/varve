@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use varve_core::canonical::MAX_SAFE_INTEGER;
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId};
 use varve_schema::{
     Arity, Cardinality, NomenclatureRef, NomenclatureTable, OptionRow,
@@ -52,6 +53,10 @@ pub enum ConformanceError {
     AttachmentTypeNotAccepted(ColumnId, String),
     #[error("column '{0}': file exceeds the size limit")]
     AttachmentTooLarge(ColumnId),
+    /// A byte-size claim beyond 2^53 − 1 cannot ride the canonical form
+    /// (JSON numbers are JCS doubles, §2.13) — and is not a real file.
+    #[error("column '{0}': attachment byte_size exceeds the JCS-safe integer range")]
+    AttachmentSizeUnrepresentable(ColumnId),
 }
 
 fn scalar_conforms(
@@ -81,6 +86,9 @@ fn scalar_conforms(
             }
             if !constraints.admits_size(a.byte_size) {
                 errors.push(ConformanceError::AttachmentTooLarge(column.clone()));
+            }
+            if a.byte_size > MAX_SAFE_INTEGER as u64 {
+                errors.push(ConformanceError::AttachmentSizeUnrepresentable(column.clone()));
             }
         }
         (Scalar::Enum(option), ScalarType::Enum(nref)) => {

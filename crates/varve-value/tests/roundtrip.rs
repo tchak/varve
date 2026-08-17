@@ -329,6 +329,36 @@ fn geometry_is_validated_geojson() {
 }
 
 #[test]
+fn geometry_canonical_form_is_jcs() {
+    // §2.13 decision 3: a feature's canonical form is its JSON value
+    // with ES6 number rendering — the same bytes any JCS implementation
+    // produces — and equality is equality of that form.
+    use varve_core::canonical::{CanonicalValue, canonical_bytes};
+    use varve_value::Feature;
+    let a = Feature::parse(
+        r#"{"type":"Feature","id":7,"geometry":{"type":"Point","coordinates":[-0.0,1.0,1e21]},"properties":{"n":100000000000000000000000,"s":"x"}}"#,
+    )
+    .unwrap();
+    let b = Feature::parse(
+        r#"{"properties":{"s":"x","n":1e23},"geometry":{"coordinates":[0,1,1000000000000000000000],"type":"Point"},"id":7.0,"type":"Feature"}"#,
+    )
+    .unwrap();
+    // `-0.0`/`0`, `1.0`/`1`, `1e21`/`1000…`, `7`/`7.0`: one value each.
+    assert_eq!(a, b);
+    assert_eq!(a.id(), Some("7"));
+    // Display *is* the JCS text: sorted keys, ES6 numbers.
+    let jcs = r#"{"geometry":{"coordinates":[0,1,1e+21],"type":"Point"},"id":7,"properties":{"n":1e+23,"s":"x"},"type":"Feature"}"#;
+    assert_eq!(a.to_string(), jcs);
+    assert_eq!(canonical_bytes(a.to_canonical()).unwrap(), jcs.as_bytes());
+    // The canonical value is a JSON object, not a stringified blob, and
+    // decodes back to the same feature.
+    assert!(matches!(a.to_canonical(), CanonicalValue::Object(_)));
+    assert_eq!(Feature::from_canonical(a.to_canonical()).unwrap(), a);
+    // A canonical value that is not a Feature is refused.
+    assert!(Feature::from_canonical(&CanonicalValue::String("nope".into())).is_err());
+}
+
+#[test]
 fn file_replacement_is_visible_element_wise() {
     let old = CellValue::Many(vec![attachment("f1", "aaa"), attachment("f2", "bbb")]);
     let new = CellValue::Many(vec![attachment("f2", "b-new"), attachment("f3", "ccc")]);
