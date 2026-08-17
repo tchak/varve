@@ -32,11 +32,11 @@ pub enum MergeConflict {
     Group(GroupId),
     #[error("resolver '{0}': both sides modified it differently")]
     Resolver(ResolverId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConflictKind {
-    BothModified,
+    /// One side deleted a group while the other added or changed an
+    /// element inside it: the element would survive the merge with
+    /// nowhere to live. Reported, never dropped.
+    #[error("group '{group}' was deleted on one side while '{element}' was added or changed inside it on the other")]
+    OrphanedByDeletedGroup { group: GroupId, element: String },
 }
 
 struct Flat {
@@ -135,6 +135,28 @@ pub fn merge(
             Ok(Some(decl)) => resolvers.push(decl),
             Ok(None) => {}
             Err(()) => conflicts.push(MergeConflict::Resolver(id.clone())),
+        }
+    }
+
+    // An element that survives the merge inside a group that did not:
+    // one side deleted the group, the other added or changed the
+    // element. `rebuild` never descends into a group that is gone, so
+    // this must be a conflict — silently dropping the element would be
+    // guessing.
+    for (key, def) in &merged {
+        let parent = match def {
+            Def::Column { parent, .. } | Def::Group { parent, .. } => parent,
+        };
+        if let Some(group) = parent
+            && !merged.contains_key(&Key::Group(group.clone()))
+        {
+            conflicts.push(MergeConflict::OrphanedByDeletedGroup {
+                group: group.clone(),
+                element: match key {
+                    Key::Column(c) => c.to_string(),
+                    Key::Group(g) => g.to_string(),
+                },
+            });
         }
     }
 

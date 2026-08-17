@@ -13,7 +13,7 @@ mod nomenclatures;
 pub use aggregate::{
     AggregateColumn, AggregatePolicy, AggregateReport, AggregateRevision, aggregate,
 };
-pub use merge::{ConflictKind, MergeConflict, merge};
+pub use merge::{MergeConflict, merge};
 pub use blocks::{BlockRegistry, PublishBlockError};
 pub use nomenclatures::{NomenclatureRegistry, PublishNomenclatureError};
 

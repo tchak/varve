@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2a6d0da06712afa8696d4c0aae2f1bb4766385e38c6538a441294b2fa5dd7362 # shrinks to a = Enum(Inline([])), b = Enum(Published { id: NomenclatureId("pays"), version: 1 }), c = Enum(Published { id: NomenclatureId("pays"), version: 1 })

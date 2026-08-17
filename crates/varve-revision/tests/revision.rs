@@ -217,6 +217,27 @@ fn merge_recurses_into_groups() {
     assert_eq!(g.children.len(), 2);
     let Element::Column(x) = &g.children[0] else { panic!() };
     assert_eq!(x.ty, ScalarType::Decimal(None));
+
+    // One side deletes the group, the other adds a column inside it:
+    // the addition would survive with nowhere to live — a conflict,
+    // never a silent drop.
+    let deleted = schema(vec![]);
+    let added_inside = schema(vec![group(vec![
+        column("x", ScalarType::Text),
+        column("y", ScalarType::Boolean),
+    ])]);
+    assert_eq!(
+        merge(&base, &deleted, &added_inside),
+        Err(vec![MergeConflict::OrphanedByDeletedGroup {
+            group: GroupId::new("g"),
+            element: "y".into(),
+        }])
+    );
+    // Symmetric.
+    assert!(merge(&base, &added_inside, &deleted).is_err());
+    // Deleting the group on one side while the other leaves it untouched
+    // deletes it, children included — no orphan, no conflict.
+    assert_eq!(merge(&base, &deleted, &base).unwrap().root, vec![]);
 }
 
 #[test]
