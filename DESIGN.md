@@ -1561,8 +1561,26 @@ Only then: `surface`, `store`, service.
    exists in the data. The few requests over the years were refused without
    much pushback. Depth-1 stands as policy; `row_path` staying a sequence
    (§2.3) is the entire accommodation.
-5. **Group-level atomic validation.** What exactly does a published block
-   guarantee, and what does violating it produce?
+5. ~~Group-level atomic validation.~~ **Resolved by the assembled
+   design.** A published block guarantees its **structure** (columns,
+   types, units, constraints, inline nomenclatures — §2.1, versioned and
+   content-addressed like nomenclatures), its **paired declarations**
+   (a resolver, per the §2.7 SIRET example), and its **bundled rules**
+   (§4: visibility, requiredness, and validation predicates over its own
+   columns — `date_fin ≥ date_debut` is the §4.3 column-to-column
+   comparison, scheduled for validation predicates first). Casting a
+   block between versions is the per-column cast machinery over the
+   block's columns together (§2.5: a block's value is a view). Violating
+   a block rule produces **non-admissibility with respect to a surface**
+   (§2.6), never global invalidity: block rules are surface-level rules
+   the block *ships as defaults*, the way a "RIB" block ships an accept
+   set — so a block publication bundles a **schema-side part** (what a
+   revision includes) and a **surface-side part** (the rule and prompt
+   defaults). Rules pin to the block version — that is what "published"
+   means, and what makes an impact report over block bumps meaningful.
+   Residual is implementation, deliberately deferred: no `Block` type
+   until both halves can be built together (schema cannot depend on
+   surface), i.e. alongside `varve-wire`, where blocks are a line kind.
 6. ~~Import modes.~~ **Resolved (§5 "Import modes").** Modes are
    distinguished by stream kind, never by flag; snapshot import is
    whole-record replace (column-scoped replace cut — DN practice does
