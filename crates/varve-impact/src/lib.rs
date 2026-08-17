@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use varve_core::{ColumnId, OptionId, ResolverId};
 use varve_projection::project;
 use varve_schema::{
-    Cast, CastClass, CastError, NomenclatureTable, ResolverDeclaration,
-    ScalarType, Schema, SchemaIndex, Unit, column_cast, nomenclature_rows,
+    AttachmentConstraints, Cast, CastClass, CastError, NomenclatureTable,
+    ResolverDeclaration, ScalarType, Schema, SchemaIndex, Unit, column_cast,
+    nomenclature_rows,
 };
 use varve_value::RecordValues;
 
@@ -57,6 +58,10 @@ pub struct ColumnImpact {
     /// For enum transitions that drop options (§2.11): exactly which
     /// ids — the records holding them are the ones that will fail.
     pub removed_options: Vec<OptionId>,
+    /// For attachment transitions whose constraints changed (§2.15):
+    /// named, so the report can say "accept narrowed to [pdf]; limit
+    /// lowered" instead of an anonymous retype.
+    pub constraint_change: Option<ConstraintChange>,
     /// For number transitions whose unit changed (§2.14): named
     /// explicitly, because a unit added or removed is a *semantic*
     /// change even when the cast is free — values unchanged, meaning
@@ -68,6 +73,12 @@ pub struct ColumnImpact {
 pub struct UnitChange {
     pub from: Option<Unit>,
     pub to: Option<Unit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstraintChange {
+    pub from: AttachmentConstraints,
+    pub to: AttachmentConstraints,
 }
 
 /// The §2.8 impact questions, answered per resolver.
@@ -137,12 +148,14 @@ pub fn classify(
                 class: ChangeClass::Safe,
                 removed_options: vec![],
                 unit_change: None,
+                constraint_change: None,
             },
             Some(tinfo) if finfo.scope != tinfo.scope => ColumnImpact {
                 change: ColumnChange::ScopeMoved,
                 class: ChangeClass::Breaking,
                 removed_options: vec![],
                 unit_change: None,
+                constraint_change: None,
             },
             Some(tinfo) => {
                 let cast = column_cast(
@@ -153,36 +166,42 @@ pub fn classify(
                 let removed_options =
                     removed_options(&finfo.ty, &tinfo.ty, nomenclatures)?;
                 let unit_change = unit_change(&finfo.ty, &tinfo.ty);
+                let constraint_change = constraint_change(&finfo.ty, &tinfo.ty);
                 match cast.class() {
                     CastClass::Identity => ColumnImpact {
                         change: ColumnChange::Identical,
                         class: ChangeClass::Safe,
                         removed_options,
                         unit_change,
+                        constraint_change: constraint_change.clone(),
                     },
                     CastClass::Forbidden => ColumnImpact {
                         change: ColumnChange::Forbidden,
                         class: ChangeClass::Breaking,
                         removed_options,
                         unit_change,
+                        constraint_change: constraint_change.clone(),
                     },
                     CastClass::Widening => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Safe,
                         removed_options,
                         unit_change,
+                        constraint_change: constraint_change.clone(),
                     },
                     CastClass::Lossy => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Lossy,
                         removed_options,
                         unit_change,
+                        constraint_change: constraint_change.clone(),
                     },
                     CastClass::Checked => ColumnImpact {
                         change: ColumnChange::Retyped { cast },
                         class: ChangeClass::Checked,
                         removed_options,
                         unit_change,
+                        constraint_change: constraint_change.clone(),
                     },
                 }
             }
@@ -198,6 +217,7 @@ pub fn classify(
                     class: ChangeClass::Safe,
                     removed_options: vec![],
                     unit_change: None,
+                    constraint_change: None,
                 },
             );
         }
@@ -243,6 +263,17 @@ pub fn assess<'a>(
     }
     report.records = Some(assessment);
     Ok(report)
+}
+
+/// §2.15: name the constraint transition whenever both sides are
+/// attachments and the constraints differ.
+fn constraint_change(from: &ScalarType, to: &ScalarType) -> Option<ConstraintChange> {
+    match (from, to) {
+        (ScalarType::Attachment(f), ScalarType::Attachment(t)) if f != t => {
+            Some(ConstraintChange { from: f.clone(), to: t.clone() })
+        }
+        _ => None,
+    }
 }
 
 /// §2.14: name the unit transition whenever both sides are numbers and

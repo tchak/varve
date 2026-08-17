@@ -161,6 +161,39 @@ fn unit_changes_are_named_in_the_report() {
 }
 
 #[test]
+fn attachment_constraint_changes_are_named() {
+    use varve_impact::ConstraintChange;
+    use varve_schema::AttachmentConstraints;
+    let files = |constraints: AttachmentConstraints| {
+        schema(vec![column("piece", ScalarType::Attachment(constraints), Arity::Many)])
+    };
+    let open = AttachmentConstraints::default();
+    let pdf_only = AttachmentConstraints {
+        accept: vec!["application/pdf".into()],
+        max_bytes: Some(5_000_000),
+    };
+
+    // Narrowing: checked, and the report names both sides.
+    let report = classify(&files(open.clone()), &files(pdf_only.clone()), &Default::default()).unwrap();
+    let impact = &report.columns[&ColumnId::new("piece")];
+    assert_eq!(impact.class, ChangeClass::Checked);
+    assert_eq!(
+        impact.constraint_change,
+        Some(ConstraintChange { from: open.clone(), to: pdf_only.clone() })
+    );
+
+    // Broadening: safe, still named.
+    let report = classify(&files(pdf_only), &files(open.clone()), &Default::default()).unwrap();
+    let impact = &report.columns[&ColumnId::new("piece")];
+    assert_eq!(impact.class, ChangeClass::Safe);
+    assert!(impact.constraint_change.is_some());
+
+    // Unchanged: no noise.
+    let report = classify(&files(open.clone()), &files(open), &Default::default()).unwrap();
+    assert_eq!(report.columns[&ColumnId::new("piece")].constraint_change, None);
+}
+
+#[test]
 fn resolver_impact_questions() {
     let decl = |id: &str, version: u32, target: &str| ResolverDeclaration {
         id: ResolverId::new(id),
