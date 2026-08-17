@@ -1,0 +1,20 @@
+[package]
+name = "varve-wire"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+varve-value = { path = "../varve-value" }
+varve-record = { path = "../varve-record" }
+thiserror.workspace = true
+# The wire is JSON: serde_json is the format parser here (§9 — wire types
+# only). Emitted lines are JCS canonical bytes from varve-core, so the
+# writer never depends on serde_json's output shape.
+serde_json = "1"
+
+[dev-dependencies]
+proptest.workspace = true

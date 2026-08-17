@@ -1500,6 +1500,14 @@ every feature must appear in the corpus to earn its place.
   §4.2 computed values and the §4.3 solver are not yet implemented.*
 
 - **M3** (`wire`) — **Round-trip.** The corpus in and out, byte-stable.
+  *Machinery built (`varve-wire`): tagged JSONL where every line is the
+  JCS canonical bytes (one serializer — byte-stability is a property of
+  the canonical form); both export modes, the line-1 manifest with
+  intent, fail-fast reading, mode-mixing rejection, history import as
+  chain adoption (tamper detected on import), snapshot import as an
+  ordinary log entry. Round-trip and reader-totality are property-tested;
+  the corpus run itself (m0 emitting and re-reading all 42,723 schemas)
+  is the remaining M3 step.*
 
 Only then: `surface`, `store`, service.
 

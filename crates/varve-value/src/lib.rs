@@ -34,7 +34,8 @@ pub enum Scalar {
     /// A member of the column's nomenclature; cells store option ids,
     /// labels live in the revision (§2.11).
     Enum(OptionId),
-    Attachment(AttachmentRef),
+    /// Boxed: the one large scalar — keeps every cell small (§2.4).
+    Attachment(Box<AttachmentRef>),
     Geometry(Feature),
 }
 

@@ -70,13 +70,13 @@ fn one(scalar: Scalar) -> CellState {
 
 fn attachment(id: &str, content: &str) -> Scalar {
     use varve_core::canonical::{CanonicalValue, hash_plain};
-    Scalar::Attachment(AttachmentRef {
+    Scalar::Attachment(Box::new(AttachmentRef {
         id: id.into(),
         hash: hash_plain(&CanonicalValue::String(content.into())).unwrap(),
         filename: format!("{id}.pdf"),
         content_type: "application/pdf".into(),
         byte_size: 1_000,
-    })
+    }))
 }
 
 fn sample() -> RecordValues {

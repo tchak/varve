@@ -10,7 +10,10 @@ mod canon;
 mod cast;
 mod units;
 
-pub use canon::{revision_id, schema_canonical};
+pub use canon::{
+    SchemaDecodeError, option_row_canonical, option_row_from_canonical, revision_id,
+    scalar_type_from_canonical, schema_canonical, schema_from_canonical,
+};
 pub use units::{Dimension, Unit, conversion};
 
 pub use cast::{
@@ -198,7 +201,7 @@ pub struct ResolverDeclaration {
 }
 
 /// A schema: the root is an implicit `one` group (§2.5).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Schema {
     pub root: Vec<Element>,
     pub resolvers: Vec<ResolverDeclaration>,

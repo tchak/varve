@@ -205,13 +205,13 @@ fn referenced_blobs_cover_history_and_snapshots() {
             column: ColumnId::new("piece"),
             path: RowPath::root(),
             state: CellState::Value(CellValue::Many(vec![Scalar::Attachment(
-                AttachmentRef {
+                Box::new(AttachmentRef {
                     id: name.into(),
                     hash: blob(content),
                     filename: format!("{name}.pdf"),
                     content_type: "application/pdf".into(),
                     byte_size: 10,
-                },
+                }),
             )])),
         }
     };

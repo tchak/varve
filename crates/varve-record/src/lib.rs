@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-mod canon;
+pub mod canon;
 mod entry;
 mod log;
 mod resolution;
