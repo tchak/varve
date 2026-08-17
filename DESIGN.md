@@ -895,7 +895,10 @@ Expr  ::= and(Expr…) | or(Expr…) | Atom
 Atom  ::= eq | not_eq | lt | le | gt | ge     (typed comparison)
         | is_empty | is_filled
         | contains | excludes                  (arity-many enum)
-        | pending(resolver)                    (§2.8 rule 3)
+        | pending | not_pending (resolver)     (§2.8 rule 3; paired
+                                                negative — "required
+                                                unless pending" needs it,
+                                                found building surfaces)
 Term  ::= column(column_id, field?)            (field: nomenclature
                                                 extra-field projection)
         | const(typed literal)

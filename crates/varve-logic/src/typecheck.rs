@@ -79,7 +79,7 @@ fn check_atom(
     scope: &[GroupId],
     errors: &mut Vec<TypeError>,
 ) {
-    if let Atom::Pending { resolver } = atom {
+    if let Atom::Pending { resolver } | Atom::NotPending { resolver } = atom {
         if !schema.resolvers.iter().any(|r| r.id == *resolver) {
             errors.push(TypeError::UnknownResolver(resolver.clone()));
         }
@@ -118,7 +118,7 @@ fn check_atom(
         | Atom::Ge { right, .. } => {
             check_comparison(source, info, right, nomenclatures, true, errors);
         }
-        Atom::Pending { .. } => unreachable!(),
+        Atom::Pending { .. } | Atom::NotPending { .. } => unreachable!(),
     }
 }
 

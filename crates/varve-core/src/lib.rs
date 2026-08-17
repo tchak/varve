@@ -71,6 +71,11 @@ id_type!(
     /// store option ids; labels live in the revision.
     OptionId
 );
+id_type!(
+    /// Identity of a surface (§2.1): a presentation + admissibility
+    /// tree over a revision.
+    SurfaceId
+);
 
 /// One segment of a row path: which item of which `many` group.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

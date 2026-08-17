@@ -1,0 +1,13 @@
+[package]
+name = "varve-surface"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+varve-logic = { path = "../varve-logic" }
+varve-value = { path = "../varve-value" }
+thiserror.workspace = true

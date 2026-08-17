@@ -609,6 +609,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "varve-surface"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+ "varve-core",
+ "varve-logic",
+ "varve-schema",
+ "varve-value",
+]
+
+[[package]]
 name = "varve-value"
 version = "0.1.0"
 dependencies = [

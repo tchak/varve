@@ -111,6 +111,10 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
             ("op", string("pending")),
             ("resolver", string(resolver)),
         ]),
+        Atom::NotPending { resolver } => obj(vec![
+            ("op", string("not_pending")),
+            ("resolver", string(resolver)),
+        ]),
     }
 }
 
@@ -254,6 +258,9 @@ fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
             option: OptionId::new(text(map, "option")?),
         }),
         "pending" => Ok(Atom::Pending {
+            resolver: ResolverId::new(text(map, "resolver")?),
+        }),
+        "not_pending" => Ok(Atom::NotPending {
             resolver: ResolverId::new(text(map, "resolver")?),
         }),
         other => Err(DecodeError(format!("unknown op '{other}'"))),

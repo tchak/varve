@@ -47,6 +47,7 @@ pub fn eval(expr: &Expr, ctx: &EvalContext) -> bool {
 fn eval_atom(atom: &Atom, ctx: &EvalContext) -> bool {
     match atom {
         Atom::Pending { resolver } => ctx.pending.contains(resolver),
+        Atom::NotPending { resolver } => !ctx.pending.contains(resolver),
         Atom::IsEmpty { source } => read(source, ctx).is_none(),
         Atom::IsFilled { source } => read(source, ctx).is_some(),
         Atom::Contains { source, option } => match read(source, ctx) {

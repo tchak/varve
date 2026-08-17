@@ -77,8 +77,10 @@ pub enum Atom {
     /// Arity-`many` enum membership.
     Contains { source: ColumnRef, option: OptionId },
     Excludes { source: ColumnRef, option: OptionId },
-    /// §2.8 rule 3: resolution status is readable.
+    /// §2.8 rule 3: resolution status is readable. Paired negative
+    /// (like `not_eq`): there is no `Not` combinator.
     Pending { resolver: ResolverId },
+    NotPending { resolver: ResolverId },
 }
 
 impl Atom {
@@ -94,7 +96,7 @@ impl Atom {
             | Atom::IsFilled { source }
             | Atom::Contains { source, .. }
             | Atom::Excludes { source, .. } => Some(source),
-            Atom::Pending { .. } => None,
+            Atom::Pending { .. } | Atom::NotPending { .. } => None,
         }
     }
 
@@ -150,7 +152,8 @@ pub fn resolver_sources(expr: &Expr) -> BTreeSet<ResolverId> {
                     walk(operand, out);
                 }
             }
-            Expr::Atom(Atom::Pending { resolver }) => {
+            Expr::Atom(Atom::Pending { resolver })
+            | Expr::Atom(Atom::NotPending { resolver }) => {
                 out.insert(resolver.clone());
             }
             Expr::Atom(_) => {}
