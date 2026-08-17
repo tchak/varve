@@ -1131,7 +1131,10 @@ typechecks; an enum constant references a **removed option id** (the
 §2.11/§3 flagged case, now reaching rules); a projected nomenclature
 field disappears. These mirror DN's own rule-error taxonomy
 (`not_available`, `incompatible`, `not_included`) and become the
-"broken rule references" section of the impact report.
+"broken rule references" section of the impact report — built:
+`varve_impact::broken_rules` re-typechecks caller-supplied rules
+against the new revision and classifies the verdicts, telling a rule
+the transition broke from one that was already broken.
 
 ### 4.2 Computed values (in scope — strong standing demand)
 
@@ -1195,8 +1198,9 @@ against brute-force enumeration over small domains.
   one's; first-match makes the later group unreachable. DN today
   detects only exact duplicates.
 - **Never-true visibility × required-on-surface** = the "statically
-  unreachable required columns" §7 already promises the impact report —
-  this is the algorithm behind that promise.
+  unreachable required columns" §7 promises the impact report —
+  this is the algorithm behind that promise, and the promise waits on
+  it (open question 15).
 
 **The presentation-tree graph is statically computable.** The visible
 set is a function of the finite atom valuation, propagated through the
@@ -1548,16 +1552,22 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
 - `varve-projection` — records viewed and edited through a revision they
   weren't written on. Casts applied, lossiness reported.
 - `varve-impact` — what does publishing revision N+1 do? Change classification
-  (safe / lossy / breaking), broken rule references, statically unreachable
-  required columns, count of records whose cells fail the new cast.
-  *(Name settled — see open question 2.)*
+  (safe / lossy / breaking), the §2.8 resolver questions, broken rule
+  references (§4.1), count of records whose cells fail the new cast, records
+  with pending resolutions against a removed resolver. **Statically
+  unreachable required columns** need the §4.3 solver — not built (open
+  question 15). *(Name settled — see open question 2.)*
 
 `projection` and `impact` both depend on `schema`.
 *Correction, found in implementation: `impact` also depends on
 `projection` — counting the records whose cells fail a transition **is**
 running the projection over them, and duplicating the per-cell cast
-execution would drift. The DAG stays acyclic; the reverse direction
-(projection → impact) remains absent.*
+execution would drift — and on `logic`, since "broken rule references"
+**is** re-typechecking rules against the new revision. Both are Tier 2;
+the DAG stays acyclic; the reverse directions remain absent. Rules and
+per-record pending resolutions are inputs to `impact` — surfaces (Tier 3)
+and resolution instances (Tier 3) hand them down; the crate never looks
+up.*
 
 **Tier 3**
 - `varve-surface` — presentation + admissibility tree. Depends on schema +
@@ -1601,9 +1611,18 @@ every feature must appear in the corpus to earn its place.
   revision transition be classified? Where DN actually broke or froze dossiers,
   does the impact report predict it? This is the thesis, and it is testable.
   *Machinery built: `varve-projection` and `varve-impact` implement
-  classification (§3 table), the §2.8 resolver questions, and record
-  assessment, tested on synthetic transitions. The falsification itself
-  awaits the DN revision-history extract (§12.4).*
+  classification (§3 table), the §2.8 resolver questions (removed →
+  orphaned columns and records pending; result type changed → broken
+  mappings; mapping changed → stale and orphaned columns; input and
+  version changes), the §4.1 broken-rule section (rules re-typechecked
+  against the new revision, classified as source removed / retyped /
+  option removed / field removed, with "already broken" told apart), and
+  record assessment (failed cells per column; records whose cells have
+  no cast at all under a breaking change; pending resolutions against
+  removed resolvers), tested on synthetic transitions. Not built:
+  statically unreachable required columns — the §4.3 solver, open
+  question 15. The falsification itself awaits the DN revision-history
+  extract (§12.4).*
 
 - **M2** (`logic`) — **Rule expressibility.** Can every existing conditional and
   routing rule be expressed and type-checked? The residue is either a needed
@@ -1784,6 +1803,15 @@ Only then: `surface`, `store`, service.
     blobs share one sidecar, and `resolution`/`checkpoint` lines should
     land with it so import restores a record whole. Decide with §12.7
     (deferred-resolution frequency) in hand.
+15. **The §4.3 solver — absurdity detection and statically unreachable
+    required columns.** Promised by §7 for the impact report and by
+    §4.3 as the algorithm behind it; not built (found by audit,
+    2026-08-17 — earlier wording read as if it were). Everything else
+    the impact report promises is implemented; this one needs the small
+    per-column abstract-domain solver over the acyclic rule DAG. Build
+    it after the §12.5 rule extraction shows cascade depth and component
+    size — the same data that decides whether per-component enumeration
+    is always cheap.
 
 ## 11. Prior art to consult
 

@@ -3,19 +3,25 @@
 //! The impact report is the product artifact no competitor offers
 //! (§1): shown to an administration *before* it publishes. This crate
 //! covers change classification (§3), the resolver impact questions
-//! (§2.8), and record assessment (running the projection over real
-//! records and counting). Broken rule references arrive with
-//! `varve-logic`; statically-unreachable required columns with
-//! `varve-surface`.
+//! (§2.8), broken rule references (§4.1 — rules re-typechecked against
+//! the new revision), and record assessment (running the projection
+//! over real records and counting, including records with pending
+//! resolutions against a removed resolver). Not here yet: statically
+//! unreachable required columns — that needs the §4.3 solver (§10 Q15).
+//!
+//! Tier 2 cannot see surfaces or resolution instances, so the caller
+//! hands in what it wants judged: the rules (`RuleRef`), and per record
+//! the pending resolvers beside its values.
 
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use varve_core::{ColumnId, OptionId, ResolverId};
+use varve_core::{ColumnId, GroupId, OptionId, ResolverId};
+use varve_logic::{Expr, TypeError, typecheck};
 use varve_projection::project;
 use varve_schema::{
-    AttachmentConstraints, Cast, CastClass, CastError, NomenclatureTable,
+    AttachmentConstraints, Cast, CastClass, CastError, Mapping, NomenclatureTable,
     ResolverDeclaration, ScalarType, Schema, SchemaIndex, Unit, column_cast,
     nomenclature_rows,
 };
@@ -81,24 +87,90 @@ pub struct ConstraintChange {
     pub to: AttachmentConstraints,
 }
 
-/// The §2.8 impact questions, answered per resolver.
+/// The §2.8 impact questions, answered per resolver. One declaration
+/// may produce several entries (a version bump *and* a remap).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolverChange {
     Added { id: ResolverId },
     /// Which columns are orphaned (still exist in the new revision but
     /// nothing feeds them anymore); pending resolutions against this
-    /// resolver can never land.
+    /// resolver can never land — `assess` counts the records.
     Removed {
         id: ResolverId,
         orphaned_columns: Vec<ColumnId>,
     },
-    /// Which cells are stale — and re-derivable from retained snapshots
-    /// (§2.7): the mapped target columns.
+    /// §2.8: "resolver result type changed → which mappings break": the
+    /// mappings whose result field vanished or no longer typechecks
+    /// against its target column.
+    ResultTypeChanged {
+        id: ResolverId,
+        broken_mappings: Vec<Mapping>,
+    },
+    /// §2.8: "mapping changed → which cells are stale and re-derivable
+    /// from retained snapshots": the targets the new mapping feeds
+    /// differently or newly (stale), and the targets the old mapping fed
+    /// that nothing feeds now (orphaned by the remap).
     MappingChanged {
         id: ResolverId,
         stale_columns: Vec<ColumnId>,
+        orphaned_columns: Vec<ColumnId>,
     },
+    /// The input signature changed: pending resolutions were requested
+    /// against the old one (§2.8 rule 1 binds at request time).
+    InputChanged { id: ResolverId },
     VersionChanged { id: ResolverId, from: u32, to: u32 },
+}
+
+/// A rule the caller wants judged against the new revision — Tier 2
+/// cannot see where rules live (surfaces, blocks, routing), so the
+/// caller names them. `scope` is the rule's attachment scope: empty for
+/// record scope, the chain of `many` groups for an item scope (§4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuleRef {
+    pub name: String,
+    pub scope: Vec<GroupId>,
+    pub expr: Expr,
+}
+
+/// Why a rule breaks — §4.1's taxonomy, mirroring DN's
+/// `not_available` / `incompatible` / `not_included`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BreakKind {
+    /// A source column no longer exists (`not_available`).
+    SourceRemoved(ColumnId),
+    /// A source was retyped or rescoped so the atom no longer
+    /// typechecks (`incompatible`).
+    SourceRetyped(ColumnId),
+    /// An enum constant names an option id the new nomenclature lacks
+    /// (`not_included`; the §2.11/§3 flagged case reaching rules).
+    OptionRemoved(ColumnId, OptionId),
+    /// A projected nomenclature field disappeared.
+    FieldRemoved(ColumnId, String),
+    /// `pending(r)` names a resolver the new revision does not declare.
+    ResolverRemoved(ResolverId),
+    /// Anything else the typechecker refuses (policy, unknown
+    /// nomenclature).
+    Other(TypeError),
+}
+
+/// A rule that fails to typecheck against the new revision.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrokenRule {
+    pub name: String,
+    pub kinds: Vec<BreakKind>,
+    /// It did not typecheck against the *old* revision either — the
+    /// transition is not what broke it.
+    pub already_broken: bool,
+}
+
+/// One record as `assess` sees it: its folded values and the resolvers
+/// with a pending resolution on it (§2.8 — resolutions sit beside
+/// cells; `varve_record::pending_set` yields them, project to resolver
+/// ids).
+#[derive(Debug, Clone, Copy)]
+pub struct RecordUnderAssessment<'a> {
+    pub values: &'a RecordValues,
+    pub pending_resolvers: &'a BTreeSet<ResolverId>,
 }
 
 /// Aggregated over a record set by `assess`.
@@ -110,25 +182,91 @@ pub struct RecordAssessment {
     pub cells_failed: u64,
     pub cells_lossy: u64,
     pub failed_by_column: BTreeMap<ColumnId, u64>,
+    /// Records whose cells hit a column with no cast at all (`Forbidden`
+    /// or `ScopeMoved`): the projection drops them, so they are not
+    /// "failed cells" — they are cells with nowhere to go. Counted per
+    /// column so a breaking verdict comes with its blast radius.
+    pub records_with_uncastable: u64,
+    pub uncastable_by_column: BTreeMap<ColumnId, u64>,
+    /// §2.8: records with a pending resolution against a resolver the
+    /// new revision removes — those can never land.
+    pub pending_on_removed_resolvers: BTreeMap<ResolverId, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImpactReport {
     pub columns: BTreeMap<ColumnId, ColumnImpact>,
     pub resolvers: Vec<ResolverChange>,
+    /// §4.1 "broken rule references": filled by `broken_rules`, or by
+    /// `classify_with_rules`/`assess` when rules are supplied.
+    pub rules: Vec<BrokenRule>,
     /// Present when `assess` ran over records.
     pub records: Option<RecordAssessment>,
 }
 
 impl ImpactReport {
-    /// The one-line verdict: the worst class any column hits.
+    /// The one-line verdict: the worst class any column hits — and a
+    /// rule newly broken by the transition is breaking.
     pub fn worst(&self) -> ChangeClass {
-        self.columns
-            .values()
-            .map(|c| c.class)
-            .max()
-            .unwrap_or(ChangeClass::Safe)
+        let columns = self.columns.values().map(|c| c.class).max().unwrap_or(ChangeClass::Safe);
+        if self.rules.iter().any(|r| !r.already_broken) {
+            ChangeClass::Breaking
+        } else {
+            columns
+        }
     }
+}
+
+/// §4.1: which rules the transition breaks. A rule breaks when a source
+/// column is removed, a source is retyped so the atom no longer
+/// typechecks, an enum constant references a removed option id, or a
+/// projected nomenclature field disappears — exactly the failures the
+/// typechecker reports against the new revision, classified.
+pub fn broken_rules(
+    rules: &[RuleRef],
+    from: &Schema,
+    to: &Schema,
+    nomenclatures: &NomenclatureTable,
+) -> Vec<BrokenRule> {
+    let from_index = SchemaIndex::build(from);
+    let mut out = Vec::new();
+    for rule in rules {
+        let errors = typecheck(&rule.expr, to, nomenclatures, &rule.scope);
+        if errors.is_empty() {
+            continue;
+        }
+        let already_broken = !typecheck(&rule.expr, from, nomenclatures, &rule.scope).is_empty();
+        let kinds = errors
+            .into_iter()
+            .map(|e| match e {
+                TypeError::UnknownColumn(c) if from_index.columns.contains_key(&c) => {
+                    BreakKind::SourceRemoved(c)
+                }
+                TypeError::AtomNotAllowed(c)
+                | TypeError::TypeMismatch(c)
+                | TypeError::UnitMismatch(c)
+                | TypeError::ScopeViolation(c) => BreakKind::SourceRetyped(c),
+                TypeError::UnknownOption(c, o) => BreakKind::OptionRemoved(c, o),
+                TypeError::UnknownField(c, f) => BreakKind::FieldRemoved(c, f),
+                TypeError::UnknownResolver(r) => BreakKind::ResolverRemoved(r),
+                other => BreakKind::Other(other),
+            })
+            .collect();
+        out.push(BrokenRule { name: rule.name.clone(), kinds, already_broken });
+    }
+    out
+}
+
+/// `classify` plus the §4.1 broken-rule section.
+pub fn classify_with_rules(
+    from: &Schema,
+    to: &Schema,
+    nomenclatures: &NomenclatureTable,
+    rules: &[RuleRef],
+) -> Result<ImpactReport, CastError> {
+    let mut report = classify(from, to, nomenclatures)?;
+    report.rules = broken_rules(rules, from, to, nomenclatures);
+    Ok(report)
 }
 
 /// Static classification of the transition `from → to` (§3).
@@ -226,22 +364,42 @@ pub fn classify(
     Ok(ImpactReport {
         columns,
         resolvers: resolver_changes(from, to, &to_index),
+        rules: Vec::new(),
         records: None,
     })
 }
 
-/// Full impact: static classification plus the projection run over a
-/// record set — turning every `Checked` into an exact count (§7:
-/// "count of records whose cells fail the new cast").
+/// Full impact: static classification, the §4.1 broken-rule section,
+/// and the projection run over a record set — turning every `Checked`
+/// into an exact count (§7: "count of records whose cells fail the new
+/// cast"), naming the records whose cells have nowhere to go under a
+/// breaking column change, and counting records with pending
+/// resolutions against a removed resolver (§2.8).
 pub fn assess<'a>(
     from: &Schema,
     to: &Schema,
     nomenclatures: &NomenclatureTable,
-    records: impl IntoIterator<Item = &'a RecordValues>,
+    rules: &[RuleRef],
+    records: impl IntoIterator<Item = RecordUnderAssessment<'a>>,
 ) -> Result<ImpactReport, CastError> {
-    let mut report = classify(from, to, nomenclatures)?;
+    let mut report = classify_with_rules(from, to, nomenclatures, rules)?;
+    let removed_resolvers: BTreeSet<ResolverId> = report
+        .resolvers
+        .iter()
+        .filter_map(|c| match c {
+            ResolverChange::Removed { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    let uncastable: BTreeSet<ColumnId> = report
+        .columns
+        .iter()
+        .filter(|(_, c)| matches!(c.change, ColumnChange::Forbidden | ColumnChange::ScopeMoved))
+        .map(|(id, _)| id.clone())
+        .collect();
     let mut assessment = RecordAssessment::default();
-    for values in records {
+    for record in records {
+        let values = record.values;
         let projection = project(values, from, to, nomenclatures)?;
         assessment.records += 1;
         let failed = projection.report.total_failed();
@@ -254,6 +412,21 @@ pub fn assess<'a>(
         }
         assessment.cells_failed += failed;
         assessment.cells_lossy += lossy;
+        // Cells of uncastable columns are dropped by the projection, so
+        // count them here: a breaking verdict with a blast radius.
+        let mut hit_uncastable = false;
+        for addr in values.cells.keys() {
+            if uncastable.contains(&addr.column) {
+                hit_uncastable = true;
+                *assessment.uncastable_by_column.entry(addr.column.clone()).or_default() += 1;
+            }
+        }
+        if hit_uncastable {
+            assessment.records_with_uncastable += 1;
+        }
+        for resolver in record.pending_resolvers.intersection(&removed_resolvers) {
+            *assessment.pending_on_removed_resolvers.entry(resolver.clone()).or_default() += 1;
+        }
         for (column, col) in &projection.report.columns {
             if col.cells_failed > 0 {
                 *assessment.failed_by_column.entry(column.clone()).or_default() +=
@@ -339,20 +512,55 @@ fn resolver_changes(
                 });
             }
             Some(tdecl) => {
-                if tdecl.mapping != fdecl.mapping
-                    || tdecl.result_type != fdecl.result_type
-                {
+                // Independent questions, independent answers (§2.8): a
+                // declaration can bump its version, retype its result and
+                // remap at once — each is reported.
+                if tdecl.result_type != fdecl.result_type {
+                    let broken_mappings: Vec<Mapping> = tdecl
+                        .mapping
+                        .iter()
+                        .filter(|m| {
+                            let field = tdecl.result_type.iter().find(|f| f.name == m.result_field);
+                            match (field, to_index.columns.get(&m.target)) {
+                                (None, _) => true, // field vanished
+                                (Some(f), Some(col)) => !f.ty.same_constructor(&col.ty),
+                                (Some(_), None) => false, // target gone: a column question, not a resolver one
+                            }
+                        })
+                        .cloned()
+                        .collect();
+                    changes.push(ResolverChange::ResultTypeChanged {
+                        id: id.clone(),
+                        broken_mappings,
+                    });
+                }
+                if tdecl.mapping != fdecl.mapping {
                     // §2.8: stale cells, re-derivable from retained
                     // snapshots — the genuinely valuable bulk operation.
+                    let stale_columns: Vec<ColumnId> = tdecl
+                        .mapping
+                        .iter()
+                        .filter(|m| !fdecl.mapping.contains(m))
+                        .map(|m| m.target.clone())
+                        .collect();
+                    let orphaned_columns: Vec<ColumnId> = fdecl
+                        .mapping
+                        .iter()
+                        .map(|m| &m.target)
+                        .filter(|t| !tdecl.mapping.iter().any(|m| m.target == **t))
+                        .filter(|t| to_index.columns.contains_key(*t))
+                        .cloned()
+                        .collect();
                     changes.push(ResolverChange::MappingChanged {
                         id: id.clone(),
-                        stale_columns: tdecl
-                            .mapping
-                            .iter()
-                            .map(|m| m.target.clone())
-                            .collect(),
+                        stale_columns,
+                        orphaned_columns,
                     });
-                } else if tdecl.version != fdecl.version {
+                }
+                if tdecl.input != fdecl.input {
+                    changes.push(ResolverChange::InputChanged { id: id.clone() });
+                }
+                if tdecl.version != fdecl.version {
                     changes.push(ResolverChange::VersionChanged {
                         id: id.clone(),
                         from: fdecl.version,

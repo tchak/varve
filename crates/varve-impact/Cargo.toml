@@ -10,3 +10,6 @@ varve-core = { path = "../varve-core" }
 varve-schema = { path = "../varve-schema" }
 varve-value = { path = "../varve-value" }
 varve-projection = { path = "../varve-projection" }
+# Broken rule references (§4.1): re-typecheck rules against the new
+# revision. Tier 2 → Tier 2, DAG intact (§7).
+varve-logic = { path = "../varve-logic" }
