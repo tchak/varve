@@ -135,6 +135,15 @@ fn check_comparison(
     };
     let column = &source.column;
 
+    // §4.1 conditionability matrix: comparisons read one scalar. An
+    // arity-`many` column has `contains`/`excludes` (enums) and the
+    // presence atoms; a comparison on it would typecheck and then be
+    // false forever — exactly the impossible-condition class to refuse.
+    if info.arity == Arity::Many {
+        errors.push(TypeError::AtomNotAllowed(column.clone()));
+        return;
+    }
+
     // Field projection: enum column, field must exist on some row,
     // compares eq/not_eq against text (§4.1 — the dissolved geo
     // operators).

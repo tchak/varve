@@ -279,6 +279,16 @@ fn typechecker_enforces_the_matrix_and_scopes() {
         [TypeError::UnknownResolver(_)]
     ));
 
+    // A comparison on an arity-`many` column would typecheck and be
+    // false forever: refused. `contains`/`excludes` are its atoms.
+    let many_eq = eq("tags", Const::Option(OptionId::new("oui")));
+    assert!(matches!(
+        typecheck(&many_eq, &s, &noms, record).as_slice(),
+        [TypeError::AtomNotAllowed(c)] if c == &ColumnId::new("tags")
+    ));
+    let contains = Expr::Atom(Atom::Contains { source: source("tags"), option: OptionId::new("oui") });
+    assert_eq!(typecheck(&contains, &s, &noms, record), vec![]);
+
     // Unknown projected field.
     let bad_field = Expr::Atom(Atom::Eq {
         source: ColumnRef {
