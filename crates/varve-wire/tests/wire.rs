@@ -386,6 +386,86 @@ fn intent_makes_id_mismatches_fail_loudly() {
 }
 
 #[test]
+fn imports_are_all_or_nothing() {
+    // §5: "import rejects … or commits to the whole stream". A stream
+    // whose second record fails intent must leave the first uncreated.
+    let fresh = RecordId::new("fresh");
+    let old = RecordId::new("old");
+    let mut old_log = RecordLog::new(old.clone());
+    old_log.append(draft(0, 0, vec![set("name", "Old")])).unwrap();
+    let mut fresh_log = RecordLog::new(fresh.clone());
+    fresh_log.append(draft(0, 0, vec![set("name", "New")])).unwrap();
+
+    // History mode.
+    let bytes = write_history(
+        manifest(Mode::History, Intent::CreateOnly, 2),
+        schema_lines(),
+        &[(fresh.clone(), &fresh_log), (old.clone(), &old_log)],
+    )
+    .unwrap();
+    let stream = read_stream(&bytes).unwrap();
+    let mut store = BTreeMap::from([(old.clone(), old_log.clone())]);
+    assert!(matches!(adopt_history(&stream, &mut store), Err(ImportError::AlreadyExists(r)) if r == old));
+    assert!(!store.contains_key(&fresh), "first record was created despite the failure");
+    assert_eq!(store.len(), 1);
+
+    // Snapshot mode.
+    let folded = |log: &RecordLog| log.fold().unwrap().values;
+    let bytes = write_snapshot(
+        manifest(Mode::Snapshot, Intent::CreateOnly, 2),
+        schema_lines(),
+        &[
+            SnapshotRecord { record: fresh.clone(), lens: revision_id(&schema()), values: folded(&fresh_log) },
+            SnapshotRecord { record: old.clone(), lens: revision_id(&schema()), values: folded(&old_log) },
+        ],
+    )
+    .unwrap();
+    let stream = read_stream(&bytes).unwrap();
+    let salts = test_salts(3);
+    let request = SnapshotImportRequest {
+        actor: Actor { id: "importer".into(), kind: ActorKind::System },
+        timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
+        revision: revision_id(&schema()),
+        note: None,
+        salts_for: &salts,
+    };
+    let mut store = BTreeMap::from([(old.clone(), old_log.clone())]);
+    assert!(matches!(import_snapshot(&stream, &mut store, &request), Err(ImportError::AlreadyExists(r)) if r == old));
+    assert!(!store.contains_key(&fresh));
+    assert_eq!(store[&old].entries().len(), 1, "existing record was touched despite the failure");
+}
+
+#[test]
+fn history_upsert_extends_or_diverges() {
+    // Under upsert an imported history that extends the existing chain
+    // replaces it; a shorter or diverging one is a conflict of
+    // histories, reported as such — not as a tamper.
+    let record = RecordId::new("r1");
+    let mut two = sample_log();
+    let mut three = two.clone();
+    three.append(draft(2, 2, vec![set("name", "Third")])).unwrap();
+    let export = |log: &RecordLog| {
+        read_stream(
+            &write_history(manifest(Mode::History, Intent::Upsert, 1), schema_lines(), &[(record.clone(), log)]).unwrap(),
+        )
+        .unwrap()
+    };
+    // Extends: adopted, reported as updated.
+    let mut store = BTreeMap::from([(record.clone(), two.clone())]);
+    let outcome = adopt_history(&export(&three), &mut store).unwrap();
+    assert_eq!(outcome.updated, vec![record.clone()]);
+    assert_eq!(store[&record].entries().len(), 3);
+    // Shorter: not an extension.
+    let mut store = BTreeMap::from([(record.clone(), three.clone())]);
+    assert!(matches!(adopt_history(&export(&two), &mut store), Err(ImportError::Diverges(r)) if r == record));
+    assert_eq!(store[&record].entries().len(), 3);
+    // Diverging at the last entry.
+    two.append(draft(2, 2, vec![set("name", "Other third")])).unwrap();
+    let mut store = BTreeMap::from([(record.clone(), three)]);
+    assert!(matches!(adopt_history(&export(&two), &mut store), Err(ImportError::Diverges(_))));
+}
+
+#[test]
 fn tampered_history_is_rejected_on_import() {
     let record = RecordId::new("r1");
     let bytes = write_history(

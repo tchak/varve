@@ -31,6 +31,11 @@ pub enum ImportError {
     NotFound(RecordId),
     #[error("record '{0}': entry {1} failed to apply during import")]
     Append(RecordId, u64),
+    /// Under `Upsert`/`UpdateOnly` the imported history must extend the
+    /// existing chain; a shorter or diverging history is a conflict of
+    /// histories, not a tamper (§6: one-way, one-time migration).
+    #[error("record '{0}': imported history diverges from the existing chain")]
+    Diverges(RecordId),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -57,7 +62,11 @@ fn check_intent(
 /// both instances). Under `Upsert`/`UpdateOnly` an existing record is
 /// replaced by the imported log only if the imported log *extends* the
 /// existing one (same prefix): a diverging import is a conflict of
-/// histories and is rejected as a chain error.
+/// histories and is rejected.
+///
+/// **All or nothing** (§5: "import rejects on line 1 or commits to the
+/// whole stream"): every record is verified and staged first; `store`
+/// is touched only once nothing can fail.
 pub fn adopt_history(
     stream: &Stream,
     store: &mut BTreeMap<RecordId, RecordLog>,
@@ -72,32 +81,33 @@ pub fn adopt_history(
         }
     }
     let mut outcome = ImportOutcome::default();
+    let mut staged: Vec<(RecordId, RecordLog)> = Vec::new();
     for (record, mut entries) in incoming {
         entries.sort_by_key(|e| e.envelope.seq);
         let log = RecordLog::from_entries(record.clone(), entries);
-        log.verify_chain()
-            .map_err(|e| ImportError::Chain(record.clone(), e))?;
+        log.verify_chain().map_err(|e| ImportError::Chain(record.clone(), e))?;
+        // Adopted logs must fold: a chain that verifies but does not
+        // apply would be poison (`RecordLog::append` refuses it later,
+        // but importing it would still be importing damage).
+        log.fold().map_err(|e| ImportError::Append(record.clone(), e.seq))?;
         let existing = store.get(&record);
         check_intent(stream.manifest.intent, existing.is_some(), &record)?;
         if let Some(current) = existing {
             // Must extend the current chain: every current entry hash
             // must appear at the same position in the import.
             let extends = current.entries().len() <= log.entries().len()
-                && current
-                    .entries()
-                    .iter()
-                    .zip(log.entries())
-                    .all(|(a, b)| a.hash() == b.hash());
+                && current.entries().iter().zip(log.entries()).all(|(a, b)| a.hash() == b.hash());
             if !extends {
-                return Err(ImportError::Chain(
-                    record.clone(),
-                    varve_record::ChainError::PrevMismatch { at: 0 },
-                ));
+                return Err(ImportError::Diverges(record.clone()));
             }
             outcome.updated.push(record.clone());
         } else {
             outcome.created.push(record.clone());
         }
+        staged.push((record, log));
+    }
+    // Commit: nothing below can fail.
+    for (record, log) in staged {
         store.insert(record, log);
     }
     Ok(outcome)
@@ -131,18 +141,19 @@ pub fn import_snapshot(
         return Err(ImportError::WrongMode(stream.manifest.mode));
     }
     let mut outcome = ImportOutcome::default();
+    // All or nothing (§5): every record's new log is built on a staged
+    // copy; `store` is touched only once nothing can fail.
+    let mut staged: Vec<(RecordId, RecordLog)> = Vec::new();
     for r in snapshot_records(stream) {
-        let existing = store.contains_key(&r.record);
-        check_intent(stream.manifest.intent, existing, &r.record)?;
-        let log = store
-            .entry(r.record.clone())
-            .or_insert_with(|| RecordLog::new(r.record.clone()));
+        let existing = store.get(&r.record);
+        check_intent(stream.manifest.intent, existing.is_some(), &r.record)?;
+        let mut log = existing.cloned().unwrap_or_else(|| RecordLog::new(r.record.clone()));
         let current = log
             .fold()
             .map_err(|e| ImportError::Append(r.record.clone(), e.seq))?
             .values;
         let ops = diff(&current, &r.values);
-        if ops.is_empty() && existing {
+        if ops.is_empty() && existing.is_some() {
             outcome.updated.push(r.record.clone());
             continue;
         }
@@ -159,11 +170,15 @@ pub fn import_snapshot(
             salts,
         })
         .map_err(|_| ImportError::Append(r.record.clone(), base_version))?;
-        if existing {
+        if existing.is_some() {
             outcome.updated.push(r.record.clone());
         } else {
             outcome.created.push(r.record.clone());
         }
+        staged.push((r.record, log));
+    }
+    for (record, log) in staged {
+        store.insert(record, log);
     }
     Ok(outcome)
 }
