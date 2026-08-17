@@ -73,6 +73,60 @@ impl Unit {
     }
 }
 
+impl Unit {
+    /// Stable wire/canonical name.
+    pub fn name(self) -> &'static str {
+        use Unit::*;
+        match self {
+            Millimetre => "mm",
+            Centimetre => "cm",
+            Metre => "m",
+            Kilometre => "km",
+            Gram => "g",
+            Kilogram => "kg",
+            Tonne => "t",
+            Minute => "minute",
+            Hour => "hour",
+            Day => "day",
+            Week => "week",
+            Month => "month",
+            Year => "year",
+            SquareMetre => "m2",
+            Hectare => "ha",
+            SquareKilometre => "km2",
+            Litre => "L",
+            CubicMetre => "m3",
+            Percent => "percent",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Unit> {
+        use Unit::*;
+        Some(match name {
+            "mm" => Millimetre,
+            "cm" => Centimetre,
+            "m" => Metre,
+            "km" => Kilometre,
+            "g" => Gram,
+            "kg" => Kilogram,
+            "t" => Tonne,
+            "minute" => Minute,
+            "hour" => Hour,
+            "day" => Day,
+            "week" => Week,
+            "month" => Month,
+            "year" => Year,
+            "m2" => SquareMetre,
+            "ha" => Hectare,
+            "km2" => SquareKilometre,
+            "L" => Litre,
+            "m3" => CubicMetre,
+            "percent" => Percent,
+            _ => return None,
+        })
+    }
+}
+
 /// The exact conversion `value_in_from × num ⁄ den = value_in_to`, or
 /// `None` across dimensions.
 pub fn conversion(from: Unit, to: Unit) -> Option<(u64, u64)> {
