@@ -7,12 +7,12 @@
 use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
-use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, RecordId, RevisionId};
+use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_record::canon as record_canon;
 use varve_schema::{option_row_from_canonical, schema_from_canonical};
-use varve_value::{CellAddr, ItemsAddr, RecordValues};
+use varve_value::{CellAddr, CellState, ItemsAddr, RecordValues};
 
-use crate::line::{Intent, Line, Manifest, Mode, RecordLine};
+use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
 use crate::FORMAT_VERSION;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -45,6 +45,10 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     let mut manifest: Option<Manifest> = None;
     let mut lines = Vec::new();
     let mut records_seen: std::collections::BTreeSet<RecordId> = Default::default();
+    // Snapshot contiguity (§5): the record whose item lines may follow,
+    // the item paths seen so far, and per-(group, parent) item counts
+    // so `ord` is checked in sequence.
+    let mut open: Option<OpenRecord> = None;
 
     for (index, raw) in text.lines().enumerate() {
         let line_no = index + 1;
@@ -78,6 +82,9 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             continue;
         }
         let mode = manifest.as_ref().expect("set above").mode;
+        if kind != "item" {
+            open = None; // Any other line kind closes the open record (§5).
+        }
 
         let line = match kind {
             "header" => return Err(malformed("duplicate header".into())),
@@ -113,8 +120,47 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     });
                 }
                 let r = record_line_from(map).map_err(malformed)?;
-                records_seen.insert(r.record.clone());
+                // A stream is authoritative for each record it contains
+                // exactly once (§5) — a second `record` line for one id
+                // is malformed, never a second version.
+                if !records_seen.insert(r.record.clone()) {
+                    return Err(malformed(format!("duplicate record '{}'", r.record)));
+                }
+                open = Some(OpenRecord {
+                    record: r.record.clone(),
+                    paths: Default::default(),
+                    counts: Default::default(),
+                });
                 Line::Record(r)
+            }
+            "item" => {
+                if mode != Mode::Snapshot {
+                    return Err(ReadError::ModeMismatch {
+                        line: line_no,
+                        kind: kind.into(),
+                        mode,
+                    });
+                }
+                let i = item_line_from(map).map_err(malformed)?;
+                let Some(current) = open.as_mut().filter(|o| o.record == i.record) else {
+                    return Err(malformed(format!(
+                        "item line for record '{}' outside that record's lines",
+                        i.record
+                    )));
+                };
+                if i.parent.depth() != 0 && !current.paths.contains(&i.parent) {
+                    return Err(malformed("item's parent is not an item seen for this record".into()));
+                }
+                let count = current.counts.entry((i.group.clone(), i.parent.clone())).or_insert(0);
+                if i.ord != *count {
+                    return Err(malformed(format!("item ord {} out of sequence (expected {count})", i.ord)));
+                }
+                *count += 1;
+                let path = i.parent.child(PathSeg { group: i.group.clone(), item: i.id.clone() });
+                if !current.paths.insert(path) {
+                    return Err(malformed(format!("duplicate item '{}' in group '{}'", i.id, i.group)));
+                }
+                Line::Item(i)
             }
             "entry" => {
                 if mode != Mode::History {
@@ -236,44 +282,79 @@ fn manifest_from(m: &Obj) -> Result<Manifest, String> {
     })
 }
 
+struct OpenRecord {
+    record: RecordId,
+    paths: std::collections::BTreeSet<RowPath>,
+    counts: BTreeMap<(GroupId, RowPath), usize>,
+}
+
+fn cells_from(m: &Obj) -> Result<BTreeMap<ColumnId, CellState>, String> {
+    as_obj(get(m, "cells")?)?
+        .iter()
+        .map(|(column, state)| {
+            Ok((
+                ColumnId::new(column),
+                record_canon::state_from(state).map_err(|e| e.to_string())?,
+            ))
+        })
+        .collect()
+}
+
 fn record_line_from(m: &Obj) -> Result<RecordLine, String> {
-    let mut values = RecordValues::new();
-    for cell in as_arr(get(m, "cells")?)? {
-        let cell = as_obj(cell)?;
-        values.cells.insert(
-            CellAddr {
-                column: ColumnId::new(get_str(cell, "column")?),
-                path: record_canon::path_from(get(cell, "path")?).map_err(|e| e.to_string())?,
-            },
-            record_canon::state_from(get(cell, "state")?).map_err(|e| e.to_string())?,
-        );
-    }
-    for list in as_arr(get(m, "items")?)? {
-        let list = as_obj(list)?;
-        let ids: Vec<ItemId> = as_arr(get(list, "items")?)?
-            .iter()
-            .map(|i| match i {
-                CanonicalValue::String(s) => Ok(ItemId::new(s)),
-                _ => Err("item ids must be strings".to_string()),
-            })
-            .collect::<Result<_, _>>()?;
-        if ids.is_empty() {
-            // One state, one encoding (§2.4): a group with no items has
-            // no item list.
-            return Err("an empty item list is not stored — omit it".to_string());
-        }
-        values.items.insert(
-            ItemsAddr {
-                group: GroupId::new(get_str(list, "group")?),
-                parent: record_canon::path_from(get(list, "parent")?)
-                    .map_err(|e| e.to_string())?,
-            },
-            ids,
-        );
-    }
     Ok(RecordLine {
         record: RecordId::new(get_str(m, "id")?),
         lens: RevisionId::new(get_str(m, "lens")?),
-        values,
+        cells: cells_from(m)?,
     })
+}
+
+fn item_line_from(m: &Obj) -> Result<ItemLine, String> {
+    Ok(ItemLine {
+        record: RecordId::new(get_str(m, "record")?),
+        group: GroupId::new(get_str(m, "group")?),
+        parent: record_canon::path_from(get(m, "parent")?).map_err(|e| e.to_string())?,
+        id: ItemId::new(get_str(m, "id")?),
+        ord: get_u64(m, "ord")? as usize,
+        cells: cells_from(m)?,
+    })
+}
+
+/// Reassemble the snapshot records of a read stream from their `record`
+/// and `item` lines (contiguity was verified on read).
+pub fn snapshot_records(stream: &Stream) -> Vec<SnapshotRecord> {
+    let mut out: Vec<SnapshotRecord> = Vec::new();
+    for line in &stream.lines {
+        match line {
+            Line::Record(r) => {
+                let mut values = RecordValues::new();
+                for (column, state) in &r.cells {
+                    values.cells.insert(
+                        CellAddr { column: column.clone(), path: RowPath::root() },
+                        state.clone(),
+                    );
+                }
+                out.push(SnapshotRecord { record: r.record.clone(), lens: r.lens.clone(), values });
+            }
+            Line::Item(i) => {
+                let Some(current) = out.last_mut().filter(|c| c.record == i.record) else {
+                    continue; // unreachable after read_stream's contiguity check
+                };
+                let path = i.parent.child(PathSeg { group: i.group.clone(), item: i.id.clone() });
+                current
+                    .values
+                    .items
+                    .entry(ItemsAddr { group: i.group.clone(), parent: i.parent.clone() })
+                    .or_default()
+                    .push(i.id.clone());
+                for (column, state) in &i.cells {
+                    current
+                        .values
+                        .cells
+                        .insert(CellAddr { column: column.clone(), path: path.clone() }, state.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }

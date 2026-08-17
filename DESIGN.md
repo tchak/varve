@@ -431,8 +431,10 @@ surfaces, so the platform fills the frozen set from the surface
 
 ### Wire format
 
-New line kinds: `resolver` (declarations, part of the schema), `snapshot`
-(payloads, part of the record's meaning), `resolution` (instances with status).
+New line kinds: `resolver` (declarations, part of the schema — carried
+inside the `revision` line's schema), `snapshot` (payloads, part of the
+record's meaning), `resolution` (instances with status). The latter two
+are not yet emitted — §10 question 14.
 
 The resolver *implementation* — endpoint, credentials, rate limits — is
 instance-local and does not travel.
@@ -1239,15 +1241,19 @@ be **heterogeneous**, carrying schema, records, items, attachments and history
 in one file in dependency order.
 
 ```
-{"k":"header", ...}                 // format ver, kernel ver, source instance, manifest
-{"k":"revision", "id":"...", ...}   // writer schema travels with the data (Avro property)
-{"k":"block", "id":"...", ...}
-{"k":"nomenclature", "id":"...", ...}   // versioned (id, label, ...fields) table (§2.12); travels like a block
-{"k":"record", "id":"...", "lens":"...", "cells":{...}}   // snapshot mode; lens = fold revision, not a record property (§2.9)
-{"k":"item", "record":"...", "group":"...", "id":"...", "ord":0, "cells":{...}}
+{"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, attachments mode)
+{"k":"revision", "id":"...", "schema":{...}}   // writer schema travels with the data (Avro property); resolver declarations ride inside it
+{"k":"block", "id":"...", ...}                 // not yet emitted — Block lives in varve-surface, which varve-wire cannot depend on (§7); unresolved
+{"k":"nomenclature", "id":"...", "version":1, "rows":[...]}   // versioned (id, label, ...fields) table (§2.12); travels like a block
+{"k":"record", "id":"...", "lens":"...", "cells":{...}}   // snapshot mode: ROOT cells; lens = fold revision, not a record property (§2.9)
+{"k":"item", "record":"...", "group":"...", "parent":[...], "id":"...", "ord":0, "cells":{...}}   // one item's cells; follows its record line
 {"k":"entry", "record":"...", "seq":0, "prev":"...", "ops":[...], ...}  // history mode: one log entry (§2.9)
-{"k":"attachment", "sha256":"...", ...}
+{"k":"attachment", "hash":"sha256:...", "byte_size":..., "content_type":"..."}   // describes a blob (§2.15); algorithm-tagged (§2.13)
 ```
+
+Not yet on the wire — **open question 14**: `resolution` instances,
+`checkpoint`s, payload `snapshot` descriptions and the bundled blob
+sidecar. Until then a history export is lossless for the *log*.
 
 ### Key unifications
 
@@ -1324,10 +1330,14 @@ kinds cannot mix (above), so one format can never do both:
 
 - key absent from `cells` → absent
 - key present, `null` → empty
-- key present, value → value
+- key present, value → value: a **scalar object** (`{"text":"…"}`,
+  `{"integer":"42"}`, `{"option":"…"}`, `{"geometry":{…}}`, …) for arity
+  `one`, an **array of scalar objects** for arity `many`
 
-One state, one encoding (§2.4): a blank `many` cell is `empty`, never a
-zero-length list; an item list is never empty. The reader refuses both.
+The same encoding serves the `state` of a `set` op — one serializer for
+cells and ops, so the two cannot drift. One state, one encoding (§2.4): a
+blank `many` cell is `null`, never `[]`; an item list is never empty. The
+reader refuses both.
 
 Reachability is never serialized — always derived on read from surface +
 revision (§2.4). Stored values are transmitted even when unreachable on every
@@ -1336,14 +1346,21 @@ current surface: "hidden never deletes" implies hidden must round-trip.
 ### Constraints
 
 - **Lines must be bounded.** One-record-per-line breaks at 5,000 items. Hence
-  `record` (root cells) and `item` lines are separate. Reader must handle
-  "record not yet complete" — needs an explicit terminator or a
-  contiguity rule.
-- **Line 1 must carry everything needed to fail fast**: format version, kernel
-  version, source instance ID, manifest of revision IDs / group IDs / counts /
-  whether attachments are bundled or referenced. Import rejects on line 1 or
-  commits to the whole stream. Apply into staging, then atomic swap — never
-  stream into live tables.
+  `record` (root cells) and `item` lines are separate. **Settled
+  (2026-08-17): the contiguity rule, no terminator.** A record's `item`
+  lines immediately follow its `record` line, parents before children
+  (`parent` names the root or an item already seen for that record), in
+  list order (`ord` is the position and is checked in sequence); any other
+  line kind, or the end of the stream, closes the record. A stream names a
+  record once — a second `record` line for the same id is malformed. Depth
+  1 today; `parent` keeps the grammar depth-N ready (§2.3).
+- **Line 1 must carry everything needed to fail fast**: format version,
+  source instance ID, mode, intent, manifest of revision IDs, record count,
+  whether attachments are bundled or referenced. (Schemas travel as
+  `revision` lines, so group ids are not repeated in the manifest; the
+  format version is the compatibility contract, so no separate kernel
+  version.) Import rejects on line 1 or commits to the whole stream. Apply
+  into staging, then atomic swap — never stream into live tables.
 - **Canonical serialization required** for content-addressed checkpoints.
   Settled: JCS (RFC 8785) — the full design is §2.13; hash the canonical
   bytes, never the emitted line.
@@ -1740,6 +1757,18 @@ Only then: `surface`, `store`, service.
     conformance, wire reader) so each state has one canonical form.
     Collapsing to two states was considered and rejected — it would
     erase the "left blank by whom" fact that audit and diff rely on.
+14. **Record-side wire completeness.** Not yet on the wire (found by
+    audit, 2026-08-17): `resolution` instances (§2.8 lifecycle, landed
+    snapshot ref), `checkpoint`s (§2.9: entry hash, reading revision,
+    expected resolutions, frozen set), payload `snapshot` descriptions
+    (hash/size/type, like `attachment`), and the bundled blob **sidecar**
+    (§2.15) — so today a history export is lossless for the log only and
+    "an imported record remains fully meaningful on an instance with no
+    access to INSEE" (§2.8) is a goal, not a property. Deliberately
+    routed here rather than built piecemeal: payload blobs and attachment
+    blobs share one sidecar, and `resolution`/`checkpoint` lines should
+    land with it so import restores a record whole. Decide with §12.7
+    (deferred-resolution frequency) in hand.
 
 ## 11. Prior art to consult
 

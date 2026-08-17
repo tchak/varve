@@ -15,7 +15,7 @@ use varve_record::{Actor, Draft, Entry, EntrySalts, Origin, RecordLog};
 use varve_value::diff;
 
 use crate::line::{Intent, Line, Mode};
-use crate::read::Stream;
+use crate::read::{Stream, snapshot_records};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ImportError {
@@ -131,8 +131,7 @@ pub fn import_snapshot(
         return Err(ImportError::WrongMode(stream.manifest.mode));
     }
     let mut outcome = ImportOutcome::default();
-    for line in &stream.lines {
-        let Line::Record(r) = line else { continue };
+    for r in snapshot_records(stream) {
         let existing = store.contains_key(&r.record);
         check_intent(stream.manifest.intent, existing, &r.record)?;
         let log = store.entry(r.record.clone()).or_default();

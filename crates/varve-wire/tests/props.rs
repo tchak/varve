@@ -6,7 +6,7 @@ use proptest::prelude::*;
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_value::{CellAddr, CellState, CellValue, Feature, ItemsAddr, RecordValues, Scalar};
-use varve_wire::{Intent, Line, Manifest, Mode, RecordLine, read_stream, write_lines};
+use varve_wire::{Intent, Line, Manifest, Mode, SnapshotRecord, read_stream, snapshot_records, write_lines};
 
 /// Geometry with the numbers JCS rendering has to get right: negative
 /// zero, integral doubles, large and tiny exponents, numeric ids,
@@ -46,51 +46,72 @@ fn state() -> impl Strategy<Value = CellState> {
     ]
 }
 
-fn path() -> impl Strategy<Value = RowPath> {
-    proptest::collection::vec(("[a-z]{1,3}", "[a-z0-9]{1,3}"), 0..3).prop_map(|segs| {
-        segs.into_iter().fold(RowPath::root(), |p, (g, i)| {
-            p.child(PathSeg { group: GroupId::new(g), item: ItemId::new(i) })
-        })
-    })
-}
-
+/// A coherent record: root cells; a `many` group `g1` with items and
+/// cells; a nested `many` group `g2` under each `g1` item (depth 2 — the
+/// wire is depth-N ready even though the policy is depth 1). Item lists
+/// are never empty and every cell sits on an existing item (§2.4).
 fn record_values() -> impl Strategy<Value = RecordValues> {
+    let ids = || proptest::collection::btree_set("[a-z0-9]{1,3}", 1..3);
     (
-        proptest::collection::btree_map(("[a-z]{1,4}", path()), state(), 0..5),
-        proptest::collection::btree_map(
-            ("[a-z]{1,3}", path()),
-            // Never empty: a group with no items has no item list (§2.4).
-            proptest::collection::vec("[a-z0-9]{1,3}", 1..3),
-            0..3,
-        ),
+        proptest::collection::btree_map("[a-z]{1,4}", state(), 0..4),
+        proptest::option::of((
+            ids(),
+            proptest::collection::btree_map(("[a-z]{1,3}", "[a-z0-9]{1,3}"), state(), 0..4),
+            proptest::option::of((ids(), proptest::collection::btree_map("[a-z]{1,3}", state(), 0..3))),
+        )),
     )
-        .prop_map(|(cells, items)| {
+        .prop_map(|(root, g1)| {
             let mut v = RecordValues::new();
-            for ((column, path), state) in cells {
+            for (column, state) in root {
+                v.cells.insert(CellAddr { column: ColumnId::new(column), path: RowPath::root() }, state);
+            }
+            let Some((items, item_cells, nested)) = g1 else { return v };
+            let g1 = GroupId::new("g1");
+            v.items.insert(
+                ItemsAddr { group: g1.clone(), parent: RowPath::root() },
+                items.iter().map(ItemId::new).collect(),
+            );
+            for ((column, item), state) in item_cells {
+                // Only cells on items that exist.
+                if !items.contains(&item) {
+                    continue;
+                }
+                let path = RowPath::root().child(PathSeg { group: g1.clone(), item: ItemId::new(item) });
                 v.cells.insert(CellAddr { column: ColumnId::new(column), path }, state);
             }
-            for ((group, parent), list) in items {
+            if let Some((sub_ids, sub_cells)) = nested {
+                let first = ItemId::new(items.iter().next().expect("non-empty"));
+                let parent = RowPath::root().child(PathSeg { group: g1.clone(), item: first });
+                let g2 = GroupId::new("g2");
                 v.items.insert(
-                    ItemsAddr { group: GroupId::new(group), parent },
-                    list.into_iter().map(ItemId::new).collect(),
+                    ItemsAddr { group: g2.clone(), parent: parent.clone() },
+                    sub_ids.iter().map(ItemId::new).collect(),
                 );
+                let sub = ItemId::new(sub_ids.iter().next().expect("non-empty"));
+                let path = parent.child(PathSeg { group: g2, item: sub });
+                for (column, state) in sub_cells {
+                    v.cells.insert(CellAddr { column: ColumnId::new(column), path: path.clone() }, state);
+                }
             }
             v
         })
 }
 
-fn snapshot_stream() -> impl Strategy<Value = Vec<Line>> {
+fn snapshot_stream() -> impl Strategy<Value = (Vec<SnapshotRecord>, Vec<Line>)> {
     proptest::collection::vec(("[a-z0-9]{1,6}", record_values()), 0..4).prop_map(|records| {
         // Distinct record ids: dedup by id.
         let mut seen = std::collections::BTreeSet::new();
+        let mut logical = Vec::new();
         let mut lines = Vec::new();
         for (id, values) in records {
             if seen.insert(id.clone()) {
-                lines.push(Line::Record(RecordLine {
+                let rec = SnapshotRecord {
                     record: RecordId::new(id),
                     lens: RevisionId::new("lens"),
                     values,
-                }));
+                };
+                lines.extend(rec.lines());
+                logical.push(rec);
             }
         }
         let header = Line::Header(Manifest {
@@ -102,18 +123,20 @@ fn snapshot_stream() -> impl Strategy<Value = Vec<Line>> {
             record_count: seen.len() as u64,
             attachments_bundled: false,
         });
-        std::iter::once(header).chain(lines).collect()
+        (logical, std::iter::once(header).chain(lines).collect())
     })
 }
 
 proptest! {
     /// M3: read ∘ write is identity, and the bytes are stable.
     #[test]
-    fn snapshot_streams_round_trip(lines in snapshot_stream()) {
+    fn snapshot_streams_round_trip((records, lines) in snapshot_stream()) {
         let bytes = write_lines(&lines).unwrap();
         let stream = read_stream(&bytes).unwrap();
         prop_assert_eq!(&stream.lines, &lines);
         prop_assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
+        // Explode ∘ reassemble is identity on whole records too.
+        prop_assert_eq!(snapshot_records(&stream), records);
     }
 
     /// The reader never panics on arbitrary input.

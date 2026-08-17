@@ -62,14 +62,17 @@ fn scalar(s: &Scalar) -> CanonicalValue {
     }
 }
 
+/// Stored state (§2.4/§5), one encoding for ops and cell maps alike:
+/// `null` = empty; a scalar object = an arity-one value; an array of
+/// scalar objects = an arity-many value (never empty — a blank `many`
+/// cell is `null`). Absent is the key's absence, never a value.
 fn state(s: &CellState) -> CanonicalValue {
     match s {
-        CellState::Empty => string("empty"),
-        CellState::Value(CellValue::One(v)) => obj(vec![("one", scalar(v))]),
-        CellState::Value(CellValue::Many(vs)) => obj(vec![(
-            "many",
-            CanonicalValue::Array(vs.iter().map(scalar).collect()),
-        )]),
+        CellState::Empty => CanonicalValue::Null,
+        CellState::Value(CellValue::One(v)) => scalar(v),
+        CellState::Value(CellValue::Many(vs)) => {
+            CanonicalValue::Array(vs.iter().map(scalar).collect())
+        }
     }
 }
 
@@ -304,27 +307,21 @@ pub fn state_canonical(s: &CellState) -> CanonicalValue {
 }
 
 pub fn state_from(v: &CanonicalValue) -> Result<CellState, RecordDecodeError> {
-    if let CanonicalValue::String(s) = v
-        && s == "empty"
-    {
-        return Ok(CellState::Empty);
-    }
-    let m = as_obj(v)?;
-    if let Some(one) = m.get("one") {
-        return Ok(CellState::Value(CellValue::One(scalar_from(one)?)));
-    }
-    if let Some(many) = m.get("many") {
-        let list = as_arr(many)?;
-        if list.is_empty() {
-            // One state, one encoding (§2.4): a blank `many` cell is
-            // `"empty"`, never `{"many":[]}`.
-            return err("a zero-length list is not a value — use \"empty\"");
+    match v {
+        CanonicalValue::Null => Ok(CellState::Empty),
+        CanonicalValue::Object(_) => Ok(CellState::Value(CellValue::One(scalar_from(v)?))),
+        CanonicalValue::Array(list) => {
+            if list.is_empty() {
+                // One state, one encoding (§2.4): a blank `many` cell is
+                // `null`, never `[]`.
+                return err("a zero-length list is not a value — use null");
+            }
+            Ok(CellState::Value(CellValue::Many(
+                list.iter().map(scalar_from).collect::<Result<_, _>>()?,
+            )))
         }
-        return Ok(CellState::Value(CellValue::Many(
-            list.iter().map(scalar_from).collect::<Result<_, _>>()?,
-        )));
+        _ => err("a cell state is null, a scalar object, or an array of scalar objects"),
     }
-    err("state must be 'empty', 'one' or 'many'")
 }
 
 pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {

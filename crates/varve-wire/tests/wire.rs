@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 
 use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
-use varve_core::{ColumnId, OptionId, RecordId, RevisionId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_record::{Actor, ActorKind, Draft, EntrySalts, Origin, RecordLog};
 use varve_schema::{
     Arity, Column, Element, NomenclatureRef, OptionRow, ScalarType, Schema, revision_id,
 };
-use varve_value::{CellAddr, CellState, CellValue, Op, RecordValues, Scalar};
+use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, Op, RecordValues, Scalar};
 use varve_wire::{
-    ImportError, Intent, Line, Manifest, Mode, ReadError, RecordLine, WriteError,
-    SnapshotImportRequest, adopt_history, import_snapshot, read_stream, test_salts,
-    write_history, write_lines, write_snapshot,
+    ImportError, Intent, ItemLine, Line, Manifest, Mode, ReadError, RecordLine,
+    SnapshotImportRequest, SnapshotRecord, WriteError, adopt_history, import_snapshot,
+    read_stream, snapshot_records, test_salts, write_history, write_lines, write_snapshot,
 };
 
 fn schema() -> Schema {
@@ -121,7 +121,7 @@ fn snapshot_round_trip_and_import_as_log_entry() {
     let bytes = write_snapshot(
         manifest(Mode::Snapshot, Intent::Upsert, 1),
         schema_lines(),
-        vec![RecordLine {
+        &[SnapshotRecord {
             record: record.clone(),
             lens: revision_id(&schema()),
             values: folded.clone(),
@@ -152,15 +152,20 @@ fn snapshot_round_trip_and_import_as_log_entry() {
 }
 
 #[test]
-fn record_line_pins_canonical_number_shapes() {
-    // §2.13 decisions 2–3, as test vectors: exact integers are strings
-    // (a JSON number is a JCS double and cannot carry a full i64);
-    // geometry is embedded as a JSON value with ES6 numbers, never a
-    // stringified blob. Changing these bytes changes every record hash.
+fn record_and_item_lines_pin_canonical_shapes() {
+    // §5, as test vectors: a `record` line carries root cells keyed by
+    // column (absent key = absent, `null` = empty, scalar object = one,
+    // array = many); `item` lines follow, parents first, with `ord`.
+    // §2.13 decisions 2–3: exact integers are strings; geometry is a
+    // JSON value with ES6 numbers. Changing these bytes changes hashes.
     let mut values = RecordValues::new();
     values.cells.insert(
         CellAddr { column: ColumnId::new("n"), path: RowPath::root() },
         CellState::Value(CellValue::One(Scalar::Integer(i64::MAX))),
+    );
+    values.cells.insert(
+        CellAddr { column: ColumnId::new("blank"), path: RowPath::root() },
+        CellState::Empty,
     );
     values.cells.insert(
         CellAddr { column: ColumnId::new("g"), path: RowPath::root() },
@@ -171,28 +176,39 @@ fn record_line_pins_canonical_number_shapes() {
             .unwrap(),
         )))),
     );
-    let line = Line::Record(RecordLine {
-        record: RecordId::new("r1"),
-        lens: RevisionId::new("lens"),
-        values,
-    });
-    let text = String::from_utf8(write_lines(std::slice::from_ref(&line)).unwrap()).unwrap();
+    let contacts = GroupId::new("contacts");
+    let item = |i: &str| RowPath::root().child(PathSeg { group: contacts.clone(), item: ItemId::new(i) });
+    values.items.insert(
+        ItemsAddr { group: contacts.clone(), parent: RowPath::root() },
+        vec![ItemId::new("c1"), ItemId::new("c2")],
+    );
+    values.cells.insert(
+        CellAddr { column: ColumnId::new("tags"), path: item("c2") },
+        CellState::Value(CellValue::Many(vec![
+            Scalar::Enum(OptionId::new("a")),
+            Scalar::Enum(OptionId::new("b")),
+        ])),
+    );
+    let rec = SnapshotRecord { record: RecordId::new("r1"), lens: RevisionId::new("lens"), values };
+    let lines = rec.lines();
+    let text = String::from_utf8(write_lines(&lines).unwrap()).unwrap();
     assert_eq!(
         text,
         concat!(
-            r#"{"cells":["#,
-            r#"{"column":"g","path":[],"state":{"one":{"geometry":{"geometry":{"coordinates":[0,2.5,1e+21],"type":"Point"},"id":1,"properties":null,"type":"Feature"}}}},"#,
-            r#"{"column":"n","path":[],"state":{"one":{"integer":"9223372036854775807"}}}"#,
-            r#"],"id":"r1","items":[],"k":"record","lens":"lens"}"#,
-            "\n"
+            r#"{"cells":{"blank":null,"g":{"geometry":{"geometry":{"coordinates":[0,2.5,1e+21],"type":"Point"},"id":1,"properties":null,"type":"Feature"}},"n":{"integer":"9223372036854775807"}},"id":"r1","k":"record","lens":"lens"}"#,
+            "\n",
+            r#"{"cells":{},"group":"contacts","id":"c1","k":"item","ord":0,"parent":[],"record":"r1"}"#,
+            "\n",
+            r#"{"cells":{"tags":[{"option":"a"},{"option":"b"}]},"group":"contacts","id":"c2","k":"item","ord":1,"parent":[],"record":"r1"}"#,
+            "\n",
         )
     );
-    // And it reads back to the same line.
-    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
-    let mut bytes = header;
+    // Reads back to the same lines, and reassembles to the same record.
+    let mut bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
     bytes.extend_from_slice(text.as_bytes());
     let stream = read_stream(&bytes).unwrap();
-    assert_eq!(stream.lines[1], line);
+    assert_eq!(&stream.lines[1..], lines.as_slice());
+    assert_eq!(snapshot_records(&stream), vec![rec]);
 
     // A structural count that is not a JCS-safe integer is refused —
     // it can never have been produced by a JCS serializer.
@@ -209,8 +225,86 @@ fn record_line_pins_canonical_number_shapes() {
     // And on the read side a too-large count literal is a double, which
     // is not a count.
     let bad = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
-    let bad = String::from_utf8(bad).unwrap().replace(r#""record_count":1"#, r#""record_count":9007199254740993"#);
+    let bad = String::from_utf8(bad)
+        .unwrap()
+        .replace(r#""record_count":1"#, r#""record_count":9007199254740993"#);
     assert!(matches!(read_stream(bad.as_bytes()), Err(ReadError::Malformed { line: 1, .. })));
+}
+
+#[test]
+fn item_lines_obey_the_contiguity_rule() {
+    // §5: a record's item lines follow its record line immediately,
+    // parents before children, in order; any other line closes it.
+    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 2))]).unwrap();
+    let rec = |id: &str| {
+        Line::Record(RecordLine {
+            record: RecordId::new(id),
+            lens: RevisionId::new("lens"),
+            cells: Default::default(),
+        })
+    };
+    let item = |rec: &str, group: &str, parent: RowPath, id: &str, ord: usize| {
+        Line::Item(ItemLine {
+            record: RecordId::new(rec),
+            group: GroupId::new(group),
+            parent,
+            id: ItemId::new(id),
+            ord,
+            cells: Default::default(),
+        })
+    };
+    let g1 = |i: &str| RowPath::root().child(PathSeg { group: GroupId::new("g1"), item: ItemId::new(i) });
+    let stream = |lines: &[Line]| {
+        let mut b = header.clone();
+        b.extend_from_slice(&write_lines(lines).unwrap());
+        read_stream(&b)
+    };
+    // Well-formed: r1 with two g1 items and a nested g2 item, then r2.
+    let ok = [
+        rec("r1"),
+        item("r1", "g1", RowPath::root(), "a", 0),
+        item("r1", "g1", RowPath::root(), "b", 1),
+        item("r1", "g2", g1("a"), "x", 0),
+        rec("r2"),
+    ];
+    let s = stream(&ok).unwrap();
+    let records = snapshot_records(&s);
+    assert_eq!(records.len(), 2);
+    assert_eq!(
+        records[0].values.items[&ItemsAddr { group: GroupId::new("g1"), parent: RowPath::root() }],
+        vec![ItemId::new("a"), ItemId::new("b")]
+    );
+    assert_eq!(
+        records[0].values.items[&ItemsAddr { group: GroupId::new("g2"), parent: g1("a") }],
+        vec![ItemId::new("x")]
+    );
+    // Item for a record that is not the open one.
+    assert!(matches!(
+        stream(&[rec("r1"), rec("r2"), item("r1", "g1", RowPath::root(), "a", 0)]),
+        Err(ReadError::Malformed { line: 4, .. })
+    ));
+    // Ord out of sequence.
+    assert!(matches!(
+        stream(&[rec("r1"), item("r1", "g1", RowPath::root(), "a", 1), rec("r2")]),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
+    // Child before its parent.
+    assert!(matches!(
+        stream(&[rec("r1"), item("r1", "g2", g1("a"), "x", 0), rec("r2")]),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
+    // Duplicate item id in one list.
+    assert!(matches!(
+        stream(&[
+            rec("r1"),
+            item("r1", "g1", RowPath::root(), "a", 0),
+            item("r1", "g1", RowPath::root(), "a", 1),
+            rec("r2")
+        ]),
+        Err(ReadError::Malformed { line: 4, .. })
+    ));
+    // Duplicate record: a stream is authoritative for a record once.
+    assert!(matches!(stream(&[rec("r1"), rec("r1")]), Err(ReadError::Malformed { line: 3, .. })));
 }
 
 #[test]
@@ -218,21 +312,21 @@ fn reader_refuses_the_alternative_blank_encodings() {
     // §2.4 one state, one encoding: `{"many":[]}` and an empty item
     // list are not what the writer emits and are refused on read.
     let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
-    let with = |cells: &str, items: &str| {
+    let with = |cells: &str| {
         let mut bytes = header.clone();
         bytes.extend_from_slice(
-            format!(r#"{{"cells":[{cells}],"id":"r1","items":[{items}],"k":"record","lens":"lens"}}"#)
-                .as_bytes(),
+            format!(r#"{{"cells":{{{cells}}},"id":"r1","k":"record","lens":"lens"}}"#).as_bytes(),
         );
         bytes.push(b'\n');
         bytes
     };
-    let ok = with(r#"{"column":"tags","path":[],"state":"empty"}"#, "");
+    let ok = with(r#""tags":null"#);
     assert!(read_stream(&ok).is_ok());
-    let empty_many = with(r#"{"column":"tags","path":[],"state":{"many":[]}}"#, "");
+    let empty_many = with(r#""tags":[]"#);
     assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 2, .. })));
-    let empty_items = with("", r#"{"group":"contacts","items":[],"parent":[]}"#);
-    assert!(matches!(read_stream(&empty_items), Err(ReadError::Malformed { line: 2, .. })));
+    // The old wrapped shapes are not the encoding.
+    let wrapped = with(r#""tags":{"many":[{"option":"a"}]}"#);
+    assert!(matches!(read_stream(&wrapped), Err(ReadError::Malformed { line: 2, .. })));
 }
 
 #[test]
@@ -331,7 +425,7 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
         Line::Record(RecordLine {
             record: RecordId::new("r1"),
             lens: RevisionId::new("x"),
-            values: RecordValues::new(),
+            cells: Default::default(),
         }),
     ]).unwrap();
     assert!(matches!(
@@ -371,16 +465,11 @@ fn schema_and_nomenclature_lines_round_trip() {
     let stream = read_stream(&bytes).unwrap();
     assert_eq!(stream.lines, lines);
     assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
-    // A cell address round-trips too (record line with items).
-    let mut values = RecordValues::new();
-    values.cells.insert(
-        CellAddr { column: ColumnId::new("name"), path: RowPath::root() },
-        CellState::Empty,
-    );
+    // A record line with an empty root cell round-trips too.
     let rec = Line::Record(RecordLine {
         record: RecordId::new("r9"),
         lens: revision_id(&schema()),
-        values,
+        cells: [(ColumnId::new("name"), CellState::Empty)].into_iter().collect(),
     });
     let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1)), rec.clone()]).unwrap();
     assert_eq!(read_stream(&bytes).unwrap().lines[1], rec);

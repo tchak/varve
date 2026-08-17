@@ -6,7 +6,12 @@ use varve_core::canonical::{CanonicalError, CanonicalValue, canonical_bytes};
 use varve_record::canon as record_canon;
 use varve_schema::{option_row_canonical, schema_canonical};
 
-use crate::line::{Intent, Line, Manifest, Mode, RecordLine, obj, string};
+use std::collections::BTreeMap;
+
+use varve_core::ColumnId;
+use varve_value::CellState;
+
+use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord, obj, string};
 
 pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
     obj(vec![
@@ -40,42 +45,33 @@ pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
     ])
 }
 
+fn cells_canonical(cells: &BTreeMap<ColumnId, CellState>) -> CanonicalValue {
+    CanonicalValue::Object(
+        cells
+            .iter()
+            .map(|(column, state)| (column.to_string(), record_canon::state_canonical(state)))
+            .collect(),
+    )
+}
+
 fn record_line_canonical(r: &RecordLine) -> CanonicalValue {
-    let cells = CanonicalValue::Array(
-        r.values
-            .cells
-            .iter()
-            .map(|(addr, state)| {
-                obj(vec![
-                    ("column", string(&addr.column)),
-                    ("path", record_canon::path_canonical(&addr.path)),
-                    ("state", record_canon::state_canonical(state)),
-                ])
-            })
-            .collect(),
-    );
-    let items = CanonicalValue::Array(
-        r.values
-            .items
-            .iter()
-            .map(|(addr, list)| {
-                obj(vec![
-                    ("group", string(&addr.group)),
-                    ("parent", record_canon::path_canonical(&addr.parent)),
-                    (
-                        "items",
-                        CanonicalValue::Array(list.iter().map(string).collect()),
-                    ),
-                ])
-            })
-            .collect(),
-    );
     obj(vec![
         ("k", string("record")),
         ("id", string(&r.record)),
         ("lens", string(&r.lens)),
-        ("cells", cells),
-        ("items", items),
+        ("cells", cells_canonical(&r.cells)),
+    ])
+}
+
+fn item_line_canonical(i: &ItemLine) -> CanonicalValue {
+    obj(vec![
+        ("k", string("item")),
+        ("record", string(&i.record)),
+        ("group", string(&i.group)),
+        ("parent", record_canon::path_canonical(&i.parent)),
+        ("id", string(&i.id)),
+        ("ord", CanonicalValue::Int(i.ord as i64)),
+        ("cells", cells_canonical(&i.cells)),
     ])
 }
 
@@ -97,6 +93,7 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
             ),
         ]),
         Line::Record(r) => record_line_canonical(r),
+        Line::Item(i) => item_line_canonical(i),
         Line::Entry { record, entry } => {
             let mut fields = match record_canon::entry_canonical(entry) {
                 CanonicalValue::Object(m) => m,
@@ -164,11 +161,11 @@ pub fn write_history(
 pub fn write_snapshot(
     manifest: Manifest,
     schema_lines: Vec<Line>,
-    records: Vec<RecordLine>,
+    records: &[SnapshotRecord],
 ) -> Result<Vec<u8>, WriteError> {
     debug_assert_eq!(manifest.mode, Mode::Snapshot);
     let mut lines = vec![Line::Header(manifest)];
     lines.extend(schema_lines);
-    lines.extend(records.into_iter().map(Line::Record));
+    lines.extend(records.iter().flat_map(SnapshotRecord::lines));
     write_lines(&lines)
 }
