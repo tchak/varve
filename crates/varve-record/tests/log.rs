@@ -124,6 +124,60 @@ fn tampering_breaks_the_chain() {
 }
 
 #[test]
+fn append_refuses_ops_that_do_not_apply() {
+    // The §2.9 detect-don't-merge scenario: two actors remove the same
+    // item from the same base. The second entry must not be appended —
+    // an entry the fold cannot apply would poison the log (every later
+    // fold failing forever). It is refused, the log is unchanged, and
+    // the fold still works.
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    let add = Op::AddItem {
+        group: GroupId::new("g1"),
+        parent: RowPath::root(),
+        item: ItemId::new("i1"),
+        at: 0,
+    };
+    let remove = Op::RemoveItem {
+        group: GroupId::new("g1"),
+        parent: RowPath::root(),
+        item: ItemId::new("i1"),
+    };
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![add])).unwrap();
+    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![remove.clone()])).unwrap();
+    let before = log.entries().len();
+    let refused = log.append(draft(human("b2"), 2, 1, Origin::Entered, vec![remove]));
+    assert!(matches!(
+        refused,
+        Err(AppendError::DoesNotApply(varve_value::ApplyError::UnknownItem(..)))
+    ));
+    assert_eq!(log.entries().len(), before);
+    assert!(log.fold().is_ok());
+    // A zero-length list is refused the same way (§2.4 one encoding).
+    let empty_many = Op::Set {
+        column: ColumnId::new("tags"),
+        path: RowPath::root(),
+        state: CellState::Value(CellValue::Many(vec![])),
+    };
+    assert!(matches!(
+        log.append(draft(human("a1"), 3, 2, Origin::Entered, vec![empty_many])),
+        Err(AppendError::DoesNotApply(varve_value::ApplyError::EmptyList(_)))
+    ));
+    // A poisoned log (rehydrated with an entry that does not apply)
+    // refuses appends until repaired, instead of growing the damage.
+    let mut entries = log.entries().to_vec();
+    entries[1].content.ops.push(Op::RemoveItem {
+        group: GroupId::new("g1"),
+        parent: RowPath::root(),
+        item: ItemId::new("ghost"),
+    });
+    let mut poisoned = RecordLog::from_entries(RecordId::new("r1"), entries);
+    assert!(matches!(
+        poisoned.append(draft(human("a1"), 4, 2, Origin::Entered, vec![set("name", "x")])),
+        Err(AppendError::Unfoldable(_))
+    ));
+}
+
+#[test]
 fn a_log_verifies_only_under_its_own_record() {
     // The genesis commits to the record id (§2.9): record A's stored
     // log rehydrated under record B's id is a chain error at entry 0 —

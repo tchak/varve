@@ -17,7 +17,7 @@ pub struct RecordLog {
     entries: Vec<Entry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum AppendError {
     /// One salt per op plus one for metadata — counts must line up.
     #[error(transparent)]
@@ -25,6 +25,17 @@ pub enum AppendError {
     /// `base_version` cannot exceed the log's current version.
     #[error("base_version {base} is ahead of the log (version {version})")]
     BaseVersionAhead { base: u64, version: u64 },
+    /// The draft's ops do not apply to the current state (an item that
+    /// no longer exists, a duplicate item, a bad index …). Refused at
+    /// append: an entry the fold cannot apply would poison the log —
+    /// every later fold would fail forever. Detected, not merged (§2.9):
+    /// the platform reports the conflict and lets the actor retry.
+    #[error("ops do not apply to the current state: {0}")]
+    DoesNotApply(ApplyError),
+    /// The log as loaded does not fold (a poisoned or tampered log);
+    /// nothing can be appended until it is repaired.
+    #[error("the log does not fold: {0}")]
+    Unfoldable(FoldError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -126,6 +137,61 @@ fn derive_provenance(origin: &Origin, current: Option<&Origin>) -> Origin {
     }
 }
 
+/// Fold one entry into `result`: apply its ops with the §2.8 rule 2
+/// guard, and derive provenance (§2.7). The single implementation used
+/// by `fold_at` and, on the candidate entry, by `append`.
+fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
+    let seq = entry.envelope.seq;
+    let origin = &entry.content.origin;
+    let late_machine_write = entry.envelope.actor.kind == crate::ActorKind::Resolver
+        && matches!(origin, Origin::Derived(_));
+    for op in &entry.content.ops {
+        // §2.8 rule 2, enforced where provenance is derived: a
+        // resolver's derived write onto a human-authored cell is not
+        // applied; the cell keeps its value and gains the late
+        // derivation as `superseded` (divergence visible, restore
+        // possible), and the write is reported.
+        if let Op::Set { column, path, .. } | Op::Unset { column, path } = op
+            && late_machine_write
+        {
+            let addr = CellAddr { column: column.clone(), path: path.clone() };
+            if let Some(current) = result.provenance.get(&addr)
+                && matches!(current, Origin::Entered | Origin::Overridden { .. })
+            {
+                let landed = match origin {
+                    Origin::Derived(d) => Some(d.clone()),
+                    _ => None,
+                };
+                let superseded = match current {
+                    Origin::Overridden { superseded: Some(d) } => Some(d.clone()),
+                    _ => landed,
+                };
+                result.provenance.insert(addr.clone(), Origin::Overridden { superseded });
+                result.suppressed.push(Suppressed { seq, addr });
+                continue;
+            }
+        }
+        apply(&mut result.values, op).map_err(|error| FoldError { seq, error })?;
+        match op {
+            Op::Set { column, path, .. } => {
+                let addr = CellAddr { column: column.clone(), path: path.clone() };
+                let derived = derive_provenance(origin, result.provenance.get(&addr));
+                result.provenance.insert(addr, derived);
+            }
+            Op::Unset { column, path } => {
+                result.provenance.remove(&CellAddr { column: column.clone(), path: path.clone() });
+            }
+            Op::RemoveItem { group, parent, item } => {
+                let prefix =
+                    parent.child(varve_core::PathSeg { group: group.clone(), item: item.clone() });
+                result.provenance.retain(|addr, _| !addr.path.starts_with(&prefix));
+            }
+            Op::AddItem { .. } | Op::Reorder { .. } => {}
+        }
+    }
+    Ok(())
+}
+
 impl RecordLog {
     /// An empty log for `record`.
     pub fn new(record: RecordId) -> Self {
@@ -183,6 +249,10 @@ impl RecordLog {
             content,
             salts: draft.salts,
         };
+        // The entry must apply to the current state — through the very
+        // fold that will read it back — or the log would be poisoned.
+        let mut state = self.fold().map_err(AppendError::Unfoldable)?;
+        fold_entry(&mut state, &entry).map_err(|e| AppendError::DoesNotApply(e.error))?;
         self.entries.push(entry);
         Ok(self.entries.last().expect("just pushed"))
     }
@@ -215,65 +285,7 @@ impl RecordLog {
     pub fn fold_at(&self, upto: u64) -> Result<FoldResult, FoldError> {
         let mut result = FoldResult::default();
         for entry in self.entries.iter().take(upto as usize) {
-            let seq = entry.envelope.seq;
-            let origin = &entry.content.origin;
-            let late_machine_write = entry.envelope.actor.kind == crate::ActorKind::Resolver
-                && matches!(origin, Origin::Derived(_));
-            for op in &entry.content.ops {
-                // §2.8 rule 2, enforced where provenance is derived: a
-                // resolver's derived write onto a human-authored cell is
-                // not applied; the cell keeps its value and gains the
-                // late derivation as `superseded` (divergence visible,
-                // restore possible), and the write is reported.
-                if let Op::Set { column, path, .. } | Op::Unset { column, path } = op
-                    && late_machine_write
-                {
-                    let addr = CellAddr { column: column.clone(), path: path.clone() };
-                    if let Some(current) = result.provenance.get(&addr)
-                        && matches!(current, Origin::Entered | Origin::Overridden { .. })
-                    {
-                        let landed = match origin {
-                            Origin::Derived(d) => Some(d.clone()),
-                            _ => None,
-                        };
-                        let superseded = match current {
-                            Origin::Overridden { superseded: Some(d) } => Some(d.clone()),
-                            _ => landed,
-                        };
-                        result.provenance.insert(addr.clone(), Origin::Overridden { superseded });
-                        result.suppressed.push(Suppressed { seq, addr });
-                        continue;
-                    }
-                }
-                apply(&mut result.values, op).map_err(|error| FoldError { seq, error })?;
-                match op {
-                    Op::Set { column, path, .. } => {
-                        let addr = CellAddr { column: column.clone(), path: path.clone() };
-                        let derived = derive_provenance(origin, result.provenance.get(&addr));
-                        result.provenance.insert(addr, derived);
-                    }
-                    Op::Unset { column, path } => {
-                        result.provenance.remove(&CellAddr {
-                            column: column.clone(),
-                            path: path.clone(),
-                        });
-                    }
-                    Op::RemoveItem {
-                        group,
-                        parent,
-                        item,
-                    } => {
-                        let prefix = parent.child(varve_core::PathSeg {
-                            group: group.clone(),
-                            item: item.clone(),
-                        });
-                        result
-                            .provenance
-                            .retain(|addr, _| !addr.path.starts_with(&prefix));
-                    }
-                    Op::AddItem { .. } | Op::Reorder { .. } => {}
-                }
-            }
+            fold_entry(&mut result, entry)?;
         }
         Ok(result)
     }
