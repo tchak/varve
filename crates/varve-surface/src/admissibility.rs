@@ -6,10 +6,10 @@
 
 use std::collections::BTreeSet;
 
-use varve_core::{ColumnId, ResolverId, RowPath};
+use varve_core::{ColumnId, RowPath};
 // `eval` is varve-logic's pure predicate-AST evaluator (no code
 // execution — see its definition).
-use varve_logic::{EvalContext, RuleCycle, eval};
+use varve_logic::{EvalContext, PendingSet, RuleCycle, eval};
 use varve_schema::{NomenclatureTable, Schema, SchemaIndex};
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
 
@@ -47,7 +47,7 @@ pub fn admissibility(
     schema: &Schema,
     nomenclatures: &NomenclatureTable,
     values: &RecordValues,
-    pending: &BTreeSet<ResolverId>,
+    pending: &PendingSet,
 ) -> Result<AdmissibilityReport, RuleCycle> {
     let index = SchemaIndex::build(schema);
     let reach = reachability(surface, schema, nomenclatures, values, pending)?;

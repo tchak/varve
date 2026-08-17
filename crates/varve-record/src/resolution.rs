@@ -27,6 +27,11 @@ pub struct Resolution {
     pub attempts: u32,
     pub last_error: Option<String>,
     pub deadline: Option<Instant>,
+    /// The landed payload (§2.7): set by [`Resolution::land`]. This is
+    /// where the snapshot lives when the target cells were overridden
+    /// while the resolution was pending (§2.8 rule 2) — and a GC root
+    /// (`RecordLog::referenced_blobs`).
+    pub snapshot: Option<ContentHash>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,17 +47,36 @@ pub enum ResolutionStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("illegal resolution transition {from:?} → {to:?}")]
-pub struct TransitionError {
-    pub from: ResolutionStatus,
-    pub to: ResolutionStatus,
+pub enum TransitionError {
+    #[error("illegal resolution transition {from:?} → {to:?}")]
+    Illegal { from: ResolutionStatus, to: ResolutionStatus },
+    /// `resolved` always carries its payload: use [`Resolution::land`].
+    #[error("a resolution resolves by landing a snapshot (Resolution::land)")]
+    ResolvedWithoutSnapshot,
 }
 
 impl Resolution {
     /// Lifecycle: `pending → resolved | not_found | ambiguous | failed |
     /// abandoned`; `failed → pending` (retry, counted). Terminal states
-    /// do not transition.
+    /// do not transition. `resolved` is reached through [`Self::land`]
+    /// only — a resolution never resolves without its payload.
     pub fn transition(&mut self, to: ResolutionStatus) -> Result<(), TransitionError> {
+        if to == ResolutionStatus::Resolved {
+            return Err(TransitionError::ResolvedWithoutSnapshot);
+        }
+        self.step(to)
+    }
+
+    /// The payload landed (§2.7): `pending → resolved`, recording the
+    /// snapshot. Whether the mapped cells actually change is the fold's
+    /// business (§2.8 rule 2) — the snapshot lands regardless.
+    pub fn land(&mut self, snapshot: ContentHash) -> Result<(), TransitionError> {
+        self.step(ResolutionStatus::Resolved)?;
+        self.snapshot = Some(snapshot);
+        Ok(())
+    }
+
+    fn step(&mut self, to: ResolutionStatus) -> Result<(), TransitionError> {
         use ResolutionStatus::*;
         let legal = matches!(
             (self.status, to),
@@ -60,10 +84,7 @@ impl Resolution {
                 | (Failed, Pending | Abandoned)
         );
         if !legal {
-            return Err(TransitionError {
-                from: self.status,
-                to,
-            });
+            return Err(TransitionError::Illegal { from: self.status, to });
         }
         if (self.status, to) == (Failed, Pending) {
             self.attempts += 1;
@@ -71,6 +92,18 @@ impl Resolution {
         self.status = to;
         Ok(())
     }
+}
+
+/// What the logic language reads (§2.8 rule 3): pending resolutions as
+/// `(scope, resolver)` pairs — per group instance, so "required unless
+/// pending" in one item does not leak into another. Feed this to
+/// `varve_logic::EvalContext::pending`.
+pub fn pending_set(resolutions: &[Resolution]) -> BTreeSet<(RowPath, ResolverId)> {
+    resolutions
+        .iter()
+        .filter(|r| r.status == ResolutionStatus::Pending)
+        .map(|r| (r.scope.clone(), r.resolver.clone()))
+        .collect()
 }
 
 /// The one pure function a Tier 5 scheduler needs (§2.8).

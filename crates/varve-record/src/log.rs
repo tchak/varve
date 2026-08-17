@@ -44,12 +44,28 @@ pub struct FoldError {
     pub error: ApplyError,
 }
 
-/// Folded state plus derived cell provenance: a cell's origin is the
-/// origin of the entry that last set it (§2.7).
+/// Folded state plus derived cell provenance (§2.7). Provenance is
+/// *derived*, not copied: a human write over a derived cell becomes
+/// `overridden { superseded }` whether or not the entry said so, and a
+/// resolver's late derived write never clobbers a human-authored cell
+/// (§2.8 rule 2) — it is recorded in `suppressed` and its derivation
+/// lands on the cell as `superseded`, so divergence is a cell-local
+/// read and restore is one `set` away.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FoldResult {
     pub values: RecordValues,
     pub provenance: BTreeMap<CellAddr, Origin>,
+    /// Late machine writes the fold refused to apply (§2.8 rule 2):
+    /// visible, never silent.
+    pub suppressed: Vec<Suppressed>,
+}
+
+/// A resolver's derived write that landed on a human-authored cell and
+/// was not applied (§2.8 rule 2: override wins over late resolution).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suppressed {
+    pub seq: u64,
+    pub addr: CellAddr,
 }
 
 /// Two actors wrote the same cell from the same base: detected and
@@ -80,6 +96,30 @@ pub enum SnapshotError {
     HashMismatch,
     #[error("snapshot's state does not match a refold")]
     StateMismatch,
+}
+
+/// Cell provenance after a write with `origin` lands on a cell whose
+/// current provenance is `current` (§2.7): a human write over a
+/// derived value retains what it replaced; an explicit `overridden`
+/// without `superseded` picks it up from the cell; everything else is
+/// the entry's origin verbatim.
+fn derive_provenance(origin: &Origin, current: Option<&Origin>) -> Origin {
+    let replaced = match current {
+        Some(Origin::Derived(d)) => Some(d.clone()),
+        Some(Origin::Overridden { superseded }) => superseded.clone(),
+        _ => None,
+    };
+    match origin {
+        Origin::Entered => match replaced {
+            Some(d) => Origin::Overridden { superseded: Some(d) },
+            None if matches!(current, Some(Origin::Overridden { .. })) => {
+                Origin::Overridden { superseded: None }
+            }
+            None => Origin::Entered,
+        },
+        Origin::Overridden { superseded: None } => Origin::Overridden { superseded: replaced },
+        other => other.clone(),
+    }
 }
 
 impl RecordLog {
@@ -165,20 +205,42 @@ impl RecordLog {
     pub fn fold_at(&self, upto: u64) -> Result<FoldResult, FoldError> {
         let mut result = FoldResult::default();
         for entry in self.entries.iter().take(upto as usize) {
+            let seq = entry.envelope.seq;
+            let origin = &entry.content.origin;
+            let late_machine_write = entry.envelope.actor.kind == crate::ActorKind::Resolver
+                && matches!(origin, Origin::Derived(_));
             for op in &entry.content.ops {
-                apply(&mut result.values, op).map_err(|error| FoldError {
-                    seq: entry.envelope.seq,
-                    error,
-                })?;
+                // §2.8 rule 2, enforced where provenance is derived: a
+                // resolver's derived write onto a human-authored cell is
+                // not applied; the cell keeps its value and gains the
+                // late derivation as `superseded` (divergence visible,
+                // restore possible), and the write is reported.
+                if let Op::Set { column, path, .. } | Op::Unset { column, path } = op
+                    && late_machine_write
+                {
+                    let addr = CellAddr { column: column.clone(), path: path.clone() };
+                    if let Some(current) = result.provenance.get(&addr)
+                        && matches!(current, Origin::Entered | Origin::Overridden { .. })
+                    {
+                        let landed = match origin {
+                            Origin::Derived(d) => Some(d.clone()),
+                            _ => None,
+                        };
+                        let superseded = match current {
+                            Origin::Overridden { superseded: Some(d) } => Some(d.clone()),
+                            _ => landed,
+                        };
+                        result.provenance.insert(addr.clone(), Origin::Overridden { superseded });
+                        result.suppressed.push(Suppressed { seq, addr });
+                        continue;
+                    }
+                }
+                apply(&mut result.values, op).map_err(|error| FoldError { seq, error })?;
                 match op {
                     Op::Set { column, path, .. } => {
-                        result.provenance.insert(
-                            CellAddr {
-                                column: column.clone(),
-                                path: path.clone(),
-                            },
-                            entry.content.origin.clone(),
-                        );
+                        let addr = CellAddr { column: column.clone(), path: path.clone() };
+                        let derived = derive_provenance(origin, result.provenance.get(&addr));
+                        result.provenance.insert(addr, derived);
                     }
                     Op::Unset { column, path } => {
                         result.provenance.remove(&CellAddr {
@@ -264,11 +326,16 @@ impl RecordLog {
     /// resolver-payload snapshots in origins. The kernel enumerates
     /// roots; the Tier 5 store sweeps. Erasure must cover history, so
     /// this walks the log, not the fold.
-    pub fn referenced_blobs(&self) -> std::collections::BTreeSet<
-        varve_core::canonical::ContentHash,
-    > {
+    pub fn referenced_blobs(
+        &self,
+        resolutions: &[crate::Resolution],
+    ) -> std::collections::BTreeSet<varve_core::canonical::ContentHash> {
         use varve_value::{CellValue as V, Scalar};
         let mut blobs = std::collections::BTreeSet::new();
+        // Landed payloads live on the resolution instance too (§2.7):
+        // a snapshot that landed while its targets were overridden may
+        // be referenced from nowhere else.
+        blobs.extend(resolutions.iter().filter_map(|r| r.snapshot));
         for entry in &self.entries {
             match &entry.content.origin {
                 crate::Origin::Derived(d)

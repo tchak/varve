@@ -25,10 +25,23 @@ pub struct EvalContext<'a> {
     /// absent (§4.1 — hidden never contributes; stale values in hidden
     /// columns must not drive visibility).
     pub hidden: BTreeSet<ColumnId>,
-    /// Resolvers with a pending resolution in this context (§2.8 rule
-    /// 3). Supplied by the caller — resolution state lives beside the
-    /// record, above this crate's tier.
-    pub pending: BTreeSet<ResolverId>,
+    /// Pending resolutions as `(scope, resolver)` — per group instance
+    /// (§2.8 rule 3). Supplied by the caller — resolution state lives
+    /// beside the record, above this crate's tier. `pending(r)` holds
+    /// at `item` iff some pending `(scope, r)` has `scope` a prefix of
+    /// `item`: an item sees its own instance's and the record's pending
+    /// resolutions, never a sibling item's (the §4.1 scope rule).
+    pub pending: PendingSet,
+}
+
+/// Pending resolutions keyed by group instance (§2.8): what
+/// `varve_record::pending_set` produces.
+pub type PendingSet = BTreeSet<(RowPath, ResolverId)>;
+
+fn is_pending(ctx: &EvalContext, resolver: &ResolverId) -> bool {
+    ctx.pending
+        .iter()
+        .any(|(scope, r)| r == resolver && ctx.item.starts_with(scope))
 }
 
 /// Total: every expression evaluates to a boolean on every record.
@@ -46,8 +59,8 @@ pub fn eval(expr: &Expr, ctx: &EvalContext) -> bool {
 
 fn eval_atom(atom: &Atom, ctx: &EvalContext) -> bool {
     match atom {
-        Atom::Pending { resolver } => ctx.pending.contains(resolver),
-        Atom::NotPending { resolver } => !ctx.pending.contains(resolver),
+        Atom::Pending { resolver } => is_pending(ctx, resolver),
+        Atom::NotPending { resolver } => !is_pending(ctx, resolver),
         Atom::IsEmpty { source } => read(source, ctx).is_none(),
         Atom::IsFilled { source } => read(source, ctx).is_some(),
         Atom::Contains { source, option } => match read(source, ctx) {

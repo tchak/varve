@@ -281,11 +281,33 @@ fn referenced_blobs_cover_history_and_snapshots() {
     ))
     .unwrap();
 
-    let blobs = log.referenced_blobs();
+    let blobs = log.referenced_blobs(&[]);
     assert!(blobs.contains(&blob("v1")));
     assert!(blobs.contains(&blob("v2")));
     assert!(blobs.contains(&derivation().snapshot_ref));
     assert_eq!(blobs.len(), 3);
+
+    // A payload that landed on a resolution instance is a root too —
+    // it may be referenced from nowhere else (§2.8 rule 2).
+    let mut resolution = pending_resolution();
+    resolution.land(blob("payload")).unwrap();
+    let blobs = log.referenced_blobs(&[resolution]);
+    assert!(blobs.contains(&blob("payload")));
+    assert_eq!(blobs.len(), 4);
+}
+
+fn pending_resolution() -> Resolution {
+    Resolution {
+        resolver: ResolverId::new("insee-sirene"),
+        resolver_version: 1,
+        mapping_version: 1,
+        scope: RowPath::root(),
+        status: ResolutionStatus::Pending,
+        attempts: 0,
+        last_error: None,
+        deadline: None,
+        snapshot: None,
+    }
 }
 
 #[test]
@@ -309,27 +331,112 @@ fn scan_lifecycle() {
 
 #[test]
 fn resolution_lifecycle() {
-    let mut resolution = Resolution {
-        resolver: ResolverId::new("insee-sirene"),
-        resolver_version: 1,
-        mapping_version: 1,
-        scope: RowPath::root(),
-        status: ResolutionStatus::Pending,
-        attempts: 0,
-        last_error: None,
-        deadline: None,
-    };
+    use varve_record::{TransitionError, pending_set};
+    let mut resolution = pending_resolution();
     let list = [resolution.clone()];
     assert_eq!(pending_resolutions(&list).len(), 1);
+    // What the logic language reads: (scope, resolver) pairs.
+    assert_eq!(
+        pending_set(&list),
+        [(RowPath::root(), ResolverId::new("insee-sirene"))].into_iter().collect()
+    );
 
     resolution.transition(ResolutionStatus::Failed).unwrap();
     resolution.transition(ResolutionStatus::Pending).unwrap();
     assert_eq!(resolution.attempts, 1);
-    resolution.transition(ResolutionStatus::Resolved).unwrap();
+    // A resolution never resolves without its payload (§2.7).
+    assert_eq!(
+        resolution.transition(ResolutionStatus::Resolved),
+        Err(TransitionError::ResolvedWithoutSnapshot)
+    );
+    let payload = derivation().snapshot_ref;
+    resolution.land(payload).unwrap();
+    assert_eq!(resolution.status, ResolutionStatus::Resolved);
+    assert_eq!(resolution.snapshot, Some(payload));
+    assert!(pending_set(&[resolution.clone()]).is_empty());
     // Terminal: no way back, and abandonment of a resolved instance is
     // meaningless.
     assert!(resolution.transition(ResolutionStatus::Pending).is_err());
     assert!(resolution.transition(ResolutionStatus::Abandoned).is_err());
+    assert!(resolution.land(payload).is_err());
+}
+
+#[test]
+fn override_wins_over_late_resolution() {
+    // §2.8 rule 2 (RATIFIED), enforced by the fold. The applicant fills
+    // `raison_sociale` by hand while the SIRET lookup is pending; the
+    // lookup lands later. The human value stays; the late derivation is
+    // retained on the cell as `superseded` — divergence visible, restore
+    // one `set` away — and the suppressed write is reported.
+    let mut log = RecordLog::new();
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("raison_sociale", "ACME (typed)")]))
+        .unwrap();
+    log.append(draft(
+        resolver_actor(),
+        1,
+        1,
+        Origin::Derived(derivation()),
+        vec![set("raison_sociale", "ACME SARL"), set("adresse", "1 rue X")],
+    ))
+    .unwrap();
+    let folded = log.fold().unwrap();
+    assert_eq!(
+        folded.values.cells.get(&addr("raison_sociale")),
+        Some(&CellState::Value(CellValue::One(Scalar::Text("ACME (typed)".into()))))
+    );
+    assert_eq!(
+        folded.provenance.get(&addr("raison_sociale")),
+        Some(&Origin::Overridden { superseded: Some(derivation()) })
+    );
+    // The untouched target still lands.
+    assert_eq!(
+        folded.values.cells.get(&addr("adresse")),
+        Some(&CellState::Value(CellValue::One(Scalar::Text("1 rue X".into()))))
+    );
+    assert!(matches!(folded.provenance.get(&addr("adresse")), Some(Origin::Derived(_))));
+    assert_eq!(
+        folded.suppressed,
+        vec![varve_record::Suppressed { seq: 1, addr: addr("raison_sociale") }]
+    );
+
+    // A human writing over a derived cell becomes `overridden` with the
+    // replaced derivation retained, even though the entry said `entered`
+    // — provenance is derived, not copied (§2.7).
+    log.append(draft(human("a1"), 2, 2, Origin::Entered, vec![set("adresse", "2 rue Y")]))
+        .unwrap();
+    let folded = log.fold().unwrap();
+    assert_eq!(
+        folded.provenance.get(&addr("adresse")),
+        Some(&Origin::Overridden { superseded: Some(derivation()) })
+    );
+    // A later resolver write onto that override is refused too.
+    log.append(draft(
+        resolver_actor(),
+        3,
+        3,
+        Origin::Derived(derivation()),
+        vec![set("adresse", "3 rue Z")],
+    ))
+    .unwrap();
+    let folded = log.fold().unwrap();
+    assert_eq!(
+        folded.values.cells.get(&addr("adresse")),
+        Some(&CellState::Value(CellValue::One(Scalar::Text("2 rue Y".into()))))
+    );
+    assert_eq!(folded.suppressed.len(), 2);
+
+    // Restore (§2.7): a *human* re-derives from the retained snapshot —
+    // a deliberate act with a Derived origin, not a late machine write —
+    // and it applies. Machine values never win by force; humans may
+    // choose them.
+    log.append(draft(human("a1"), 4, 4, Origin::Derived(derivation()), vec![set("adresse", "3 rue Z")]))
+        .unwrap();
+    let folded = log.fold().unwrap();
+    assert_eq!(
+        folded.values.cells.get(&addr("adresse")),
+        Some(&CellState::Value(CellValue::One(Scalar::Text("3 rue Z".into()))))
+    );
+    assert!(matches!(folded.provenance.get(&addr("adresse")), Some(Origin::Derived(_))));
 }
 
 #[test]

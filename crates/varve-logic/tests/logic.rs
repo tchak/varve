@@ -310,10 +310,30 @@ fn contains_and_pending() {
     });
     assert!(eval(&excludes, &f.ctx()));
 
+    // §2.8 rule 3, per group instance: a record-scoped pending
+    // resolution is visible at root and inside every item; an
+    // item-scoped one is visible in its own item only.
+    let insee = ResolverId::new("insee-sirene");
+    let pending = Expr::Atom(Atom::Pending { resolver: insee.clone() });
+    let not_pending = Expr::Atom(Atom::NotPending { resolver: insee.clone() });
+    let item = |i: &str| {
+        RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new(i) })
+    };
     let mut ctx = f.ctx();
-    ctx.pending.insert(ResolverId::new("insee-sirene"));
-    let pending = Expr::Atom(Atom::Pending { resolver: ResolverId::new("insee-sirene") });
+    ctx.pending.insert((RowPath::root(), insee.clone()));
     assert!(eval(&pending, &ctx));
+    assert!(!eval(&not_pending, &ctx));
+    ctx.item = item("c1");
+    assert!(eval(&pending, &ctx));
+
+    let mut ctx = f.ctx();
+    ctx.pending.insert((item("c1"), insee.clone()));
+    assert!(!eval(&pending, &ctx)); // root does not see an item's pending
+    ctx.item = item("c1");
+    assert!(eval(&pending, &ctx));
+    ctx.item = item("c2");
+    assert!(!eval(&pending, &ctx)); // nor does a sibling item
+    assert!(eval(&not_pending, &ctx));
     assert!(!eval(&pending, &f.ctx()));
 }
 

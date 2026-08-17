@@ -16,12 +16,12 @@ pub use entry::{
 };
 pub use log::{
     AppendError, ChainError, Conflict, FoldError, FoldResult, RecordLog,
-    Snapshot, SnapshotError,
+    Snapshot, SnapshotError, Suppressed,
 };
 pub use resolution::{
     Checkpoint, CheckpointViolation, ExpectedResolution, Resolution,
     ResolutionStatus, Scan, ScanStatus, ScanTransitionError, TransitionError,
-    pending_resolutions, pending_scans, validate_after_checkpoint,
+    pending_resolutions, pending_scans, pending_set, validate_after_checkpoint,
 };
 
 use varve_core::ResolverId;
@@ -47,16 +47,20 @@ pub enum ActorKind {
 }
 
 /// Where an entry's values came from (§2.7). Cell-level provenance is
-/// derived by fold: a cell's origin is the origin of the entry that
-/// last set it.
+/// *derived* by fold from the entry origins: a human write over a
+/// derived cell yields `overridden { superseded }` even if the entry
+/// just said `entered`, and a resolver's late derived write onto a
+/// human-authored cell is refused and lands as `superseded` instead
+/// (§2.8 rule 2). See `RecordLog::fold`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Origin {
     Entered,
     Derived(Derivation),
     /// Retains what it replaced (§2.7): divergence is a cell-local
-    /// read. `superseded` is absent only when overriding while a
-    /// resolution was still pending — the landed snapshot then lives on
-    /// the resolution instance.
+    /// read. `superseded` is absent only while an override made during
+    /// a pending resolution has not yet been answered — once the late
+    /// derived write lands, the fold fills it in; the landed snapshot
+    /// also lives on the resolution instance (`Resolution::snapshot`).
     Overridden { superseded: Option<Derivation> },
 }
 

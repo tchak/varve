@@ -15,7 +15,7 @@ mod graph;
 mod typecheck;
 
 pub use canon::{DecodeError, from_canonical, to_canonical};
-pub use eval::{EvalContext, eval};
+pub use eval::{EvalContext, PendingSet, eval};
 pub use graph::{RuleCycle, check_acyclic};
 pub use typecheck::{TypeError, typecheck};
 

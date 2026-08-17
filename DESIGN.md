@@ -204,11 +204,16 @@ origin: entered
 way. **`overridden` retains the provenance it replaced.** That makes
 divergence — what the source said vs what the human wrote — a cell-local
 read instead of a log walk (which matters at millions of records), and makes
-*restore* a re-derivation from `superseded.snapshot_ref`. The one case where
-`superseded` is absent: overriding while a resolution is still pending
-(§2.8) — the overriding entry cannot reference a snapshot that does not yet
-exist, so there the landed snapshot lives on the resolution instance, which
-sits beside the cells precisely for this.
+*restore* a re-derivation from `superseded.snapshot_ref`. **Cell provenance
+is derived by the fold, not copied from entries**: a human `set` over a
+derived cell yields `overridden { superseded }` whether or not the entry
+said so, so the retention cannot be forgotten by an entry author. The one
+case where `superseded` is transiently absent: overriding while a
+resolution is still pending (§2.8) — the overriding entry cannot reference
+a snapshot that does not yet exist. When the late derived write lands, the
+fold fills `superseded` from it (rule 2 below), and the landed snapshot
+also lives on the resolution instance, which sits beside the cells
+precisely for this.
 
 Orthogonal to stored state and reachability (§2.4) — those say what the cell
 holds and whether a surface shows it; this says where the value came from.
@@ -360,11 +365,25 @@ clocks.
 2. **Override wins over late resolution.** If a user fills a derived-target cell
    manually while resolution is pending, the cell becomes `overridden` and
    resolution must not clobber it — but the snapshot still lands, so divergence
-   stays visible and re-derivable.
+   stays visible and re-derivable. *Enforced by the fold (2026-08-17)*: a
+   **resolver's** derived write onto a human-authored cell (`entered` or
+   `overridden`) is not applied; the cell keeps its value, gains the late
+   derivation as `superseded`, and the refused write is reported in the fold
+   result — never silent. The fold cannot see resolution state, so "while
+   pending" is realised as "human-authored wins", which is the stronger
+   reading and the one surfaces already imply (where humans may not write
+   derived targets there is nothing to protect). Derived writes by *humans
+   or the system* — restore, bulk re-map (rule 1) — are deliberate acts and
+   apply: machine values never win by force; people may choose them. The
+   payload lands on the resolution instance (`Resolution::land`) regardless
+   of what the cells do — a resolution never resolves without its snapshot.
 
 3. **Pending is readable by the logic language.** Resolution status is part of
    record state, so a surface can express "required unless pending". Keeps
-   admissibility binary rather than adding a third value.
+   admissibility binary rather than adding a third value. Read **per group
+   instance**, like cells: `pending(r)` in an item sees that item's and the
+   record's pending resolutions, never a sibling item's (the §4.1 scope
+   rule) — the evaluator's environment is keyed by `(scope, resolver)`.
 
 All three are ratified. Rule 2 is the one the rest of the design leans on:
 `overridden { superseded }` (§2.7) and prefill restore encode exactly its

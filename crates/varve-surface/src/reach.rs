@@ -5,10 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use varve_core::{ColumnId, GroupId, ItemId, PathSeg, ResolverId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RowPath};
 // `eval` is varve-logic's pure predicate-AST evaluator (no code
 // execution — see its definition).
-use varve_logic::{EvalContext, Expr, RuleCycle, check_acyclic, eval};
+use varve_logic::{EvalContext, Expr, PendingSet, RuleCycle, check_acyclic, eval};
 use varve_schema::{NomenclatureTable, Schema, SchemaIndex};
 use varve_value::{ItemsAddr, RecordValues};
 
@@ -57,7 +57,7 @@ pub fn reachability(
     schema: &Schema,
     nomenclatures: &NomenclatureTable,
     values: &RecordValues,
-    pending: &BTreeSet<ResolverId>,
+    pending: &PendingSet,
 ) -> Result<Reachability, RuleCycle> {
     let index = SchemaIndex::build(schema);
     let entries = column_entries(surface);
