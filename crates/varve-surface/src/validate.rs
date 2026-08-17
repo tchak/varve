@@ -27,6 +27,11 @@ pub enum SurfaceError {
     /// §2.6: format constraints apply to text columns only.
     #[error("column '{0}': format constraint on a non-text column")]
     FormatOnNonText(ColumnId),
+    /// A custom pattern that does not compile (or uses backtracking-only
+    /// constructs the linear-time engine rejects): a publication error,
+    /// never a runtime one.
+    #[error("column '{0}': invalid format pattern: {1}")]
+    InvalidPattern(ColumnId, String),
     #[error("rule on column '{0}': {1}")]
     Rule(ColumnId, TypeError),
     #[error("rule on group '{0}': {1}")]
@@ -137,8 +142,13 @@ fn walk(
                 if info.scope != *scope {
                     errors.push(SurfaceError::MisplacedColumn(column.clone()));
                 }
-                if column_node.format.is_some() && info.ty != ScalarType::Text {
-                    errors.push(SurfaceError::FormatOnNonText(column.clone()));
+                if let Some(format) = &column_node.format {
+                    if info.ty != ScalarType::Text {
+                        errors.push(SurfaceError::FormatOnNonText(column.clone()));
+                    }
+                    if let Err(reason) = format.verify() {
+                        errors.push(SurfaceError::InvalidPattern(column.clone(), reason));
+                    }
                 }
                 for rule in [&column_node.visibility, &column_node.required]
                     .into_iter()

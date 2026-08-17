@@ -4,21 +4,46 @@
 //! deliberately lenient except IBAN, which has a real checksum
 //! (ISO 13616 mod-97).
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Format {
     Email,
     Phone,
     Iban,
+    /// Author-supplied pattern (DN's "formatted" champ). Matched with
+    /// the linear-time `regex` engine — author patterns run against
+    /// user input, so no-backtracking is a security property (no
+    /// ReDoS), not a convenience. Always full-match: wrapped
+    /// `\A(?:pat)\z`, so forgotten anchors cannot accept substrings.
+    /// Pattern validity is checked by `validate()` at publication.
+    Regex(String),
 }
 
 impl Format {
-    pub fn check(self, value: &str) -> bool {
+    pub fn check(&self, value: &str) -> bool {
         match self {
             Format::Email => email(value),
             Format::Phone => phone(value),
             Format::Iban => iban(value),
+            Format::Regex(pattern) => match compile(pattern) {
+                // An invalid pattern rejects nothing at runtime: it is
+                // a publication error, not an applicant's problem.
+                Err(_) => true,
+                Ok(re) => re.is_match(value),
+            },
         }
     }
+
+    /// Publication-time pattern verification for `validate()`.
+    pub fn verify(&self) -> Result<(), String> {
+        match self {
+            Format::Regex(pattern) => compile(pattern).map(|_| ()),
+            _ => Ok(()),
+        }
+    }
+}
+
+fn compile(pattern: &str) -> Result<regex::Regex, String> {
+    regex::Regex::new(&format!(r"\A(?:{pattern})\z")).map_err(|e| e.to_string())
 }
 
 /// Structural: one `@`, non-empty local part, dotted domain, no
@@ -87,5 +112,26 @@ mod tests {
         assert!(Format::Iban.check("GB82 WEST 1234 5698 7654 32"));
         assert!(!Format::Iban.check("GB82 WEST 1234 5698 7654 33"));
         assert!(Format::Iban.check("FR1420041010050500013M02606"));
+    }
+
+    #[test]
+    fn custom_patterns_are_anchored_and_linear() {
+        let code = Format::Regex("[0-9]{5}".into());
+        assert!(code.check("75011"));
+        // Full-match by construction: substrings do not pass.
+        assert!(!code.check("x75011y"));
+        assert!(!code.check("750112"));
+
+        // The PCRE-killer pattern: compiles here and runs in linear
+        // time — the engine guarantee that makes author-supplied
+        // patterns safe against user input.
+        let pathological = Format::Regex("(a+)+".into());
+        assert!(pathological.check(&"a".repeat(1000)));
+        assert!(!pathological.check(&format!("{}b", "a".repeat(1000))));
+
+        // Backtracking-only constructs are rejected at verification —
+        // DN patterns using them surface as counted residue at import.
+        assert!(Format::Regex("(?=x)".into()).verify().is_err());
+        assert!(Format::Regex("[0-9]{5}".into()).verify().is_ok());
     }
 }

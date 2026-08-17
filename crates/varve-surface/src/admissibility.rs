@@ -94,7 +94,7 @@ pub fn admissibility(
                     path: path.clone(),
                 });
             }
-            if let Some(format) = entry.node.format
+            if let Some(format) = &entry.node.format
                 && let Some(CellState::Value(CellValue::One(Scalar::Text(text)))) = cell
                 && !text.is_empty()
                 && !format.check(text)
@@ -102,7 +102,7 @@ pub fn admissibility(
                 findings.push(Finding::FormatViolation {
                     column: column.clone(),
                     path: path.clone(),
-                    format,
+                    format: format.clone(),
                 });
             }
         }

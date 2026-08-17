@@ -147,7 +147,11 @@ Format constraints get the same treatment (**settled from the M0 residue**):
 email, phone, IBAN, regex formats are admissibility, not representability.
 The schema type is plain `text`; the format check lives in the surface.
 Casts stay trivial, strictness may differ per surface, and a mis-formatted
-value is non-admissible — never ill-typed.
+value is non-admissible — never ill-typed. Custom patterns run on a
+**linear-time engine** (author-supplied patterns meet user input, so
+no-backtracking is a security property — no ReDoS), always full-match by
+construction; backtracking-only constructs are publication errors, and DN
+patterns using them surface as counted residue at import.
 
 Logic splits accordingly: type-level predicates in the schema; visibility and
 requirement rules in the surface. Both compile against a specific revision and
