@@ -250,13 +250,16 @@ fn project_scalar(
     let ok = |s: Scalar| Ok(Some((s, false)));
     match (from, to) {
         (a, b) if a == b => ok(scalar.clone()),
-        (T::Enum(_), T::Enum(r)) => {
+        (T::Enum(w), T::Enum(r)) => {
             let Scalar::Enum(id) = scalar else {
                 return Ok(None);
             };
             let rows = nomenclature_rows(r, nomenclatures)?;
             if rows.iter().any(|row| row.id == *id) {
-                ok(scalar.clone())
+                // §2.12: dropping or switching a référentiel binding keeps
+                // the id and loses its meaning — lossy per cell, like a
+                // dropped unit.
+                Ok(Some((scalar.clone(), binding_dropped(w, r))))
             } else {
                 // Option removed from the reader's nomenclature: exactly
                 // the flagged case of §3's enum rows.
@@ -393,6 +396,17 @@ fn convert_number(
 /// meaning does not — so every such cell counts in the lossiness report.
 fn unit_dropped(from: Option<Unit>, to: Option<Unit>) -> bool {
     from.is_some() && to.is_none()
+}
+
+/// §2.12: a published nomenclature binding dropped (→ inline) or
+/// switched (→ another nomenclature) is lossy the same way.
+fn binding_dropped(from: &varve_schema::NomenclatureRef, to: &varve_schema::NomenclatureRef) -> bool {
+    use varve_schema::NomenclatureRef as N;
+    match (from, to) {
+        (N::Published { id: a, .. }, N::Published { id: b, .. }) => a != b,
+        (N::Published { .. }, N::Inline(_)) => true,
+        _ => false,
+    }
 }
 
 fn text(

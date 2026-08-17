@@ -172,11 +172,16 @@ proptest! {
         aa in arity(), ab in arity(),
     ) {
         let n = table();
-        prop_assume!(!matches!(
+        // Attachment/geometry against anything else has no join by
+        // design (Incompatible): nothing to check for those pairs.
+        let incompatible = matches!(
             (&a, &b),
             (ScalarType::Attachment(_) | ScalarType::Geometry, _)
                 | (_, ScalarType::Attachment(_) | ScalarType::Geometry)
-        ) || a == b);
+        ) && a != b;
+        if incompatible {
+            return Ok(());
+        }
         if let Ok(((ty, arity), _)) = column_join((&a, aa), (&b, ab), &n) {
             prop_assert_eq!(arity, arity_join(aa, ab));
             for (side_ty, side_arity) in [(&a, aa), (&b, ab)] {

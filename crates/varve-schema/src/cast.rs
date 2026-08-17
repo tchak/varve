@@ -194,16 +194,30 @@ pub fn scalar_cast(
         (a, b) if a == b => Cast::IDENTITY,
         // §2.11: id-set comparison. Target superset → free; otherwise
         // cells holding removed ids fail, and are countable exactly.
+        // §2.12 binding: an enum bound to a published nomenclature
+        // carries a référentiel meaning beyond its id set. Lifting an
+        // inline enum out into a published one (ids ⊆) is widening;
+        // dropping the binding (published → inline) or switching it
+        // (published A → published B) is **lossy** even when every id
+        // survives — the values keep their bytes and lose their
+        // référentiel, like a number losing its unit (§2.14). This is
+        // what keeps "widens to" a partial order whose join is least.
         (Enum(a), Enum(b)) => {
             let from_ids = option_ids(a, nomenclatures)
                 .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
             let to_ids = option_ids(b, nomenclatures)
                 .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
-            if from_ids.is_subset(&to_ids) {
-                Cast::WIDENING
-            } else {
-                Cast::CHECKED
-            }
+            let ids = if from_ids.is_subset(&to_ids) { Cast::WIDENING } else { Cast::CHECKED };
+            let binding = match (a, b) {
+                (NomenclatureRef::Published { id: x, .. }, NomenclatureRef::Published { id: y, .. })
+                    if x == y =>
+                {
+                    Cast::WIDENING
+                }
+                (NomenclatureRef::Published { .. }, _) => Cast::LOSSY,
+                _ => Cast::WIDENING,
+            };
+            ids.and(binding)
         }
         // §2.15: broaden free, narrow checked — the enum id-set rules
         // replayed over media-type patterns and size limits.
@@ -335,9 +349,11 @@ pub fn scalar_join(
 /// labels are interpretation), so the merged row keeps the id and takes
 /// the right-hand label (the aggregate folds history forward, so the
 /// later revision's label wins; the aggregate's own surface takes
-/// labels from the latest revision anyway). Everything else falls back
-/// to the genuine upper bound both sides widen to: `Text`, reported as
-/// `ViaText`.
+/// labels from the latest revision anyway). An inline enum whose ids
+/// all belong to a published one joins to the published one — the
+/// lift-out (§2.12); the reverse never happens, since dropping a
+/// binding is lossy. Everything else falls back to the genuine upper
+/// bound both sides widen to: `Text`, reported as `ViaText`.
 fn enum_join(
     x: &NomenclatureRef,
     y: &NomenclatureRef,
@@ -369,9 +385,25 @@ fn enum_join(
                 JoinPath::Direct,
             ))
         }
+        (NomenclatureRef::Inline(_), NomenclatureRef::Published { .. })
+        | (NomenclatureRef::Published { .. }, NomenclatureRef::Inline(_)) => {
+            let (inline, published) = match x {
+                NomenclatureRef::Inline(_) => (x, y),
+                _ => (y, x),
+            };
+            let unknown = |(id, version)| JoinConflict::UnknownNomenclature(id, version);
+            let inline_ids = option_ids(inline, nomenclatures).map_err(unknown)?;
+            let published_ids = option_ids(published, nomenclatures).map_err(unknown)?;
+            if inline_ids.is_subset(&published_ids) {
+                // Lift-out: the published enum is the least upper bound.
+                Ok((ScalarType::Enum(published.clone()), JoinPath::Direct))
+            } else {
+                Ok((ScalarType::Text, JoinPath::ViaText))
+            }
+        }
         _ => {
-            // Different codelists, or inline vs published: both widen to
-            // text; verify the table knows any published side first.
+            // Different codelists: both widen to text; verify the table
+            // knows both sides first.
             for nref in [x, y] {
                 if let Err((id, version)) = option_ids(nref, nomenclatures) {
                     return Err(JoinConflict::UnknownNomenclature(id, version));
@@ -567,6 +599,32 @@ mod tests {
             scalar_cast(&v1, &Enum(NomenclatureRef::Published { id: cog.clone(), version: 3 }), &n),
             Err(CastError::UnknownNomenclature(cog, 3))
         );
+    }
+
+    #[test]
+    fn enum_binding_is_meaning_the_way_a_unit_is() {
+        // §2.12: lifting an inline enum into a published nomenclature is
+        // widening (ids ⊆); dropping or switching the binding is lossy
+        // even when every id survives; and the join is the lift-out —
+        // never Text when a published enum bounds both.
+        use ScalarType::Enum;
+        let mut n = NomenclatureTable::new();
+        let row = |id: &str| OptionRow { id: OptionId::new(id), label: id.into(), fields: vec![] };
+        n.insert(NomenclatureId::new("pays"), 1, vec![row("FR"), row("DE")]);
+        n.insert(NomenclatureId::new("cog"), 1, vec![row("FR")]);
+        let pays = Enum(NomenclatureRef::Published { id: NomenclatureId::new("pays"), version: 1 });
+        let cog = Enum(NomenclatureRef::Published { id: NomenclatureId::new("cog"), version: 1 });
+        let inline_fr = Enum(inline(&[("FR", "France")]));
+        let inline_xx = Enum(inline(&[("XX", "Nowhere")]));
+        assert_eq!(scalar_cast(&inline_fr, &pays, &n).unwrap().class(), CastClass::Widening);
+        assert_eq!(scalar_cast(&pays, &inline_fr, &n).unwrap().class(), CastClass::Checked); // DE has nowhere to go
+        assert!(scalar_cast(&pays, &inline_fr, &n).unwrap().lossy);
+        assert_eq!(scalar_cast(&cog, &inline_fr, &n).unwrap().class(), CastClass::Lossy);
+        assert_eq!(scalar_cast(&cog, &pays, &n).unwrap().class(), CastClass::Lossy); // ids ⊆, binding switched
+        assert_eq!(scalar_join(&inline_fr, &pays, &n).unwrap(), (pays.clone(), JoinPath::Direct));
+        assert_eq!(scalar_join(&pays, &inline_fr, &n).unwrap(), (pays.clone(), JoinPath::Direct));
+        assert_eq!(scalar_join(&inline_xx, &pays, &n).unwrap(), (ScalarType::Text, JoinPath::ViaText));
+        assert_eq!(scalar_join(&cog, &pays, &n).unwrap(), (ScalarType::Text, JoinPath::ViaText));
     }
 
     #[test]

@@ -755,7 +755,14 @@ version, referenced by inclusion.
   from nomenclature N@v" gives the checker a closed id set: rule literals
   and exhaustiveness become statically checkable. Version bumps run
   through the §3 enum rows — label edits free, removed ids flagged with an
-  exact record count.
+  exact record count. **The binding is meaning** (settled 2026-08-17, the
+  §2.14 unit precedent): lifting an inline enum out into a published
+  nomenclature whose ids contain it is widening; dropping the binding
+  (published → inline) or switching it (published A → B) is **lossy** even
+  when every id survives — the values keep their bytes and lose their
+  référentiel. In the aggregate join, an inline enum bounded by a
+  published one lifts out to it; two different nomenclatures meet only at
+  `Text`.
 - Lives in `varve-schema`, beside blocks.
 
 **Name.** Chosen for domain authenticity: INSEE publishes *nomenclatures*
