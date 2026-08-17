@@ -21,8 +21,8 @@ use varve_core::{ColumnId, GroupId, OptionId, ResolverId};
 use varve_logic::{Expr, TypeError, typecheck};
 use varve_projection::project;
 use varve_schema::{
-    AttachmentConstraints, Cast, CastClass, CastError, Mapping, NomenclatureTable,
-    ResolverDeclaration, ScalarType, Schema, SchemaIndex, Unit, column_cast,
+    AttachmentConstraints, BlockRef, Cast, CastClass, CastError, Mapping, NomenclatureTable,
+    ResolverDeclaration, ScalarType, Schema, SchemaIndex, Unit, column_cast, included_blocks,
     nomenclature_rows,
 };
 use varve_value::RecordValues;
@@ -193,10 +193,31 @@ pub struct RecordAssessment {
     pub pending_on_removed_resolvers: BTreeMap<ResolverId, u64>,
 }
 
+/// A block-level view of the transition (§2.1, Q5): what the per-column
+/// rows say, grouped by the block a group was included from — so a
+/// block bump reads as one change with its columns under it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockChange {
+    /// A group included from a block appears in the new revision.
+    Included { group: GroupId, block: BlockRef },
+    /// A group included from a block is gone.
+    Removed { group: GroupId, block: BlockRef },
+    /// The same group is included from another version of its block
+    /// (or another block): the block's columns cast per the §3 rows.
+    Bumped { group: GroupId, from: BlockRef, to: BlockRef },
+    /// The group stays but lost its provenance: edited by hand — no
+    /// longer pinned to any block version.
+    Detached { group: GroupId, was: BlockRef },
+    /// The group stays and gained provenance: adopted into a block.
+    Attached { group: GroupId, now: BlockRef },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImpactReport {
     pub columns: BTreeMap<ColumnId, ColumnImpact>,
     pub resolvers: Vec<ResolverChange>,
+    /// Block inclusions that changed between the revisions.
+    pub blocks: Vec<BlockChange>,
     /// §4.1 "broken rule references": filled by `broken_rules`, or by
     /// `classify_with_rules`/`assess` when rules are supplied.
     pub rules: Vec<BrokenRule>,
@@ -364,6 +385,7 @@ pub fn classify(
     Ok(ImpactReport {
         columns,
         resolvers: resolver_changes(from, to, &to_index),
+        blocks: block_changes(from, to, &from_index, &to_index),
         rules: Vec::new(),
         records: None,
     })
@@ -478,6 +500,42 @@ fn removed_options(
         .map(|r| r.id.clone())
         .collect();
     Ok(from_ids.difference(&to_ids).cloned().collect())
+}
+
+fn block_changes(
+    from: &Schema,
+    to: &Schema,
+    from_index: &SchemaIndex,
+    to_index: &SchemaIndex,
+) -> Vec<BlockChange> {
+    let before: BTreeMap<GroupId, BlockRef> = included_blocks(from).into_iter().collect();
+    let after: BTreeMap<GroupId, BlockRef> = included_blocks(to).into_iter().collect();
+    let mut changes = Vec::new();
+    for (group, was) in &before {
+        match after.get(group) {
+            Some(now) if now == was => {}
+            Some(now) => changes.push(BlockChange::Bumped {
+                group: group.clone(),
+                from: was.clone(),
+                to: now.clone(),
+            }),
+            None if to_index.groups.contains_key(group) => {
+                changes.push(BlockChange::Detached { group: group.clone(), was: was.clone() })
+            }
+            None => changes.push(BlockChange::Removed { group: group.clone(), block: was.clone() }),
+        }
+    }
+    for (group, now) in &after {
+        if before.contains_key(group) {
+            continue;
+        }
+        if from_index.groups.contains_key(group) {
+            changes.push(BlockChange::Attached { group: group.clone(), now: now.clone() });
+        } else {
+            changes.push(BlockChange::Included { group: group.clone(), block: now.clone() });
+        }
+    }
+    changes
 }
 
 fn resolver_changes(

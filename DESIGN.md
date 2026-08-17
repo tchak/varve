@@ -56,7 +56,17 @@ an administration before it publishes a revision.**
 - **Column** — a typed field. Has an **arity**: `one | many`.
 - **Group** — ordered container of columns. Has a **cardinality**: `one | many`.
 - **Block** — a published, reusable group definition with its own identity and
-  version, referenced by inclusion.
+  version, referenced by inclusion. Two halves along the tier boundary
+  (settled 2026-08-17, was open question 5): the **schema-side block** —
+  shell group + paired resolver declarations — lives in `varve-schema`,
+  hashes plain like a nomenclature and travels as a `block` line; the
+  **surface-side defaults** — prompts, visibility/required rules, formats,
+  write policy over the block's own columns — live in `varve-surface` and
+  reference the block by `(id, version)`. Inclusion **pastes with
+  provenance**: the shell becomes an ordinary group of the revision
+  carrying `included_from: (block, version)`, so nothing downstream learns
+  about blocks and yet the revision knows what it included — rules pin to
+  a block version, and the impact report can name a block bump.
 - **Record** — instance of a schema, bound to a revision.
 - **Item** — one instance of a `many` group. (Avoid "row" — it collides with
   export rows.)
@@ -818,9 +828,14 @@ Settled design for `varve-core::canonical`. Eight decisions:
 7. **Revision identity.** Identity-bearing: types, arity, cardinality,
    the order of columns and groups (containers are ordered), inline
    nomenclature rows including labels (a relabel is a new revision,
-   §2.11), resolver declarations. Not identity-bearing: surfaces
-   (separate objects). Canonical shapes (field names, optionals omitted
-   when absent) live in code with test vectors.
+   §2.11), resolver declarations, and a group's block provenance
+   (`included_from` — the same structure typed by hand is a different
+   revision, as an inline enum differs from a published one). Not
+   identity-bearing: surfaces (separate objects), including block
+   defaults, which are surface fragments hashed plain on their own.
+   Schema-side blocks hash plain like nomenclatures. Canonical shapes
+   (field names, optionals omitted when absent) live in code with test
+   vectors.
 8. **Envelope vs content; actor pseudonymity is a contract.** Envelope —
    survives redaction, lives as long as the record: `seq`, `prev`, actor
    (opaque id + kind), timestamp, `authored_against_revision`,
@@ -981,6 +996,7 @@ interpretation is revision-dependent.**
 | enum option added | free |
 | enum option removed | flagged — id retained with `deprecated_since`; impact report counts records holding it |
 | unit changed within a dimension | checked — exact-or-fail on the target representation (§2.14) |
+| block included / removed / **bumped to another version** | the block's columns follow the rows above; the impact report groups them under one named block change (§2.1) |
 | unit added | free — values unchanged, reported as a semantic change (§2.14) |
 | unit removed | lossy — values unchanged, meaning dropped (§2.14) |
 | unit dimension changed | breaking |
@@ -1279,7 +1295,7 @@ in one file in dependency order.
 ```
 {"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, attachments mode)
 {"k":"revision", "id":"...", "schema":{...}}   // writer schema travels with the data (Avro property); resolver declarations ride inside it
-{"k":"block", "id":"...", ...}                 // not yet emitted — Block lives in varve-surface, which varve-wire cannot depend on (§7); unresolved
+{"k":"block", "id":"...", "version":1, "group":{...}, "resolvers":[...]}   // schema-side block (§2.1); travels like a nomenclature. Its surface defaults travel with surfaces (§10 Q14)
 {"k":"nomenclature", "id":"...", "version":1, "rows":[...]}   // versioned (id, label, ...fields) table (§2.12); travels like a block
 {"k":"record", "id":"...", "lens":"...", "cells":{...}}   // snapshot mode: ROOT cells; lens = fold revision, not a record property (§2.9)
 {"k":"item", "record":"...", "group":"...", "parent":[...], "id":"...", "ord":0, "cells":{...}}   // one item's cells; follows its record line
@@ -1557,8 +1573,10 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
   nothing.
 
 **Tier 1**
-- `varve-schema` — types, arity, groups, cardinality, blocks,
-  nomenclatures (§2.12), structural constraints, depth policy. **Includes the cast table** — the compatibility
+- `varve-schema` — types, arity, groups, cardinality, schema-side blocks
+  (§2.1: shell + declarations, `Block::include_into` pastes with
+  provenance), nomenclatures (§2.12), structural constraints, depth
+  policy. **Includes the cast table** — the compatibility
   relation between two types is a property of the type system itself — **and its
   dual, the type join / least upper bound** used to build aggregate revisions
   (§5.5). Canonical hash → revision ID. **The `Revision` object itself — an
@@ -1596,10 +1614,14 @@ and resolution instances (Tier 3) hand them down; the crate never looks
 up.*
 
 **Tier 3**
-- `varve-surface` — presentation + admissibility tree. Depends on schema +
-  logic. **Nothing depends on it** — that's the proof that "form isn't core."
-- `varve-revision` — revision DAG, publication, three-way schema merge,
-  **aggregate revision construction (§5.5)**.
+- `varve-surface` — presentation + admissibility tree, and the surface-side
+  block defaults (`BlockDefaults`, referencing a schema-side block by
+  version). Depends on schema + logic. **Nothing depends on it** — that's
+  the proof that "form isn't core" — which is why a block is two objects,
+  not one.
+- `varve-revision` — revision DAG, publication, block and nomenclature
+  publication (registries: version numbering, validation), three-way
+  schema merge, **aggregate revision construction (§5.5)**.
 - `varve-record` — the log (§2.9): entries, fold, snapshots, checkpoints,
   concurrency detection, resolution instances (§2.8). Depends on `value` +
   `schema`. Still deterministic — no clock, no IO; timestamps are inputs.
@@ -1735,25 +1757,37 @@ Only then: `surface`, `store`, service.
    much pushback. Depth-1 stands as policy; `row_path` staying a sequence
    (§2.3) is the entire accommodation.
 5. ~~Group-level atomic validation.~~ **Resolved by the assembled
-   design.** A published block guarantees its **structure** (columns,
-   types, units, constraints, inline nomenclatures — §2.1, versioned and
-   content-addressed like nomenclatures), its **paired declarations**
-   (a resolver, per the §2.7 SIRET example), and its **bundled rules**
-   (§4: visibility, requiredness, and validation predicates over its own
-   columns — `date_fin ≥ date_debut` is the §4.3 column-to-column
-   comparison, scheduled for validation predicates first). Casting a
-   block between versions is the per-column cast machinery over the
-   block's columns together (§2.5: a block's value is a view). Violating
-   a block rule produces **non-admissibility with respect to a surface**
-   (§2.6), never global invalidity: block rules are surface-level rules
-   the block *ships as defaults*, the way a "RIB" block ships an accept
-   set — so a block publication bundles a **schema-side part** (what a
-   revision includes) and a **surface-side part** (the rule and prompt
-   defaults). Rules pin to the block version — that is what "published"
-   means, and what makes an impact report over block bumps meaningful.
-   Residual is implementation, deliberately deferred: no `Block` type
-   until both halves can be built together (schema cannot depend on
-   surface), i.e. alongside `varve-wire`, where blocks are a line kind.
+   design; placement and pinning settled 2026-08-17.** A published block
+   guarantees its **structure** (columns, types, units, constraints,
+   inline nomenclatures — §2.1, versioned and content-addressed like
+   nomenclatures), its **paired declarations** (a resolver, per the §2.7
+   SIRET example), and its **bundled defaults** (§4: visibility and
+   requiredness rules, prompts, formats, write policy over its own
+   columns). Validation predicates — `date_fin ≥ date_debut`, the §4.3
+   column-to-column comparison — arrive with §4.3 and blocks will carry
+   them then; an earlier wording promised them now, which neither
+   surfaces nor the publication policy support. Casting a block between
+   versions is the per-column cast machinery over the block's columns
+   together (§2.5: a block's value is a view). Violating a block rule
+   produces **non-admissibility with respect to a surface** (§2.6), never
+   global invalidity: block rules are surface-level rules the block *ships
+   as defaults*, the way a "RIB" block ships an accept set. Hence a block
+   is **two objects along the tier boundary**: the schema-side `Block`
+   (`varve-schema`, hashed plain, `block` wire line, published through a
+   registry) and `BlockDefaults` (`varve-surface`, referencing the block
+   by `(id, version)`, validated against it, travelling with surfaces —
+   Q14). An earlier implementation put both halves in `varve-surface`,
+   which the wire could not carry without breaking "nothing depends on
+   `varve-surface`" (§7); moving surface types down a tier to make one
+   wire object was considered and rejected — it would erode "form isn't
+   core" to satisfy a line kind. **Rules pin to the block version because
+   inclusion pastes with provenance**: `Group.included_from` records
+   `(block, version)`, identity-bearing (§2.13 decision 7); the alternative
+   — resolving block references through a table wherever a schema is
+   read, the published-nomenclature pattern — was rejected for its blast
+   radius. That provenance is what makes an impact report over block
+   bumps meaningful (§3 row; `varve-impact` names included / removed /
+   bumped / detached / attached).
 6. ~~Import modes.~~ **Resolved (§5 "Import modes").** Modes are
    distinguished by stream kind, never by flag; snapshot import is
    whole-record replace (column-scoped replace cut — DN practice does
@@ -1817,12 +1851,14 @@ Only then: `surface`, `store`, service.
     conformance, wire reader) so each state has one canonical form.
     Collapsing to two states was considered and rejected — it would
     erase the "left blank by whom" fact that audit and diff rely on.
-14. **Record-side wire completeness.** Not yet on the wire (found by
-    audit, 2026-08-17): `resolution` instances (§2.8 lifecycle, landed
-    snapshot ref), `checkpoint`s (§2.9: entry hash, reading revision,
-    expected resolutions, frozen set), payload `snapshot` descriptions
-    (hash/size/type, like `attachment`), and the bundled blob **sidecar**
-    (§2.15) — so today a history export is lossless for the log only and
+14. **Record-side (and surface) wire completeness.** Not yet on the wire
+    (found by audit, 2026-08-17): `resolution` instances (§2.8 lifecycle,
+    landed snapshot ref), `checkpoint`s (§2.9: entry hash, reading
+    revision, expected resolutions, frozen set), payload `snapshot`
+    descriptions (hash/size/type, like `attachment`), the bundled blob
+    **sidecar** (§2.15), and **surfaces** — including block defaults,
+    which travel with them — so today a history export is lossless for
+    the log only, a procedure's surfaces do not migrate, and
     "an imported record remains fully meaningful on an instance with no
     access to INSEE" (§2.8) is a goal, not a property. Deliberately
     routed here rather than built piecemeal: payload blobs and attachment

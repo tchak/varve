@@ -109,6 +109,51 @@ fn nomenclature_publication_is_append_only() {
 }
 
 #[test]
+fn block_publication_numbers_versions_and_validates() {
+    use varve_core::BlockId;
+    use varve_revision::{BlockRegistry, PublishBlockError};
+    use varve_schema::{Block, DepthPolicy};
+    let shell = |cols: Vec<Element>| Group {
+        id: GroupId::new("rib"),
+        label: "RIB".into(),
+        cardinality: Cardinality::One,
+        children: cols,
+        included_from: None,
+    };
+    let block = |version: u32| Block {
+        id: BlockId::new("rib"),
+        version,
+        group: shell(vec![column("iban", ScalarType::Text)]),
+        resolvers: vec![],
+    };
+    let mut registry = BlockRegistry::new();
+    assert_eq!(registry.publish(block(1), DepthPolicy::default()), Ok(1));
+    // Versions are numbered by the registry: a stale author fails loudly.
+    assert!(matches!(
+        registry.publish(block(1), DepthPolicy::default()),
+        Err(PublishBlockError::VersionMismatch { expected: 1, next: 2, .. })
+    ));
+    assert_eq!(registry.publish(block(2), DepthPolicy::default()), Ok(2));
+    assert_eq!(registry.get(&BlockId::new("rib"), 1).unwrap().version, 1);
+    assert_eq!(registry.latest(&BlockId::new("rib")).unwrap().version, 2);
+    // The shell's group id is the block's inclusion identity: it stays.
+    let mut renamed = block(3);
+    renamed.group.id = GroupId::new("bank");
+    assert!(matches!(
+        registry.publish(renamed, DepthPolicy::default()),
+        Err(PublishBlockError::ShellIdChanged { .. })
+    ));
+    // An invalid shell (duplicate column ids) is refused.
+    let mut invalid = block(3);
+    invalid.group.children.push(column("iban", ScalarType::Text));
+    assert!(matches!(
+        registry.publish(invalid, DepthPolicy::default()),
+        Err(PublishBlockError::Invalid { .. })
+    ));
+    assert_eq!(registry.all().count(), 2);
+}
+
+#[test]
 fn three_way_merge_combines_disjoint_edits() {
     let base = schema(vec![
         column("a", ScalarType::Text),
@@ -154,6 +199,7 @@ fn three_way_merge_combines_disjoint_edits() {
 fn merge_recurses_into_groups() {
     let group = |children: Vec<Element>| {
         Element::Group(Group {
+            included_from: None,
             id: GroupId::new("g"),
             label: "g".into(),
             cardinality: Cardinality::Many,

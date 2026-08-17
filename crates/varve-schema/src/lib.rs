@@ -6,12 +6,16 @@
 
 #![forbid(unsafe_code)]
 
+mod block;
 mod canon;
 mod cast;
 mod units;
 
+pub use block::{Block, BlockError, IncludeError, included_blocks};
+
 pub use canon::{
-    SchemaDecodeError, option_row_canonical, option_row_from_canonical, revision_id,
+    SchemaDecodeError, block_canonical, block_from_canonical, block_hash,
+    option_row_canonical, option_row_from_canonical, revision_id,
     scalar_type_from_canonical, schema_canonical, schema_from_canonical,
 };
 pub use units::{Dimension, Unit, conversion};
@@ -25,7 +29,7 @@ pub use cast::{
 use std::collections::HashSet;
 
 use varve_core::canonical::MAX_SAFE_INTEGER;
-use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
+use varve_core::{BlockId, ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
 
 /// Column arity (§2.2): a `many` column holds a list *value* and
 /// contributes nothing to the row path.
@@ -164,6 +168,20 @@ pub struct Group {
     pub label: String,
     pub cardinality: Cardinality,
     pub children: Vec<Element>,
+    /// Provenance when this group is a published block's shell pasted
+    /// in by inclusion (§2.1, Q5): the revision knows which block, at
+    /// which version — what lets rules pin to a block version and the
+    /// impact report name a block bump. Identity-bearing (§2.13
+    /// decision 7): the same structure typed by hand is a different
+    /// group, as an inline enum differs from a published one.
+    pub included_from: Option<BlockRef>,
+}
+
+/// A published block, by identity and version (§2.1).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct BlockRef {
+    pub id: BlockId,
+    pub version: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -455,6 +473,7 @@ mod tests {
 
     fn many_group(id: &str, children: Vec<Element>) -> Element {
         Element::Group(Group {
+            included_from: None,
             id: GroupId::new(id),
             label: id.to_string(),
             cardinality: Cardinality::Many,
@@ -490,6 +509,7 @@ mod tests {
     #[test]
     fn one_groups_do_not_count_toward_depth() {
         let one_group = Element::Group(Group {
+            included_from: None,
             id: GroupId::new("wrapper"),
             label: "wrapper".into(),
             cardinality: Cardinality::One,

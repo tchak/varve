@@ -16,7 +16,9 @@ mod reach;
 mod validate;
 
 pub use admissibility::{AdmissibilityReport, Finding, admissibility};
-pub use block::{Block, BlockError, IncludeError, included_blocks};
+pub use block::{
+    BlockDefaults, BlockDefaultsError, IncludeError, format_canonical, node_canonical,
+};
 pub use format::Format;
 pub use reach::{Reachability, reachability};
 pub use validate::{SurfaceError, validate};

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use varve_core::canonical::{CanonicalValue, ContentHash};
 use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_record::Entry;
-use varve_schema::{OptionRow, Schema};
+use varve_schema::{Block, OptionRow, Schema};
 use varve_value::{CellState, ItemsAddr, RecordValues};
 
 /// Which export/import mode a stream is (§5): a stream kind, never a
@@ -122,6 +122,10 @@ pub enum Line {
     Header(Manifest),
     Revision { id: RevisionId, schema: Schema },
     Nomenclature { id: NomenclatureId, version: u32, rows: Vec<OptionRow> },
+    /// A published block's schema-side half (§2.1): travels like a
+    /// nomenclature. Its surface-side defaults travel with surfaces
+    /// (§10 Q14).
+    Block(Block),
     Record(RecordLine),
     Item(ItemLine),
     Entry { record: RecordId, entry: Entry },

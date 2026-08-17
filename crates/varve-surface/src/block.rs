@@ -1,209 +1,158 @@
-//! Published blocks (§2.1, Q5): a reusable group definition with its own
-//! identity and version, referenced by inclusion. Two-sided by design —
-//! a **schema shell** (the group + paired resolver declarations, what a
-//! revision includes) and **surface defaults** (rules, prompts, formats,
-//! write policy — what a surface ships). This crate is the one place
-//! that sees both halves, so the assembled block lives here.
+//! The **surface-side** half of a published block (§2.1, Q5): the
+//! defaults a block ships for the surfaces that present it — prompts,
+//! visibility and requiredness rules, formats, write policies over its
+//! own columns. It references the schema-side `varve_schema::Block` by
+//! `(id, version)`; publishing block version N means publishing shell N
+//! and defaults N together, which is a platform act — the kernel gives
+//! the two objects and the pin.
 //!
-//! Inclusion *pastes*: the shell becomes an ordinary group in the
-//! schema and the defaults an ordinary group node in the surface, so
-//! projection, impact, logic and admissibility never learn about blocks
-//! — the same principle as inline nomenclatures (§2.12). Rules pin to
-//! the block version: that is what "published" means.
+//! Inclusion pastes: the defaults become an ordinary group node of the
+//! including surface, so admissibility and reachability never learn
+//! about blocks — the same principle as the schema-side paste
+//! (`Block::include_into`, which records provenance on the group).
+//! Defaults travel with surfaces, which are not on the wire yet (§10
+//! Q14).
 
 use std::collections::BTreeMap;
 
-use varve_core::canonical::{CanonicalValue, hash_plain};
-use varve_core::{BlockId, ColumnId, GroupId};
+use varve_core::canonical::{CanonicalValue, ContentHash, hash_plain};
+use varve_core::{ColumnId, GroupId};
 use varve_logic::{sources, to_canonical};
-use varve_schema::{
-    Element, Group, NomenclatureTable, ResolverDeclaration, Schema, SchemaIndex,
-    schema_canonical,
-};
+use varve_schema::{Block, BlockRef, Element, NomenclatureTable, Schema};
 
-use crate::{ColumnNode, GroupNode, Node, Surface, SurfaceError, validate};
+use crate::{ColumnNode, Format, GroupNode, Node, Surface, SurfaceError, validate};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Block {
-    pub id: BlockId,
-    pub version: u32,
-    /// Schema side: the group as it will appear in an including
-    /// revision — its id is the group id every inclusion uses.
-    pub shell: Group,
-    /// Schema side: declarations paired with the block (§2.7 SIRET
-    /// pattern). Their inputs and targets must be block columns.
-    pub resolvers: Vec<ResolverDeclaration>,
-    /// Surface side: the group node a surface includes — prompts,
-    /// rules, formats, write policies over the block's own columns.
-    pub defaults: GroupNode,
+pub struct BlockDefaults {
+    /// The schema-side block these defaults belong to.
+    pub block: BlockRef,
+    /// The group node a surface includes — prompts, rules, formats,
+    /// write policies over the block's own columns.
+    pub node: GroupNode,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum BlockError {
-    #[error("block defaults name group '{0}', shell is group '{1}'")]
+pub enum BlockDefaultsError {
+    #[error("defaults are for block '{0}' v{1}, given block '{2}' v{3}")]
+    WrongBlock(varve_core::BlockId, u32, varve_core::BlockId, u32),
+    #[error("defaults name group '{0}', the block's shell is group '{1}'")]
     GroupMismatch(GroupId, GroupId),
     /// Every default node must refer to a column of the shell — a block
     /// is self-contained.
-    #[error("block defaults reference '{0}', which is not a block column")]
+    #[error("defaults reference '{0}', which is not a block column")]
     ForeignColumn(ColumnId),
     /// A block rule must read only block columns: it must mean the same
     /// thing wherever the block is included.
-    #[error("block rule on '{0}' reads '{1}', which is not a block column")]
+    #[error("rule on '{0}' reads '{1}', which is not a block column")]
     ForeignRuleSource(ColumnId, ColumnId),
-    #[error("resolver '{0}' reads or writes a column outside the block")]
-    ForeignResolverColumn(varve_core::ResolverId),
     #[error(transparent)]
     Surface(SurfaceError),
-    #[error("schema shell: {0}")]
-    Shell(varve_schema::SchemaError),
-}
-
-impl Block {
-    /// The block's content address (plain regime, §2.13): both halves
-    /// are identity-bearing — a changed default rule is a new version.
-    pub fn content_id(&self) -> BlockId {
-        let shell = Schema {
-            root: vec![Element::Group(self.shell.clone())],
-            resolvers: self.resolvers.clone(),
-        };
-        let defaults = defaults_canonical(&self.defaults);
-        let value = CanonicalValue::Object(
-            [
-                ("shell".to_string(), schema_canonical(&shell)),
-                ("defaults".to_string(), defaults),
-                ("version".to_string(), CanonicalValue::Int(i64::from(self.version))),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        BlockId::new(hash_plain(&value).expect("blocks carry no floats").to_string())
-    }
-
-    /// The columns the block owns (any depth within the shell).
-    pub fn columns(&self) -> Vec<ColumnId> {
-        fn walk(elements: &[Element], out: &mut Vec<ColumnId>) {
-            for el in elements {
-                match el {
-                    Element::Column(c) => out.push(c.id.clone()),
-                    Element::Group(g) => walk(&g.children, out),
-                }
-            }
-        }
-        let mut out = Vec::new();
-        walk(&self.shell.children, &mut out);
-        out
-    }
-
-    /// Self-containment and internal consistency: the two halves agree,
-    /// defaults and rules stay inside the block, resolvers stay inside
-    /// the block, and everything typechecks at the block's own scope.
-    pub fn validate(&self, nomenclatures: &NomenclatureTable) -> Vec<BlockError> {
-        let mut errors = Vec::new();
-        if self.defaults.group != self.shell.id {
-            errors.push(BlockError::GroupMismatch(
-                self.defaults.group.clone(),
-                self.shell.id.clone(),
-            ));
-        }
-        let owned: std::collections::BTreeSet<ColumnId> =
-            self.columns().into_iter().collect();
-
-        // Defaults reference only block columns; rules read only block
-        // columns.
-        for entry in column_nodes(&self.defaults) {
-            if !owned.contains(&entry.column) {
-                errors.push(BlockError::ForeignColumn(entry.column.clone()));
-            }
-            for rule in [&entry.visibility, &entry.required].into_iter().flatten() {
-                for source in sources(rule) {
-                    if !owned.contains(&source) {
-                        errors.push(BlockError::ForeignRuleSource(
-                            entry.column.clone(),
-                            source,
-                        ));
-                    }
-                }
-            }
-        }
-        for decl in &self.resolvers {
-            let inside = decl.input.iter().all(|(c, _)| owned.contains(c))
-                && decl.mapping.iter().all(|m| owned.contains(&m.target));
-            if !inside {
-                errors.push(BlockError::ForeignResolverColumn(decl.id.clone()));
-            }
-        }
-
-        // The assembled pair validates as a schema + surface would.
-        let schema = Schema {
-            root: vec![Element::Group(self.shell.clone())],
-            resolvers: self.resolvers.clone(),
-        };
-        for e in varve_schema::validate(&schema, varve_schema::DepthPolicy::default()) {
-            errors.push(BlockError::Shell(e));
-        }
-        let surface = Surface {
-            id: varve_core::SurfaceId::new("block-defaults"),
-            revision: varve_core::RevisionId::new("block"),
-            nodes: vec![Node::Group(self.defaults.clone())],
-            ineligibility: None,
-        };
-        for e in validate(&surface, &schema, nomenclatures) {
-            errors.push(BlockError::Surface(e));
-        }
-        errors
-    }
-
-    /// Include the block: paste the shell into `schema` and the defaults
-    /// into `surface`, both at the given container (root or a group).
-    /// After inclusion nothing downstream knows a block was involved.
-    pub fn include(
-        &self,
-        schema: &mut Schema,
-        surface: &mut Surface,
-        container: Option<&GroupId>,
-    ) -> Result<(), IncludeError> {
-        let element = Element::Group(self.shell.clone());
-        match container {
-            None => schema.root.push(element),
-            Some(group) => {
-                if !push_into_group(&mut schema.root, group, element) {
-                    return Err(IncludeError::UnknownContainer(group.clone()));
-                }
-            }
-        }
-        schema.resolvers.extend(self.resolvers.iter().cloned());
-        let node = Node::Group(self.defaults.clone());
-        match container {
-            None => surface.nodes.push(node),
-            Some(group) => {
-                if !push_into_node_group(&mut surface.nodes, group, node) {
-                    return Err(IncludeError::UnknownContainer(group.clone()));
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IncludeError {
     #[error("no group '{0}' to include into")]
     UnknownContainer(GroupId),
+    #[error("the surface already presents group '{0}'")]
+    DuplicateGroup(GroupId),
 }
 
-fn push_into_group(elements: &mut [Element], group: &GroupId, element: Element) -> bool {
-    for el in elements.iter_mut() {
-        if let Element::Group(g) = el {
-            if g.id == *group {
-                g.children.push(element);
-                return true;
+impl BlockDefaults {
+    /// Content address of the defaults (plain regime — a surface
+    /// fragment, like a surface). A changed rule or prompt is a new
+    /// version of the defaults.
+    pub fn content_hash(&self) -> ContentHash {
+        let value = CanonicalValue::Object(
+            [
+                ("block".to_string(), string(&self.block.id)),
+                ("version".to_string(), CanonicalValue::Int(i64::from(self.block.version))),
+                ("node".to_string(), node_canonical(&Node::Group(self.node.clone()))),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        hash_plain(&value).expect("surface fragments carry no floats")
+    }
+
+    /// Self-containment against the block they belong to: same block and
+    /// version, same group id, only block columns referenced, rules read
+    /// only block columns, and the pair typechecks as a surface over the
+    /// shell would.
+    pub fn validate(&self, block: &Block, nomenclatures: &NomenclatureTable) -> Vec<BlockDefaultsError> {
+        let mut errors = Vec::new();
+        if self.block != block.reference() {
+            errors.push(BlockDefaultsError::WrongBlock(
+                self.block.id.clone(),
+                self.block.version,
+                block.id.clone(),
+                block.version,
+            ));
+        }
+        if self.node.group != block.group.id {
+            errors.push(BlockDefaultsError::GroupMismatch(self.node.group.clone(), block.group.id.clone()));
+        }
+        let owned: std::collections::BTreeSet<ColumnId> = block.columns().into_iter().collect();
+        for entry in column_nodes(&self.node) {
+            if !owned.contains(&entry.column) {
+                errors.push(BlockDefaultsError::ForeignColumn(entry.column.clone()));
             }
-            if push_into_group(&mut g.children, group, element.clone()) {
-                return true;
+            for rule in [&entry.visibility, &entry.required].into_iter().flatten() {
+                for source in sources(rule) {
+                    if !owned.contains(&source) {
+                        errors.push(BlockDefaultsError::ForeignRuleSource(entry.column.clone(), source));
+                    }
+                }
             }
         }
+        let schema = Schema {
+            root: vec![Element::Group(block.group.clone())],
+            resolvers: block.resolvers.clone(),
+        };
+        let surface = Surface {
+            id: varve_core::SurfaceId::new("block-defaults"),
+            revision: varve_core::RevisionId::new("block"),
+            nodes: vec![Node::Group(self.node.clone())],
+            ineligibility: None,
+        };
+        errors.extend(validate(&surface, &schema, nomenclatures).into_iter().map(BlockDefaultsError::Surface));
+        errors
     }
-    false
+
+    /// Include the defaults into `surface` at `container` (root, or a
+    /// group node): paste the group node. Checked before anything is
+    /// touched — an error leaves `surface` unchanged. The schema-side
+    /// half is included separately (`Block::include_into`).
+    pub fn include_into(&self, surface: &mut Surface, container: Option<&GroupId>) -> Result<(), IncludeError> {
+        if let Some(c) = container
+            && !has_group_node(&surface.nodes, c)
+        {
+            return Err(IncludeError::UnknownContainer(c.clone()));
+        }
+        if has_group_node(&surface.nodes, &self.node.group) {
+            return Err(IncludeError::DuplicateGroup(self.node.group.clone()));
+        }
+        let node = Node::Group(self.node.clone());
+        match container {
+            None => surface.nodes.push(node),
+            Some(group) => {
+                let pushed = push_into_node_group(&mut surface.nodes, group, node);
+                debug_assert!(pushed, "container existence checked above");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn string(s: impl ToString) -> CanonicalValue {
+    CanonicalValue::String(s.to_string())
+}
+
+fn has_group_node(nodes: &[Node], group: &GroupId) -> bool {
+    nodes.iter().any(|n| match n {
+        Node::Group(g) => g.group == *group || has_group_node(&g.children, group),
+        Node::Section(s) => has_group_node(&s.children, group),
+        _ => false,
+    })
 }
 
 fn push_into_node_group(nodes: &mut [Node], group: &GroupId, node: Node) -> bool {
@@ -245,70 +194,64 @@ fn column_nodes(group: &GroupNode) -> Vec<&ColumnNode> {
     out
 }
 
-/// Canonical form of the surface defaults — identity-bearing content
-/// (a changed rule or prompt is a new block version).
-fn defaults_canonical(group: &GroupNode) -> CanonicalValue {
-    fn node(n: &Node) -> CanonicalValue {
-        let obj = |pairs: Vec<(&str, CanonicalValue)>| {
-            CanonicalValue::Object(
-                pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<BTreeMap<_, _>>(),
-            )
-        };
-        let s = |v: &str| CanonicalValue::String(v.to_string());
-        let opt = |v: &Option<String>| match v {
-            None => CanonicalValue::Null,
-            Some(t) => s(t),
-        };
-        let rule = |r: &Option<varve_logic::Expr>| match r {
-            None => CanonicalValue::Null,
-            Some(e) => to_canonical(e),
-        };
-        match n {
-            Node::Column(c) => obj(vec![
-                ("column", s(c.column.as_str())),
-                ("prompt", opt(&c.prompt)),
-                ("help", opt(&c.help)),
-                ("visibility", rule(&c.visibility)),
-                ("required", rule(&c.required)),
-                ("writable", CanonicalValue::Bool(c.write.writable)),
-                ("override_derived", CanonicalValue::Bool(c.write.override_derived)),
-                (
-                    "format",
-                    match &c.format {
-                        None => CanonicalValue::Null,
-                        Some(f) => s(&format!("{f:?}")),
-                    },
-                ),
-            ]),
-            Node::Group(g) => obj(vec![
-                ("group", s(g.group.as_str())),
-                ("prompt", opt(&g.prompt)),
-                ("visibility", rule(&g.visibility)),
-                ("children", CanonicalValue::Array(g.children.iter().map(node).collect())),
-            ]),
-            Node::Section(sec) => obj(vec![
-                ("section", s(&sec.title)),
-                ("help", opt(&sec.help)),
-                ("visibility", rule(&sec.visibility)),
-                ("children", CanonicalValue::Array(sec.children.iter().map(node).collect())),
-            ]),
-            Node::Note(note) => obj(vec![("note", s(&note.body)), ("title", opt(&note.title))]),
+/// Canonical form of a format constraint (§2.13 decision 7: shapes live
+/// in code, never `Debug`).
+pub fn format_canonical(format: &Format) -> CanonicalValue {
+    match format {
+        Format::Email => string("email"),
+        Format::Phone => string("phone"),
+        Format::Iban => string("iban"),
+        Format::Regex(pattern) => {
+            CanonicalValue::Object([("regex".to_string(), string(pattern))].into_iter().collect())
         }
     }
-    node(&Node::Group(group.clone()))
 }
 
-/// The columns of a schema that came from block shells are just
-/// columns; this helper is for tooling that wants to know which — a
-/// block registry maps `SchemaIndex` groups back to block ids.
-pub fn included_blocks<'a>(
-    schema: &Schema,
-    registry: &'a [Block],
-) -> Vec<(&'a Block, GroupId)> {
-    let index = SchemaIndex::build(schema);
-    registry
-        .iter()
-        .filter(|b| index.groups.contains_key(&b.shell.id))
-        .map(|b| (b, b.shell.id.clone()))
-        .collect()
+/// Canonical form of a surface node — identity-bearing content of a
+/// surface fragment (a changed rule or prompt is a new version).
+pub fn node_canonical(n: &Node) -> CanonicalValue {
+    let obj = |pairs: Vec<(&str, CanonicalValue)>| {
+        CanonicalValue::Object(
+            pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<BTreeMap<_, _>>(),
+        )
+    };
+    let opt = |v: &Option<String>| match v {
+        None => CanonicalValue::Null,
+        Some(t) => string(t),
+    };
+    let rule = |r: &Option<varve_logic::Expr>| match r {
+        None => CanonicalValue::Null,
+        Some(e) => to_canonical(e),
+    };
+    match n {
+        Node::Column(c) => obj(vec![
+            ("column", string(&c.column)),
+            ("prompt", opt(&c.prompt)),
+            ("help", opt(&c.help)),
+            ("visibility", rule(&c.visibility)),
+            ("required", rule(&c.required)),
+            ("writable", CanonicalValue::Bool(c.write.writable)),
+            ("override_derived", CanonicalValue::Bool(c.write.override_derived)),
+            (
+                "format",
+                match &c.format {
+                    None => CanonicalValue::Null,
+                    Some(f) => format_canonical(f),
+                },
+            ),
+        ]),
+        Node::Group(g) => obj(vec![
+            ("group", string(&g.group)),
+            ("prompt", opt(&g.prompt)),
+            ("visibility", rule(&g.visibility)),
+            ("children", CanonicalValue::Array(g.children.iter().map(node_canonical).collect())),
+        ]),
+        Node::Section(sec) => obj(vec![
+            ("section", string(&sec.title)),
+            ("help", opt(&sec.help)),
+            ("visibility", rule(&sec.visibility)),
+            ("children", CanonicalValue::Array(sec.children.iter().map(node_canonical).collect())),
+        ]),
+        Node::Note(note) => obj(vec![("note", string(&note.body)), ("title", opt(&note.title))]),
+    }
 }

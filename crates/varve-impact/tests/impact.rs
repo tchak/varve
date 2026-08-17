@@ -68,6 +68,7 @@ fn classification_covers_the_section_3_table() {
         column("truncated", ScalarType::Date, Arity::One),
         column("broken", ScalarType::Integer(None), Arity::One),
         Element::Group(Group {
+            included_from: None,
             id: GroupId::new("g"),
             label: "g".into(),
             cardinality: Cardinality::Many,
@@ -272,6 +273,56 @@ fn resolver_impact_questions() {
         to: 2,
     }));
     assert!(!report.resolvers.iter().any(|c| matches!(c, ResolverChange::MappingChanged { .. })));
+}
+
+#[test]
+fn block_bumps_are_named() {
+    // §2.1/Q5: inclusion pastes with provenance, so the impact report
+    // can say "RIB block v1 → v2" and group the per-column casts under
+    // it — instead of an anonymous retype inside some group.
+    use varve_core::BlockId;
+    use varve_schema::{Block, BlockRef, DepthPolicy};
+    let rib = |version: u32, iban_ty: ScalarType| Block {
+        id: BlockId::new("rib"),
+        version,
+        group: Group {
+            id: GroupId::new("rib"),
+            label: "RIB".into(),
+            cardinality: Cardinality::One,
+            children: vec![column("iban", iban_ty, Arity::One)],
+            included_from: None,
+        },
+        resolvers: vec![],
+    };
+    let v1 = rib(1, ScalarType::Text);
+    let v2 = rib(2, ScalarType::Integer(None));
+    assert_eq!(v1.validate(DepthPolicy::default()), vec![]);
+    let mut from = schema(vec![]);
+    v1.include_into(&mut from, None).unwrap();
+    let mut to = schema(vec![]);
+    v2.include_into(&mut to, None).unwrap();
+
+    let report = classify(&from, &to, &Default::default()).unwrap();
+    assert_eq!(
+        report.blocks,
+        vec![varve_impact::BlockChange::Bumped {
+            group: GroupId::new("rib"),
+            from: BlockRef { id: BlockId::new("rib"), version: 1 },
+            to: BlockRef { id: BlockId::new("rib"), version: 2 },
+        }]
+    );
+    // The block's columns still get their §3 rows.
+    assert_eq!(report.columns[&ColumnId::new("iban")].class, ChangeClass::Checked);
+
+    // Hand-editing the included group drops the pin: detached.
+    let mut detached = to.clone();
+    if let Element::Group(g) = &mut detached.root[0] {
+        g.included_from = None;
+    }
+    let report = classify(&to, &detached, &Default::default()).unwrap();
+    assert!(matches!(report.blocks.as_slice(), [varve_impact::BlockChange::Detached { .. }]));
+    // Nothing block-related between two revisions without blocks.
+    assert!(classify(&schema(vec![]), &schema(vec![]), &Default::default()).unwrap().blocks.is_empty());
 }
 
 #[test]

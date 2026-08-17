@@ -75,6 +75,32 @@ fn manifest(mode: Mode, intent: Intent, records: u64) -> Manifest {
     }
 }
 
+fn rib_block() -> varve_schema::Block {
+    varve_schema::Block {
+        id: varve_core::BlockId::new("rib"),
+        version: 2,
+        group: varve_schema::Group {
+            id: varve_core::GroupId::new("rib"),
+            label: "RIB".into(),
+            cardinality: varve_schema::Cardinality::One,
+            children: vec![Element::Column(Column {
+                id: ColumnId::new("iban"),
+                label: "IBAN".into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+            })],
+            included_from: None,
+        },
+        resolvers: vec![],
+    }
+}
+
+fn with_rib() -> Schema {
+    let mut s = schema();
+    rib_block().include_into(&mut s, None).unwrap();
+    s
+}
+
 fn schema_lines() -> Vec<Line> {
     vec![Line::Revision { id: revision_id(&schema()), schema: schema() }]
 }
@@ -460,11 +486,19 @@ fn schema_and_nomenclature_lines_round_trip() {
             byte_size: 1234,
             content_type: "application/pdf".into(),
         },
+        // A published block travels like a nomenclature (§2.1); a
+        // schema that includes it carries the provenance.
+        Line::Block(rib_block()),
+        Line::Revision { id: revision_id(&with_rib()), schema: with_rib() },
     ];
     let bytes = write_lines(&lines).unwrap();
     let stream = read_stream(&bytes).unwrap();
     assert_eq!(stream.lines, lines);
     assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
+    // The line's canonical shape: `k` plus the block's own fields.
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains(r#"{"group":{"group":{"cardinality":"one","children":[{"column":{"arity":"one","id":"iban","label":"IBAN","type":{"kind":"text"}}}],"id":"rib","label":"RIB"}},"id":"rib","k":"block","resolvers":[],"version":2}"#), "{text}");
+    assert!(text.contains(r#""included_from":{"id":"rib","version":2}"#));
     // A record line with an empty root cell round-trips too.
     let rec = Line::Record(RecordLine {
         record: RecordId::new("r9"),

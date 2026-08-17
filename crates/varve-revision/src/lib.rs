@@ -1,11 +1,12 @@
 //! Tier 3 (§7): the revision DAG, publication, nomenclature
 //! publication (with the §2.11 append-only rule the cast table leans
-//! on), three-way schema merge, and aggregate revision construction
-//! (§5.5).
+//! on), block publication (§2.1), three-way schema merge, and aggregate
+//! revision construction (§5.5).
 
 #![forbid(unsafe_code)]
 
 mod aggregate;
+mod blocks;
 mod merge;
 mod nomenclatures;
 
@@ -13,6 +14,7 @@ pub use aggregate::{
     AggregateColumn, AggregatePolicy, AggregateReport, AggregateRevision, aggregate,
 };
 pub use merge::{ConflictKind, MergeConflict, merge};
+pub use blocks::{BlockRegistry, PublishBlockError};
 pub use nomenclatures::{NomenclatureRegistry, PublishNomenclatureError};
 
 use std::collections::BTreeMap;

@@ -40,6 +40,7 @@ fn schema() -> Schema {
             column("tags", ScalarType::Enum(tags), Arity::Many),
             column("files", ScalarType::Attachment(Default::default()), Arity::Many),
             Element::Group(Group {
+                included_from: None,
                 id: GroupId::new("contacts"),
                 label: "contacts".into(),
                 cardinality: Cardinality::Many,

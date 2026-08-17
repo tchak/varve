@@ -213,6 +213,7 @@ fn scope_move_is_breaking() {
     // projected — its row-path arity changed.
     let writer = schema(vec![column("x", ScalarType::Text, Arity::One)]);
     let reader = schema(vec![Element::Group(Group {
+        included_from: None,
         id: GroupId::new("g"),
         label: "g".into(),
         cardinality: Cardinality::Many,
@@ -234,6 +235,7 @@ fn scope_move_is_breaking() {
 fn items_survive_or_drop_with_their_group() {
     let group = |children| {
         Element::Group(Group {
+            included_from: None,
             id: GroupId::new("g"),
             label: "g".into(),
             cardinality: Cardinality::Many,

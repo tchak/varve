@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
 use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_record::canon as record_canon;
-use varve_schema::{option_row_from_canonical, schema_from_canonical};
+use varve_schema::{block_from_canonical, option_row_from_canonical, schema_from_canonical};
 use varve_value::{CellAddr, CellState, ItemsAddr, RecordValues};
 
 use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
@@ -103,6 +103,7 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     .collect::<Result<_, _>>()
                     .map_err(|e| malformed(e.to_string()))?,
             },
+            "block" => Line::Block(block_from_canonical(&value).map_err(|e| malformed(e.to_string()))?),
             "attachment" => Line::Attachment {
                 hash: get_str(map, "hash")
                     .map_err(malformed)?

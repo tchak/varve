@@ -4,7 +4,7 @@
 
 use varve_core::canonical::{CanonicalError, CanonicalValue, canonical_bytes};
 use varve_record::canon as record_canon;
-use varve_schema::{option_row_canonical, schema_canonical};
+use varve_schema::{block_canonical, option_row_canonical, schema_canonical};
 
 use std::collections::BTreeMap;
 
@@ -92,6 +92,14 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
                 CanonicalValue::Array(rows.iter().map(option_row_canonical).collect()),
             ),
         ]),
+        Line::Block(block) => {
+            let mut fields = match block_canonical(block) {
+                CanonicalValue::Object(m) => m,
+                _ => unreachable!("block canonical is an object"),
+            };
+            fields.insert("k".into(), string("block"));
+            CanonicalValue::Object(fields)
+        }
         Line::Record(r) => record_line_canonical(r),
         Line::Item(i) => item_line_canonical(i),
         Line::Entry { record, entry } => {

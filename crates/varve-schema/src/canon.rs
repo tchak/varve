@@ -5,12 +5,12 @@
 //! (a relabel is a new revision, §2.11), units, resolver declarations.
 //! Not identity-bearing: surfaces (separate objects).
 
-use varve_core::RevisionId;
-use varve_core::canonical::{CanonicalValue, hash_plain};
+use varve_core::canonical::{CanonicalValue, ContentHash, hash_plain};
+use varve_core::{BlockId, RevisionId};
 
 use crate::{
-    Arity, Cardinality, Element, NomenclatureRef, OptionRow, ResolverDeclaration,
-    ScalarType, Schema,
+    Arity, Block, BlockRef, Cardinality, Element, NomenclatureRef, OptionRow,
+    ResolverDeclaration, ScalarType, Schema,
 };
 
 fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
@@ -61,9 +61,8 @@ fn element(el: &Element) -> CanonicalValue {
                 ),
             ]),
         )]),
-        Element::Group(g) => obj(vec![(
-            "group",
-            obj(vec![
+        Element::Group(g) => {
+            let mut pairs = vec![
                 ("id", string(&g.id)),
                 ("label", string(&g.label)),
                 (
@@ -74,9 +73,57 @@ fn element(el: &Element) -> CanonicalValue {
                     }),
                 ),
                 ("children", array(&g.children, element)),
-            ]),
-        )]),
+            ];
+            // Optional, omitted when absent (§2.13 decision 7) — schemas
+            // without blocks hash exactly as before.
+            if let Some(b) = &g.included_from {
+                pairs.push(("included_from", block_ref(b)));
+            }
+            obj(vec![("group", obj(pairs))])
+        }
     }
+}
+
+fn block_ref(b: &BlockRef) -> CanonicalValue {
+    obj(vec![
+        ("id", string(&b.id)),
+        ("version", CanonicalValue::Int(i64::from(b.version))),
+    ])
+}
+
+/// Canonical form of a published block (§2.1): its shell and paired
+/// declarations — schema-side, plain regime (§2.13). The shell is
+/// canonicalized *without* provenance: a block is not included from
+/// anything.
+pub fn block_canonical(block: &Block) -> CanonicalValue {
+    obj(vec![
+        ("id", string(&block.id)),
+        ("version", CanonicalValue::Int(i64::from(block.version))),
+        ("group", element(&Element::Group(block.group.clone()))),
+        ("resolvers", array(&block.resolvers, resolver)),
+    ])
+}
+
+/// A block's content address: the plain hash of its canonical form.
+pub fn block_hash(block: &Block) -> ContentHash {
+    hash_plain(&block_canonical(block)).expect("blocks contain no floats")
+}
+
+pub fn block_from_canonical(v: &CanonicalValue) -> Result<Block, SchemaDecodeError> {
+    let m = as_obj(v)?;
+    let group = match element_from(get(m, "group")?)? {
+        Element::Group(g) => g,
+        Element::Column(_) => return err("block 'group' must be a group"),
+    };
+    Ok(Block {
+        id: BlockId::new(get_str(m, "id")?),
+        version: get_u32(m, "version")?,
+        group,
+        resolvers: get_arr(m, "resolvers")?
+            .iter()
+            .map(resolver_from)
+            .collect::<Result<_, _>>()?,
+    })
 }
 
 fn scalar_type(ty: &ScalarType) -> CanonicalValue {
@@ -240,6 +287,14 @@ fn get_int(m: &Obj, key: &str) -> Result<i64, SchemaDecodeError> {
     }
 }
 
+fn get<'a>(m: &'a Obj, key: &str) -> Result<&'a CanonicalValue, SchemaDecodeError> {
+    m.get(key).ok_or_else(|| SchemaDecodeError(format!("missing '{key}'")))
+}
+
+fn get_u32(m: &Obj, key: &str) -> Result<u32, SchemaDecodeError> {
+    u32::try_from(get_int(m, key)?).map_err(|_| SchemaDecodeError(format!("bad u32 '{key}'")))
+}
+
 fn get_arr<'a>(m: &'a Obj, key: &str) -> Result<&'a [CanonicalValue], SchemaDecodeError> {
     m.get(key)
         .map(as_arr)
@@ -294,6 +349,16 @@ fn element_from(v: &CanonicalValue) -> Result<Element, SchemaDecodeError> {
                 .iter()
                 .map(element_from)
                 .collect::<Result<_, _>>()?,
+            included_from: match g.get("included_from") {
+                None => None,
+                Some(b) => {
+                    let b = as_obj(b)?;
+                    Some(BlockRef {
+                        id: BlockId::new(get_str(b, "id")?),
+                        version: get_u32(b, "version")?,
+                    })
+                }
+            },
         }));
     }
     err("element must be 'column' or 'group'")

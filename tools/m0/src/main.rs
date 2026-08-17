@@ -152,6 +152,7 @@ impl<'a> Converter<'a> {
         self.stats.resolver_declarations += 1;
         self.stats.groups_emitted += 1;
         out.push(Element::Group(Group {
+            included_from: None,
             id: self.group_id(),
             label: label.to_string(),
             cardinality: Cardinality::One,
@@ -396,6 +397,7 @@ impl<'a> Converter<'a> {
                 }
                 self.stats.groups_emitted += 1;
                 out.push(Element::Group(Group {
+                    included_from: None,
                     id: self.group_id(),
                     label: label.to_string(),
                     cardinality: Cardinality::Many,

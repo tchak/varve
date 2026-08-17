@@ -35,6 +35,7 @@ fn schema() -> Schema {
             column("detail", ScalarType::Text, Arity::One),
             column("email", ScalarType::Text, Arity::One),
             Element::Group(Group {
+                included_from: None,
                 id: GroupId::new("contacts"),
                 label: "contacts".into(),
                 cardinality: Cardinality::Many,

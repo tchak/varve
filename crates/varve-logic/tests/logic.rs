@@ -59,6 +59,7 @@ fn schema() -> Schema {
             column("tags", ScalarType::Enum(yes_no()), Arity::Many),
             column("note", ScalarType::Text, Arity::One),
             Element::Group(Group {
+                included_from: None,
                 id: GroupId::new("contacts"),
                 label: "contacts".into(),
                 cardinality: Cardinality::Many,
