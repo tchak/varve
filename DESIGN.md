@@ -1891,6 +1891,20 @@ Only then: `surface`, `store`, service.
     migration — §5 already forbids (adoption keeps ids). Considered and
     rejected: leaving it to the store (the row a log lives in), which
     would make the chain's meaning depend on storage.
+17. **Declaration identity vs resolver identity.** A resolver
+    declaration carries "ID and version" (§2.7) and resolutions are keyed
+    per `(group instance, resolver)` (§2.8) — but one resolver feeds
+    several groups in one revision: 11,271 DN procedures declare
+    `ban-address` more than once, 1,002 `insee-sirene` (found 2026-08-18
+    when a duplicate-id check was tried in `validate` and the corpus
+    refused it). Today the declaration's id *is* the resolver's, so two
+    root-scoped SIRET blocks would collide on `(root, insee-sirene)` for
+    pending resolutions and `pending(r)` in rules. Candidates: give
+    declarations their own id (resolver id + version stay fields, like a
+    block referencing a resolver); or key resolutions and `pending` by
+    the *target group* rather than the resolver. Decide with the §12.6
+    resolver census; until then `validate` does not treat repeated
+    resolver ids as an error.
 
 ## 11. Prior art to consult
 

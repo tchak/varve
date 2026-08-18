@@ -393,6 +393,19 @@ pub enum SchemaError {
         resolver: ResolverId,
         column: ColumnId,
     },
+    /// The declared input type disagrees with the column it reads.
+    #[error("resolver '{resolver}': input '{column}' is declared with a type the column does not have")]
+    InputTypeMismatch {
+        resolver: ResolverId,
+        column: ColumnId,
+    },
+    /// Two result fields land in one column: the mapping is not a
+    /// function of the payload.
+    #[error("resolver '{resolver}': two result fields map into column '{target}'")]
+    DuplicateMappingTarget {
+        resolver: ResolverId,
+        target: ColumnId,
+    },
 }
 
 /// Validate a schema against structural rules and the depth policy.
@@ -475,16 +488,35 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
         &mut group_ids,
     );
 
+    // Note: one resolver id may be declared several times in a schema —
+    // two SIRET blocks in one procedure both feed from INSEE (the DN
+    // corpus has 11k such schemas). Whether a declaration needs an
+    // identity of its own, distinct from the resolver's, is open
+    // question 17.
     for r in &schema.resolvers {
-        for (input, _) in &r.input {
-            if !column_ids.contains(input) {
-                errors.push(SchemaError::UnknownInputColumn {
+        for (input, declared) in &r.input {
+            match columns.iter().find(|(id, _)| id == input) {
+                None => errors.push(SchemaError::UnknownInputColumn {
                     resolver: r.id.clone(),
                     column: input.clone(),
-                });
+                }),
+                Some((_, ty)) if !declared.same_constructor(ty) => {
+                    errors.push(SchemaError::InputTypeMismatch {
+                        resolver: r.id.clone(),
+                        column: input.clone(),
+                    })
+                }
+                Some(_) => {}
             }
         }
+        let mut targets = HashSet::new();
         for m in &r.mapping {
+            if !targets.insert(m.target.clone()) {
+                errors.push(SchemaError::DuplicateMappingTarget {
+                    resolver: r.id.clone(),
+                    target: m.target.clone(),
+                });
+            }
             let field = r.result_type.iter().find(|f| f.name == m.result_field);
             let target = columns.iter().find(|(id, _)| *id == m.target);
             match (field, target) {
@@ -626,5 +658,21 @@ mod tests {
             errors.as_slice(),
             [SchemaError::MappingTypeMismatch { .. }]
         ));
+
+        // Input declared with a type the column does not have; two
+        // fields into one column; a duplicated resolver id.
+        let mut bad = schema.clone();
+        bad.resolvers[0].input = vec![(ColumnId::new("siret"), ScalarType::Integer(None))];
+        bad.resolvers[0].result_type = vec![
+            ResultField { name: "a".into(), ty: ScalarType::Text },
+            ResultField { name: "b".into(), ty: ScalarType::Text },
+        ];
+        bad.resolvers[0].mapping = vec![
+            Mapping { result_field: "a".into(), target: ColumnId::new("name") },
+            Mapping { result_field: "b".into(), target: ColumnId::new("name") },
+        ];
+        let errors = validate(&bad, DepthPolicy::default());
+        assert!(errors.iter().any(|e| matches!(e, SchemaError::InputTypeMismatch { .. })));
+        assert!(errors.iter().any(|e| matches!(e, SchemaError::DuplicateMappingTarget { .. })));
     }
 }
