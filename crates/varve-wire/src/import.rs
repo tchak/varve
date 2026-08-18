@@ -28,8 +28,14 @@ pub enum ImportError {
     AlreadyExists(RecordId),
     #[error("record '{0}' does not exist (intent: update-only)")]
     NotFound(RecordId),
-    #[error("record '{0}': entry {1} failed to apply during import")]
-    Append(RecordId, u64),
+    /// The record's log (existing, or as adopted) does not fold: entry
+    /// `seq` failed to apply.
+    #[error("record '{0}': entry {1} does not apply — the log does not fold")]
+    Fold(RecordId, u64),
+    /// The import entry could not be appended (the ops the diff produced
+    /// do not apply, or the salts do not line up).
+    #[error("record '{0}': import entry could not be appended: {1}")]
+    Append(RecordId, varve_record::AppendError),
     /// Under `Upsert`/`UpdateOnly` the imported history must extend the
     /// existing chain; a shorter or diverging history is a conflict of
     /// histories, not a tamper (§6: one-way, one-time migration).
@@ -88,7 +94,7 @@ pub fn adopt_history(
         // Adopted logs must fold: a chain that verifies but does not
         // apply would be poison (`RecordLog::append` refuses it later,
         // but importing it would still be importing damage).
-        log.fold().map_err(|e| ImportError::Append(record.clone(), e.seq))?;
+        log.fold().map_err(|e| ImportError::Fold(record.clone(), e.seq))?;
         let existing = store.get(&record);
         check_intent(stream.manifest.intent, existing.is_some(), &record)?;
         if let Some(current) = existing {
@@ -147,10 +153,7 @@ pub fn import_snapshot(
         let existing = store.get(&r.record);
         check_intent(stream.manifest.intent, existing.is_some(), &r.record)?;
         let mut log = existing.cloned().unwrap_or_else(|| RecordLog::new(r.record.clone()));
-        let current = log
-            .fold()
-            .map_err(|e| ImportError::Append(r.record.clone(), e.seq))?
-            .values;
+        let current = log.fold().map_err(|e| ImportError::Fold(r.record.clone(), e.seq))?.values;
         let ops = diff(&current, &r.values);
         if ops.is_empty() && existing.is_some() {
             outcome.updated.push(r.record.clone());
@@ -168,7 +171,7 @@ pub fn import_snapshot(
             ops,
             salts,
         })
-        .map_err(|_| ImportError::Append(r.record.clone(), base_version))?;
+        .map_err(|e| ImportError::Append(r.record.clone(), e))?;
         if existing.is_some() {
             outcome.updated.push(r.record.clone());
         } else {
