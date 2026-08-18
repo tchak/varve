@@ -109,4 +109,20 @@ impl RevisionDag {
             .iter()
             .map(|p| (&p.revision, &self.revisions[&p.revision].schema))
     }
+
+    /// The §5.5 aggregate over this lineage's entire history: every
+    /// distinct revision, in first-publication order — computed once per
+    /// publication, cacheable by the caller.
+    pub fn aggregate(
+        &self,
+        nomenclatures: &varve_schema::NomenclatureTable,
+    ) -> Result<(AggregateRevision, AggregateReport), varve_schema::CastError> {
+        let mut seen = std::collections::BTreeSet::new();
+        let history: Vec<(RevisionId, &Schema)> = self
+            .history()
+            .filter(|(id, _)| seen.insert((*id).clone()))
+            .map(|(id, schema)| (id.clone(), schema))
+            .collect();
+        aggregate(&history, nomenclatures)
+    }
 }

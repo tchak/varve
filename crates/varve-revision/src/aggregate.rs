@@ -49,6 +49,11 @@ pub enum AggregatePolicy {
     /// through the aggregate. (A true split into per-range columns is
     /// the recorded follow-up.)
     ScopeKeptLatest,
+    /// §5.5 "removed then re-added with a different type, same id —
+    /// split by revision range": v1 joins across the gap and reports;
+    /// the two lives of the id share one header. (The split is the
+    /// recorded follow-up, alongside `ScopeKeptLatest`.)
+    ReAddedRetyped,
 }
 
 /// Same shape as the impact report (§5.5): which columns hit which
@@ -99,6 +104,14 @@ pub fn aggregate(
         }
         let in_scope: Vec<&Occurrence> =
             occs.iter().filter(|o| o.scope == latest.scope).collect();
+        // Removed then re-added with another type: a gap in the
+        // revision indices with a type change across it.
+        let re_added_retyped = occs.windows(2).any(|w| {
+            w[1].revision > w[0].revision + 1 && (w[1].ty != w[0].ty || w[1].arity != w[0].arity)
+        });
+        if re_added_retyped {
+            report.entries.push((column.clone(), AggregatePolicy::ReAddedRetyped));
+        }
 
         let mut ty = in_scope[0].ty.clone();
         let mut arity = in_scope[0].arity;

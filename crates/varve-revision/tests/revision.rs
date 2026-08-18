@@ -274,4 +274,22 @@ fn aggregate_joins_history_and_reports() {
     assert!(report.entries.contains(&(ColumnId::new("clash"), AggregatePolicy::ViaText)));
     assert!(report.entries.contains(&(ColumnId::new("broken"), AggregatePolicy::Omitted)));
     assert!(!agg.columns.iter().any(|c| c.column.as_str() == "broken"));
+
+    // Removed then re-added with another type, same id (§5.5 row 2):
+    // joined across the gap, and reported.
+    let rev3 = schema(vec![column("b", ScalarType::Decimal(None))]);
+    let rev4 = schema(vec![column("b", ScalarType::Decimal(None)), column("dropped", ScalarType::Integer(None))]);
+    let history = [(r(1), &rev1), (r(2), &rev2), (r(3), &rev3), (r(4), &rev4)];
+    let (_, report) = aggregate(&history, &noms).unwrap();
+    assert!(report.entries.contains(&(ColumnId::new("dropped"), AggregatePolicy::ReAddedRetyped)));
+
+    // The DAG builds its own aggregate over distinct revisions, in
+    // first-publication order — a revert repeats no revision.
+    let mut dag = RevisionDag::new();
+    let id1 = dag.publish(rev1.clone(), vec![]).unwrap();
+    let id2 = dag.publish(rev2.clone(), vec![id1.clone()]).unwrap();
+    dag.publish(rev1.clone(), vec![id2]).unwrap(); // revert
+    let (from_dag, _) = dag.aggregate(&noms).unwrap();
+    let (from_slice, _) = aggregate(&[(id1, &rev1), (r(2), &rev2)], &noms).unwrap();
+    assert_eq!(from_dag.columns.len(), from_slice.columns.len());
 }
