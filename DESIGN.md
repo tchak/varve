@@ -1654,9 +1654,15 @@ up.*
 - `varve-wire` — tagged JSONL. Reader, writer, header/manifest, patch ops,
   apply.
 
-**Tier 5 — IO appears here for the first time**
-- `varve-store` (traits, async), `varve-store-postgres`, `varve-files`
-  (content-addressed manifest + blob trait).
+**Tier 5 — IO appears here for the first time** *(expanded 2026-08-18 — §13)*
+- `varve-store` (traits, async), a store implementation (substrate —
+  Toasty vs direct SQL — is open question 19), `varve-files`
+  (content-addressed manifest + blob trait), `varve-service` (the
+  choreography narrow waist: minting, append sequencing, publication
+  gating — §13.2), `varve-resolve` (resolver host + retry driver,
+  deferred until the first resolver-backed field). The platform above
+  Tier 5 lives in this workspace under `platform/` (§13.5) and is
+  designed in `PLATFORM.md`.
 
 ## 8. Milestones — corpus-first
 
@@ -1940,6 +1946,26 @@ Only then: `surface`, `store`, service.
     it only matters if one resolver is ever declared at two anchors
     sharing a scope.
 
+18. **The read-model contract.** §13.3's query compiler needs a target:
+    which materializations the store must maintain transactionally with
+    append — a per-row cells table (scope-prefixed predicates compile to
+    `EXISTS`), unit-normalized comparable columns (agreeing exactly with
+    the evaluator's rational unit comparison, §4.1), §4.2 computed cells
+    materialized at append time so computed columns query as ordinary
+    ones — and who owns maintenance, the store impl or `varve-service`.
+    Decide together with the Q19 spike and the §12.13 census, before the
+    first reviewer table ships; retrofitting per-row cells into a
+    flat read model is the expensive path.
+19. **Store substrate: Toasty or direct SQL.** First implementation on
+    Toasty for operational unity with the platform (§13.2); the write
+    path barely needs an ORM (log rows are canonical wire bytes), so the
+    question is the read path. Gate: a spike showing Toasty's query API
+    can express a runtime-constructed nested and/or predicate tree with
+    an `EXISTS` subquery. If it can't, the fallback is parameterized SQL
+    against the same Toasty-managed read-model tables — the §13.3
+    language decision is independent of the emission target. The
+    `varve-store` trait is what keeps this reversible either way.
+
 ## 11. Prior art to consult
 
 **Directly liftable**
@@ -2027,4 +2053,142 @@ With access to open DN schema statistics:
     overridden — and then restored. Sizes whether the trivial mapping
     suffices or API prefill needs declared typed mappings from day one.
 
+13. **Saved-filter and table-usage census** — what instructeurs actually
+    filter and sort on: which columns and operators, how often filters
+    reach across revisions, how many saved filters would break at a
+    republication. Sizes the §13.3 compiler's needed coverage, validates
+    saved-filter impact reporting, and feeds Q18's read-model shape.
+
 Only after that: start `varve-core` and `varve-schema`.
+
+## 13. Tier 5 and the platform (settled 2026-08-18)
+
+Worked from the other end: what does the platform — the DN-successor web
+application and HTTP API — need from Tier 5? The platform's own design
+lives in `PLATFORM.md`; this section records only what binds the kernel
+workspace: the Tier 5 crate set (amending §7), `varve-logic` as the
+query language, the wire format's place at the API edge, and the
+workspace layout. The platform stack is `topcoat` + `toasty` (both
+tokio-rs, both early-stage) with `async-graphql`; every kernel-side
+contract below is deliberately a trait boundary so that choice stays
+cheap to revise.
+
+### 13.1 The platform owns what the kernel refused
+
+In varve terms a DN "procedure" is a revision DAG + its surfaces +
+rules, and a "dossier" is a record log. The platform is the container
+that names them, plus everything §2.7/§2.9 pushed out of the kernel:
+identity and accounts, the mapping from principals to **parties**,
+authorization (which reduces entirely to surface assignment, §2.9), the
+procedure catalog (title, description, open/closed — metadata wrapped
+around a revision DAG), messaging, notifications, webhooks, email,
+clocks and fetching. None of that enters `crates/`. The standing check:
+when platform work wants to push a clock, a fetch, or an auth check
+below Tier 5, that is the design being falsified, not a refactor to
+make.
+
+### 13.2 The Tier 5 crate set (amends §7)
+
+- `varve-store` — async persistence traits for kernel objects: the
+  revision / block / nomenclature registries, surfaces, record logs
+  (append, read, checkpoint and snapshot cache), resolution instances,
+  and the typed-query entry point of §13.3. The natural storage row for
+  a log entry is its wire line: the entry IS a wire patch (§2.9) and
+  every line is canonical bytes (§2.13), so the store is
+  event-store-shaped — `(record id, seq) → canonical bytes`,
+  hash-chained — plus content-addressed registries. There is almost
+  nothing for an ORM to do on the write path; the read path is the
+  read-model contract (open question 18).
+- **A store implementation.** First on Toasty, for operational unity
+  with the platform — one database, one migration story; direct SQL is
+  the fallback. Substrate is open question 19; the trait is the hedge.
+- `varve-service` — **the choreography narrow waist**, the crate §7 was
+  missing. The design assigns Tier 5 duties that had no named home:
+  minting ids, salts and timestamps at append time (§2.13, §2.15),
+  driving deferred-resolution retries (§2.8), deciding what a violation
+  means (§2.8), verifying attachment claims against bytes and sweeping
+  unreferenced blobs (§2.15), key management for erasure (§2.10). They
+  land here, as the transactional sequence around the pure kernel:
+  "party P submits patch X to record R through surface S" = load log →
+  fold → admissibility (surface + rules) → conformance → concurrency
+  detection (§2.9: detect, don't merge) → mint → append → maintain read
+  model → commit. Publication likewise: run `varve-impact`, gate on the
+  report (§3), commit through the registry. `varve-service` depends on
+  the `varve-store` traits (never an impl) plus the full deterministic
+  stack, and is the only API through which the platform touches kernel
+  state — without it every handler re-implements the sequence, and the
+  invariants are only as strong as the sloppiest one.
+- `varve-files` — as planned (§2.15): blob trait + content-addressed
+  manifest; local-filesystem impl first, S3 later. Byte storage only —
+  the scan sweep is scheduling and lives in `varve-service`.
+- `varve-resolve` — the resolver host: the trait external resolvers
+  implement (the fetch the kernel refuses, §2.7) and the retry driver
+  for §2.8 instances. Deferred until the first resolver-backed field;
+  everything about resolution except the fetch already exists below.
+
+### 13.3 `varve-logic` is the query language (RATIFIED)
+
+The API's and the reviewer table's filter language is the §4.1
+predicate AST — no second DSL. A query is an envelope (ordering,
+cursor, selection — or their GraphQL equivalents) around a predicate;
+the predicate language stays exactly the rules language. What falls
+out:
+
+- **Wire form for free.** Rules have no textual syntax by design; the
+  canonical JSON AST is what integrators send. No parser, no injection
+  surface — predicates compile to bound parameters.
+- **Typechecking is authorization-aware.** Queries typecheck against
+  the querying party's surface-scoped view of the revision — you cannot
+  filter on a column you cannot see (§2.9 again) — and against the
+  §5.5 aggregate revision for cross-revision listing.
+- **Saved filters are logic values.** The §4.1 broken-rule machinery
+  applies verbatim: the impact report can name the saved filters a
+  publication breaks. New capability, zero new machinery (sized by
+  §12.13).
+- **The evaluator is the compiler's oracle.** The compiler to SQL over
+  the read model is an optimization of the total evaluator; correctness
+  is differential property testing — random records, random well-typed
+  predicates, compare compiled query results with fold-and-evaluate.
+
+Two rules ratified with it. **Semantics: absence-loses, not SQL NULL.**
+The evaluator is total and two-valued; SQL is three-valued. The
+compiler translates through the kernel semantics — `not(eq(x, 5))` with
+`x` absent is *true*, so it emits `x IS NULL OR x <> 5` — and every
+operator gets the same treatment, pinned by the differential suite.
+**The compilable subset is the whole predicate language, or the query
+is rejected** — never silently post-filtered in memory, which breaks
+pagination invisibly. What this demands of the read model — per-row
+cells for scope-prefixed predicates (`EXISTS`), unit-normalized
+comparable columns, §4.2 computed cells materialized at append — is
+open question 18.
+
+### 13.4 The wire retreats to the fidelity edges
+
+The interaction contract (the API) and the interop/storage contract
+(the wire) are different contracts, and conflating them would make
+every integrator speak the storage layer. The API is GraphQL, executed
+in-process by the app and over HTTP by integrators (platform decision —
+`PLATFORM.md`): "submit a case file" is a platform use case (kernel
+append + notifications + webhooks + system message), not a wire-patch
+POST. The wire keeps the edges where byte-stability is the point: bulk
+export/import (§5, minted as artifacts and linked, never inlined),
+signed record-log download (only the wire carries what the chain
+commits to, §2.13), the §2.15 blob sidecar, and possibly webhook
+payloads (open — `PLATFORM.md` P.9).
+
+### 13.5 One workspace, layering by CI
+
+§9's "one workspace, one repo" now includes the platform: `crates/`
+(tiers 0–5), `platform/` (`publish = false` permanently), `tools/`.
+Nested workspaces were considered and rejected: two lockfiles let the
+kernel be tested against dependency versions the platform doesn't build
+with, two target dirs double compilation, and the isolation is illusory
+— workspace membership adds no dependencies to a crate. The §7 DAG
+direction is enforced where it can be real: a CI check that the
+dependency closure of every Tier 0–4 crate contains no runtime / ORM /
+web crates (tokio, toasty, topcoat, async-graphql, …), upholding §9's
+"no async below Tier 5" and "serde on wire types only" mechanically.
+Known cost: workspace builds unify features on shared dependencies, so
+kernel tests may run with platform-activated features — harmless to the
+kernel's own declarations, worth remembering when an isolated build
+(`cargo hack`) behaves differently.
