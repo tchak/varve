@@ -180,14 +180,20 @@ pub mod primitives {
             if den == 0 {
                 return None;
             }
-            let mut mantissa = self.mantissa.checked_mul(i128::from(num))?;
+            // Reduce before multiplying: cancel `den` against `num` and
+            // against the mantissa first, so a result that fits is
+            // never lost to an intermediate overflow.
+            let mut num = u128::from(num);
+            let mut den = u128::from(den);
+            let g = gcd(num, den);
+            num /= g;
+            den /= g;
+            let g = gcd(self.mantissa.unsigned_abs(), den);
+            let reduced_mantissa = self.mantissa / i128::try_from(g).ok()?;
+            den /= g;
+            let mut mantissa = reduced_mantissa.checked_mul(i128::try_from(num).ok()?)?;
             let mut scale = self.scale;
-            let mut den = i128::from(den);
-            let g = gcd(mantissa.unsigned_abs(), den.unsigned_abs());
-            if g > 1 {
-                mantissa /= i128::try_from(g).ok()?;
-                den /= i128::try_from(g).ok()?;
-            }
+            let mut den = i128::try_from(den).ok()?;
             // A finite decimal exists iff the reduced denominator is
             // 2^a·5^b: clear each factor by scaling the mantissa.
             while den % 2 == 0 {
@@ -465,6 +471,22 @@ pub mod primitives {
             assert!(Date::parse("2023-13-01").is_err());
             assert!(Date::parse("2023-1-01").is_err());
             assert_eq!(Date::parse("2024-02-29").unwrap().to_string(), "2024-02-29");
+        }
+
+        #[test]
+        fn mul_div_exact_reduces_before_multiplying() {
+            // 10^36 × 1000 overflows i128 as an intermediate, but the
+            // exact result 10^33 fits: reduce first, never lose a
+            // representable answer to an intermediate.
+            let big = Decimal::parse("1000000000000000000000000000000000000").unwrap();
+            assert_eq!(
+                big.mul_div_exact(1000, 1_000_000).unwrap().to_string(),
+                "1000000000000000000000000000000000"
+            );
+            // Still exact-or-nothing: 1 / 3 has no finite decimal.
+            assert_eq!(Decimal::parse("1").unwrap().mul_div_exact(1, 3), None);
+            // And still refuses a genuine overflow.
+            assert_eq!(big.mul_div_exact(u64::MAX, 1), None);
         }
 
         #[test]
