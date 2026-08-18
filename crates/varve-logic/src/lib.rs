@@ -46,7 +46,7 @@ pub use typecheck::{TypeError, typecheck};
 use std::collections::BTreeSet;
 
 use varve_core::primitives::{Date, Decimal, Instant};
-use varve_core::{ColumnId, OptionId, ResolverId};
+use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::Unit;
 
 /// Arbitrarily nestable (§4.1 — settled from institutional memory; DN's
@@ -101,10 +101,12 @@ pub enum Atom {
     /// Arity-`many` enum membership.
     Contains { source: ColumnRef, option: OptionId },
     Excludes { source: ColumnRef, option: OptionId },
-    /// §2.8 rule 3: resolution status is readable. Paired negative
-    /// (like `not_eq`): there is no `Not` combinator.
-    Pending { resolver: ResolverId },
-    NotPending { resolver: ResolverId },
+    /// §2.8 rule 3: resolution status is readable. Names the **anchor
+    /// group** whose resolution is pending — not the resolver: two
+    /// blocks fed by one resolver are two questions (§10 Q17). Paired
+    /// negative (like `not_eq`): there is no `Not` combinator.
+    Pending { group: GroupId },
+    NotPending { group: GroupId },
 }
 
 impl Atom {
@@ -180,19 +182,18 @@ fn collect_sources(expr: &Expr, out: &mut BTreeSet<ColumnId>) {
     }
 }
 
-/// The resolvers an expression's `pending` atoms read.
-pub fn resolver_sources(expr: &Expr) -> BTreeSet<ResolverId> {
+/// The anchor groups an expression's `pending` atoms read (§10 Q17).
+pub fn pending_sources(expr: &Expr) -> BTreeSet<GroupId> {
     let mut out = BTreeSet::new();
-    fn walk(expr: &Expr, out: &mut BTreeSet<ResolverId>) {
+    fn walk(expr: &Expr, out: &mut BTreeSet<GroupId>) {
         match expr {
             Expr::And(operands) | Expr::Or(operands) => {
                 for operand in operands {
                     walk(operand, out);
                 }
             }
-            Expr::Atom(Atom::Pending { resolver })
-            | Expr::Atom(Atom::NotPending { resolver }) => {
-                out.insert(resolver.clone());
+            Expr::Atom(Atom::Pending { group }) | Expr::Atom(Atom::NotPending { group }) => {
+                out.insert(group.clone());
             }
             Expr::Atom(_) => {}
         }

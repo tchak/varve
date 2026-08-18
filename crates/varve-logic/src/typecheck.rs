@@ -3,7 +3,7 @@
 //! DN's rule-error taxonomy and feed `varve-impact`'s broken-rule
 //! analysis.
 
-use varve_core::{ColumnId, GroupId, OptionId, ResolverId};
+use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{
     Arity, ColumnInfo, NomenclatureTable, ScalarType, Schema, SchemaIndex, Unit,
     nomenclature_rows,
@@ -30,8 +30,11 @@ pub enum TypeError {
     UnknownField(ColumnId, String),
     #[error("column '{0}': unit dimensions do not match")]
     UnitMismatch(ColumnId),
-    #[error("unknown resolver '{0}'")]
-    UnknownResolver(ResolverId),
+    /// `pending(g)`: the group must exist and have a resolver
+    /// declaration anchored to it (§10 Q17) — otherwise the atom can
+    /// never be true and the rule is silently dead.
+    #[error("no resolver is anchored to group '{0}'")]
+    NoResolverAnchored(GroupId),
     /// Representable, not yet enabled — publication-time policy (§4.3).
     #[error("column-to-column comparisons are not enabled")]
     ColumnComparisonNotEnabled,
@@ -85,9 +88,9 @@ fn check_atom(
     scope: &[GroupId],
     errors: &mut Vec<TypeError>,
 ) {
-    if let Atom::Pending { resolver } | Atom::NotPending { resolver } = atom {
-        if !schema.resolvers.iter().any(|r| r.id == *resolver) {
-            errors.push(TypeError::UnknownResolver(resolver.clone()));
+    if let Atom::Pending { group } | Atom::NotPending { group } = atom {
+        if !schema.resolvers.iter().any(|r| r.anchor == *group) {
+            errors.push(TypeError::NoResolverAnchored(group.clone()));
         }
         return;
     }

@@ -374,6 +374,7 @@ fn referenced_blobs_cover_history_and_snapshots() {
 
 fn pending_resolution() -> Resolution {
     Resolution {
+        anchor: GroupId::new("entreprise"),
         resolver: ResolverId::new("insee-sirene"),
         resolver_version: 1,
         mapping_version: 1,
@@ -411,10 +412,10 @@ fn resolution_lifecycle() {
     let mut resolution = pending_resolution();
     let list = [resolution.clone()];
     assert_eq!(pending_resolutions(&list).len(), 1);
-    // What the logic language reads: (scope, resolver) pairs.
+    // What the logic language reads: (scope, anchor group) pairs.
     assert_eq!(
         pending_set(&list),
-        [(RowPath::root(), ResolverId::new("insee-sirene"))].into_iter().collect()
+        [(RowPath::root(), GroupId::new("entreprise"))].into_iter().collect()
     );
 
     resolution.transition(ResolutionStatus::Failed).unwrap();

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use varve_core::primitives::Decimal;
-use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, ResolverId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_logic::{
     Atom, ColumnRef, Const, EvalContext, Expr, Operand, TypeError, check_acyclic,
     eval, sources, typecheck,
@@ -272,11 +272,11 @@ fn typechecker_enforces_the_matrix_and_scopes() {
             .contains(&TypeError::ColumnComparisonNotEnabled)
     );
 
-    // Unknown resolver in pending().
-    let pending = Expr::Atom(Atom::Pending { resolver: ResolverId::new("insee") });
+    // pending() names a group with no anchored resolver.
+    let pending = Expr::Atom(Atom::Pending { group: GroupId::new("entreprise") });
     assert!(matches!(
         typecheck(&pending, &s, &noms, record).as_slice(),
-        [TypeError::UnknownResolver(_)]
+        [TypeError::NoResolverAnchored(_)]
     ));
 
     // A comparison on an arity-`many` column would typecheck and be
@@ -334,21 +334,23 @@ fn contains_and_pending() {
     // §2.8 rule 3, per group instance: a record-scoped pending
     // resolution is visible at root and inside every item; an
     // item-scoped one is visible in its own item only.
-    let insee = ResolverId::new("insee-sirene");
-    let pending = Expr::Atom(Atom::Pending { resolver: insee.clone() });
-    let not_pending = Expr::Atom(Atom::NotPending { resolver: insee.clone() });
+    // `pending(g)` names the *anchor group* (§10 Q17): the SIRET
+    // block's group, not the resolver.
+    let entreprise = GroupId::new("entreprise");
+    let pending = Expr::Atom(Atom::Pending { group: entreprise.clone() });
+    let not_pending = Expr::Atom(Atom::NotPending { group: entreprise.clone() });
     let item = |i: &str| {
         RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new(i) })
     };
     let mut ctx = f.ctx();
-    ctx.pending.insert((RowPath::root(), insee.clone()));
+    ctx.pending.insert((RowPath::root(), entreprise.clone()));
     assert!(eval(&pending, &ctx));
     assert!(!eval(&not_pending, &ctx));
     ctx.item = item("c1");
     assert!(eval(&pending, &ctx));
 
     let mut ctx = f.ctx();
-    ctx.pending.insert((item("c1"), insee.clone()));
+    ctx.pending.insert((item("c1"), entreprise.clone()));
     assert!(!eval(&pending, &ctx)); // root does not see an item's pending
     ctx.item = item("c1");
     assert!(eval(&pending, &ctx));

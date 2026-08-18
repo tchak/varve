@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use varve_core::canonical::CanonicalValue;
 use varve_core::primitives::{Date, Decimal, Instant};
-use varve_core::{ColumnId, OptionId, ResolverId};
+use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::Unit;
 
 use crate::{Atom, ColumnRef, Const, Expr, Operand};
@@ -107,13 +107,13 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
             ("source", column_ref(source)),
             ("option", string(option)),
         ]),
-        Atom::Pending { resolver } => obj(vec![
+        Atom::Pending { group } => obj(vec![
             ("op", string("pending")),
-            ("resolver", string(resolver)),
+            ("group", string(group)),
         ]),
-        Atom::NotPending { resolver } => obj(vec![
+        Atom::NotPending { group } => obj(vec![
             ("op", string("not_pending")),
-            ("resolver", string(resolver)),
+            ("group", string(group)),
         ]),
     }
 }
@@ -264,7 +264,7 @@ fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
     match op.as_str() {
         "is_empty" | "is_filled" => only_keys(map, &["op", "source"])?,
         "contains" | "excludes" => only_keys(map, &["op", "source", "option"])?,
-        "pending" | "not_pending" => only_keys(map, &["op", "resolver"])?,
+        "pending" | "not_pending" => only_keys(map, &["op", "group"])?,
         _ => {}
     }
     match op.as_str() {
@@ -284,12 +284,8 @@ fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
             source: source_from(map)?,
             option: OptionId::new(text(map, "option")?),
         }),
-        "pending" => Ok(Atom::Pending {
-            resolver: ResolverId::new(text(map, "resolver")?),
-        }),
-        "not_pending" => Ok(Atom::NotPending {
-            resolver: ResolverId::new(text(map, "resolver")?),
-        }),
+        "pending" => Ok(Atom::Pending { group: GroupId::new(text(map, "group")?) }),
+        "not_pending" => Ok(Atom::NotPending { group: GroupId::new(text(map, "group")?) }),
         other => Err(DecodeError(format!("unknown op '{other}'"))),
     }
 }

@@ -33,6 +33,7 @@ fn resolver(id: &str, version: u32) -> ResolverDeclaration {
     ResolverDeclaration {
         id: ResolverId::new(id),
         version,
+        anchor: GroupId::new("g"),
         input: vec![(ColumnId::new("a"), ScalarType::Text)],
         result_type: vec![ResultField { name: "out".into(), ty: ScalarType::Text }],
         mapping: vec![Mapping { result_field: "out".into(), target: ColumnId::new("b") }],

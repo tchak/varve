@@ -23,6 +23,7 @@ const SCAN_STATUSES: [ScanStatus; 4] =
 
 fn resolution(status: ResolutionStatus, scope: RowPath) -> Resolution {
     Resolution {
+        anchor: GroupId::new("entreprise"),
         resolver: ResolverId::new("insee-sirene"),
         resolver_version: 1,
         mapping_version: 1,
@@ -129,7 +130,7 @@ fn pending_enumerations_keep_only_pending_and_distinguish_scopes() {
         set,
         [RowPath::root(), item("i1"), item("i2")]
             .into_iter()
-            .map(|scope| (scope, ResolverId::new("insee-sirene")))
+            .map(|scope| (scope, GroupId::new("entreprise")))
             .collect()
     );
     // Two pending instances at the same (scope, resolver) collapse to

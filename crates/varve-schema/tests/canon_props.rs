@@ -140,13 +140,15 @@ fn resolver() -> impl Strategy<Value = ResolverDeclaration> {
     (
         ident(),
         0u32..100,
+        ident(),
         proptest::collection::vec((ident(), scalar_type()), 0..3),
         proptest::collection::vec((ident(), scalar_type()), 0..3),
         proptest::collection::vec((ident(), ident()), 0..3),
     )
-        .prop_map(|(id, version, input, result, mapping)| ResolverDeclaration {
+        .prop_map(|(id, version, anchor, input, result, mapping)| ResolverDeclaration {
             id: ResolverId::new(id),
             version,
+            anchor: GroupId::new(anchor),
             input: input.into_iter().map(|(c, ty)| (ColumnId::new(c), ty)).collect(),
             result_type: result
                 .into_iter()

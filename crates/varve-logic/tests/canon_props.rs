@@ -5,9 +5,9 @@ use proptest::prelude::*;
 use std::collections::BTreeSet;
 use varve_core::canonical::{CanonicalValue, canonical_bytes};
 use varve_core::primitives::{Date, Decimal, Instant};
-use varve_core::{ColumnId, OptionId, ResolverId};
+use varve_core::{ColumnId, GroupId, OptionId};
 use varve_logic::{
-    Atom, ColumnRef, Const, Expr, Operand, from_canonical, resolver_sources, sources,
+    Atom, ColumnRef, Const, Expr, Operand, from_canonical, pending_sources, sources,
     to_canonical,
 };
 use varve_schema::Unit;
@@ -119,8 +119,8 @@ fn atom() -> impl Strategy<Value = Atom> {
             source,
             option: OptionId::new(o),
         }),
-        "[a-z-]{1,10}".prop_map(|r| Atom::Pending { resolver: ResolverId::new(r) }),
-        "[a-z-]{1,10}".prop_map(|r| Atom::NotPending { resolver: ResolverId::new(r) }),
+        "[a-z-]{1,10}".prop_map(|g| Atom::Pending { group: GroupId::new(g) }),
+        "[a-z-]{1,10}".prop_map(|g| Atom::NotPending { group: GroupId::new(g) }),
     ]
 }
 
@@ -155,7 +155,7 @@ fn has_float(v: &CanonicalValue) -> bool {
 }
 
 /// Independent walk: every column and resolver an expression names.
-fn mentioned(e: &Expr, columns: &mut BTreeSet<ColumnId>, resolvers: &mut BTreeSet<ResolverId>) {
+fn mentioned(e: &Expr, columns: &mut BTreeSet<ColumnId>, resolvers: &mut BTreeSet<GroupId>) {
     match e {
         Expr::And(items) | Expr::Or(items) => {
             for i in items {
@@ -180,8 +180,8 @@ fn mentioned(e: &Expr, columns: &mut BTreeSet<ColumnId>, resolvers: &mut BTreeSe
             | Atom::Excludes { source, .. } => {
                 columns.insert(source.column.clone());
             }
-            Atom::Pending { resolver } | Atom::NotPending { resolver } => {
-                resolvers.insert(resolver.clone());
+            Atom::Pending { group } | Atom::NotPending { group } => {
+                resolvers.insert(group.clone());
             }
         },
     }
@@ -210,14 +210,14 @@ proptest! {
     }
 
     /// `sources` reads exactly the columns an expression names (both
-    /// sides of a comparison), `resolver_sources` exactly its resolvers.
+    /// sides of a comparison), `pending_sources` exactly its resolvers.
     #[test]
     fn sources_are_exactly_what_is_mentioned(e in expr()) {
         let mut columns = BTreeSet::new();
         let mut resolvers = BTreeSet::new();
         mentioned(&e, &mut columns, &mut resolvers);
         prop_assert_eq!(sources(&e), columns);
-        prop_assert_eq!(resolver_sources(&e), resolvers);
+        prop_assert_eq!(pending_sources(&e), resolvers);
     }
 }
 

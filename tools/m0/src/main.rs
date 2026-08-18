@@ -144,9 +144,13 @@ impl<'a> Converter<'a> {
                 target: id,
             });
         }
+        let group_id = self.group_id();
+        // §10 Q17: the declaration is anchored to the block-shaped group
+        // it feeds — two SIRET blocks are two declarations.
         self.resolvers.push(ResolverDeclaration {
             id: ResolverId::new(resolver),
             version: 1,
+            anchor: group_id.clone(),
             input: vec![(key_id, key.1)],
             result_type,
             mapping,
@@ -155,7 +159,7 @@ impl<'a> Converter<'a> {
         self.stats.groups_emitted += 1;
         out.push(Element::Group(Group {
             included_from: None,
-            id: self.group_id(),
+            id: group_id,
             label: label.to_string(),
             cardinality: Cardinality::One,
             children,

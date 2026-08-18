@@ -14,10 +14,16 @@ use varve_value::Op;
 use crate::log::RecordLog;
 use crate::{ActorKind, Origin};
 
-/// One resolution instance, keyed by `(scope, resolver)` — the scope is
-/// the group instance's row path, empty for root (§2.5 uniformity).
+/// One resolution instance, keyed by **anchor-group instance** —
+/// `(anchor, scope)`, where `scope` is the instance's row path, empty
+/// at root (§2.5 uniformity). The resolver id is data, not identity:
+/// two SIRET blocks at root are two instances of `insee-sirene`,
+/// distinguished by their anchor groups (§10 Q17).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
+    /// The declaration's anchor group (§2.7): which block this
+    /// resolution feeds.
+    pub anchor: GroupId,
     pub resolver: ResolverId,
     /// Bound at request time, not completion (§2.8 rule 1, RATIFIED).
     pub resolver_version: u32,
@@ -95,14 +101,15 @@ impl Resolution {
 }
 
 /// What the logic language reads (§2.8 rule 3): pending resolutions as
-/// `(scope, resolver)` pairs — per group instance, so "required unless
-/// pending" in one item does not leak into another. Feed this to
-/// `varve_logic::EvalContext::pending`.
-pub fn pending_set(resolutions: &[Resolution]) -> BTreeSet<(RowPath, ResolverId)> {
+/// `(scope, anchor group)` pairs — per group instance, so "required
+/// unless pending" in one item does not leak into another, and two
+/// blocks fed by one resolver do not leak into each other (§10 Q17).
+/// Feed this to `varve_logic::EvalContext::pending`.
+pub fn pending_set(resolutions: &[Resolution]) -> BTreeSet<(RowPath, GroupId)> {
     resolutions
         .iter()
         .filter(|r| r.status == ResolutionStatus::Pending)
-        .map(|r| (r.scope.clone(), r.resolver.clone()))
+        .map(|r| (r.scope.clone(), r.anchor.clone()))
         .collect()
 }
 

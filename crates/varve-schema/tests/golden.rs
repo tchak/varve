@@ -83,6 +83,7 @@ fn kitchen_sink() -> Schema {
         resolvers: vec![ResolverDeclaration {
             id: ResolverId::new("insee-sirene"),
             version: 4,
+            anchor: GroupId::new("identite"),
             input: vec![(ColumnId::new("nom"), ScalarType::Text)],
             result_type: vec![
                 ResultField { name: "raison_sociale".into(), ty: ScalarType::Text },
@@ -110,6 +111,7 @@ fn rib_block() -> Block {
         resolvers: vec![ResolverDeclaration {
             id: ResolverId::new("bic-lookup"),
             version: 1,
+            anchor: GroupId::new("rib"),
             input: vec![(ColumnId::new("iban"), ScalarType::Text)],
             result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
             mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("bic") }],
@@ -129,7 +131,10 @@ fn revision_id_of_the_empty_schema_is_pinned() {
 fn revision_id_of_the_kitchen_sink_schema_is_pinned() {
     assert_eq!(
         revision_id(&kitchen_sink()).as_str(),
-        "sha256:80cdfe4541be4f51bfdd73663af7037c688f8a9e01dac61b8661498e82dcd78f",
+        // Repinned 2026-08-18: resolver declarations gained the identity-
+        // bearing `anchor` field (§10 Q17) — a deliberate canonical
+        // change, made while no record hashes exist.
+        "sha256:ca7d6cf075a594f73bc6cf512408c9eb6690aa771ec73c15d6a0fb893a1e4b15",
     );
 }
 
@@ -137,6 +142,7 @@ fn revision_id_of_the_kitchen_sink_schema_is_pinned() {
 fn block_content_hash_is_pinned() {
     assert_eq!(
         rib_block().content_hash().to_string(),
-        "sha256:923c932f2ac812a504e81789e8891f9a2eee0a211a4db5571a5a0f4b4cae8355",
+        // Repinned 2026-08-18, same cause as the revision id above.
+        "sha256:e8c388aba5453e82d04baa870774309ebe4deba4ce15dcaf715a6c7a1214cdc7",
     );
 }

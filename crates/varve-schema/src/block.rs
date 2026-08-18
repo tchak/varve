@@ -139,7 +139,12 @@ impl Block {
         if let Some(c) = self.columns().into_iter().find(|c| index.columns.contains_key(c)) {
             return Err(IncludeError::DuplicateColumn(c));
         }
-        if let Some(r) = self.resolvers.iter().find(|r| schema.resolvers.iter().any(|s| s.id == r.id))
+        // A declaration's identity is (anchor, id) — §10 Q17: two SIRET
+        // blocks both bring insee-sirene, anchored at their own groups.
+        if let Some(r) = self
+            .resolvers
+            .iter()
+            .find(|r| schema.resolvers.iter().any(|s| s.id == r.id && s.anchor == r.anchor))
         {
             return Err(IncludeError::DuplicateResolver(r.id.clone()));
         }

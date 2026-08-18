@@ -396,9 +396,12 @@ clocks.
 3. **Pending is readable by the logic language.** Resolution status is part of
    record state, so a surface can express "required unless pending". Keeps
    admissibility binary rather than adding a third value. Read **per group
-   instance**, like cells: `pending(r)` in an item sees that item's and the
-   record's pending resolutions, never a sibling item's (the §4.1 scope
-   rule) — the evaluator's environment is keyed by `(scope, resolver)`.
+   instance**, like cells: `pending(g)` names the **anchor group** (§2.7,
+   Q17 — not the resolver: with two SIRET blocks, "required unless pending"
+   on one must not read the other's lookup), and in an item sees that
+   item's and the record's pending resolutions, never a sibling item's (the
+   §4.1 scope rule) — the evaluator's environment is keyed by
+   `(scope, anchor group)`.
 
 All three are ratified. Rule 2 is the one the rest of the design leans on:
 `overridden { superseded }` (§2.7) and prefill restore encode exactly its

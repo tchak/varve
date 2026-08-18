@@ -236,10 +236,20 @@ pub struct Mapping {
 /// Schema-side resolver declaration (§2.7): a versioned schema *object*,
 /// not a type. The implementation (endpoint, credentials) is
 /// instance-local and never part of the schema.
+///
+/// **Anchored to a target group** (§10 Q17): the declaration's identity
+/// in a revision is `(anchor, id)` — the SIRET block's group is what
+/// makes "the INSEE lookup *of this block*" a different declaration
+/// from another block's, so one resolver may feed several groups
+/// without colliding. Resolutions are keyed per anchor-group instance,
+/// and `pending(group)` in rules names the anchor, not the resolver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolverDeclaration {
     pub id: ResolverId,
     pub version: u32,
+    /// The group whose columns this declaration feeds — mapping targets
+    /// must live in its subtree.
+    pub anchor: GroupId,
     /// Input signature: which columns feed it, with types.
     pub input: Vec<(ColumnId, ScalarType)>,
     /// Declaring the result type in the schema is what makes the whole
@@ -393,6 +403,27 @@ pub enum SchemaError {
         resolver: ResolverId,
         column: ColumnId,
     },
+    /// The anchor names a group the schema does not have.
+    #[error("resolver '{resolver}' is anchored to unknown group '{anchor}'")]
+    UnknownAnchor {
+        resolver: ResolverId,
+        anchor: GroupId,
+    },
+    /// A mapping target outside the anchor group's subtree: the
+    /// declaration would not mean the same thing wherever its group
+    /// goes.
+    #[error("resolver '{resolver}': target '{target}' is outside its anchor group")]
+    TargetOutsideAnchor {
+        resolver: ResolverId,
+        target: ColumnId,
+    },
+    /// Two declarations of one resolver at one anchor: within a group,
+    /// `(anchor, resolver)` is the declaration's identity (§10 Q17).
+    #[error("resolver '{resolver}' is declared twice at group '{anchor}'")]
+    DuplicateDeclaration {
+        resolver: ResolverId,
+        anchor: GroupId,
+    },
     /// The declared input type disagrees with the column it reads.
     #[error("resolver '{resolver}': input '{column}' is declared with a type the column does not have")]
     InputTypeMismatch {
@@ -411,7 +442,7 @@ pub enum SchemaError {
 /// Validate a schema against structural rules and the depth policy.
 pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
     let mut errors = Vec::new();
-    let mut columns: Vec<(ColumnId, ScalarType)> = Vec::new();
+    let mut columns: Vec<(ColumnId, ScalarType, Vec<GroupId>)> = Vec::new();
     let mut column_ids = HashSet::new();
     let mut group_ids = HashSet::new();
 
@@ -422,9 +453,10 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
         group_depth: usize,
         policy: DepthPolicy,
         errors: &mut Vec<SchemaError>,
-        columns: &mut Vec<(ColumnId, ScalarType)>,
+        columns: &mut Vec<(ColumnId, ScalarType, Vec<GroupId>)>,
         column_ids: &mut HashSet<ColumnId>,
         group_ids: &mut HashSet<GroupId>,
+        containers: &mut Vec<GroupId>,
     ) {
         for el in elements {
             match el {
@@ -437,7 +469,7 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                     {
                         errors.push(SchemaError::MaxBytesUnrepresentable(c.id.clone()));
                     }
-                    columns.push((c.id.clone(), c.ty.clone()));
+                    columns.push((c.id.clone(), c.ty.clone(), containers.clone()));
                 }
                 Element::Group(g) => {
                     if !group_ids.insert(g.id.clone()) {
@@ -462,6 +494,7 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                             max: policy.max_group_depth,
                         });
                     }
+                    containers.push(g.id.clone());
                     walk(
                         &g.children,
                         depth,
@@ -471,7 +504,9 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                         columns,
                         column_ids,
                         group_ids,
+                        containers,
                     );
+                    containers.pop();
                 }
             }
         }
@@ -486,21 +521,33 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
         &mut columns,
         &mut column_ids,
         &mut group_ids,
+        &mut Vec::new(),
     );
 
-    // Note: one resolver id may be declared several times in a schema —
-    // two SIRET blocks in one procedure both feed from INSEE (the DN
-    // corpus has 11k such schemas). Whether a declaration needs an
-    // identity of its own, distinct from the resolver's, is open
-    // question 17.
+    // One resolver id may be declared several times in a schema — two
+    // SIRET blocks in one procedure both feed from INSEE (11k DN
+    // schemas). A declaration's identity is `(anchor, resolver)` (§10
+    // Q17, resolved): unique per anchor group, free across groups.
+    let mut declared_at: HashSet<(GroupId, ResolverId)> = HashSet::new();
     for r in &schema.resolvers {
+        if !group_ids.contains(&r.anchor) {
+            errors.push(SchemaError::UnknownAnchor {
+                resolver: r.id.clone(),
+                anchor: r.anchor.clone(),
+            });
+        } else if !declared_at.insert((r.anchor.clone(), r.id.clone())) {
+            errors.push(SchemaError::DuplicateDeclaration {
+                resolver: r.id.clone(),
+                anchor: r.anchor.clone(),
+            });
+        }
         for (input, declared) in &r.input {
-            match columns.iter().find(|(id, _)| id == input) {
+            match columns.iter().find(|(id, _, _)| id == input) {
                 None => errors.push(SchemaError::UnknownInputColumn {
                     resolver: r.id.clone(),
                     column: input.clone(),
                 }),
-                Some((_, ty)) if !declared.same_constructor(ty) => {
+                Some((_, ty, _)) if !declared.same_constructor(ty) => {
                     errors.push(SchemaError::InputTypeMismatch {
                         resolver: r.id.clone(),
                         column: input.clone(),
@@ -518,7 +565,7 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                 });
             }
             let field = r.result_type.iter().find(|f| f.name == m.result_field);
-            let target = columns.iter().find(|(id, _)| *id == m.target);
+            let target = columns.iter().find(|(id, _, _)| *id == m.target);
             match (field, target) {
                 (None, _) => errors.push(SchemaError::UnknownMappingField {
                     resolver: r.id.clone(),
@@ -528,11 +575,18 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                     resolver: r.id.clone(),
                     target: m.target.clone(),
                 }),
-                (Some(f), Some((_, ty))) => {
+                (Some(f), Some((_, ty, containers))) => {
                     if !f.ty.same_constructor(ty) {
                         errors.push(SchemaError::MappingTypeMismatch {
                             resolver: r.id.clone(),
                             field: m.result_field.clone(),
+                            target: m.target.clone(),
+                        });
+                    }
+                    // Targets live in the anchor's subtree (§10 Q17).
+                    if !containers.contains(&r.anchor) {
+                        errors.push(SchemaError::TargetOutsideAnchor {
+                            resolver: r.id.clone(),
                             target: m.target.clone(),
                         });
                     }
@@ -637,11 +691,21 @@ mod tests {
 
     #[test]
     fn mapping_typecheck() {
+        let block = |children| {
+            Element::Group(Group {
+                id: GroupId::new("entreprise"),
+                label: "Entreprise".into(),
+                cardinality: Cardinality::One,
+                children,
+                included_from: None,
+            })
+        };
         let schema = Schema {
-            root: vec![col("siret", ScalarType::Text), col("name", ScalarType::Text)],
+            root: vec![block(vec![col("siret", ScalarType::Text), col("name", ScalarType::Text)])],
             resolvers: vec![ResolverDeclaration {
                 id: ResolverId::new("insee"),
                 version: 1,
+                anchor: GroupId::new("entreprise"),
                 input: vec![(ColumnId::new("siret"), ScalarType::Text)],
                 result_type: vec![ResultField {
                     name: "raison_sociale".into(),
@@ -674,5 +738,68 @@ mod tests {
         let errors = validate(&bad, DepthPolicy::default());
         assert!(errors.iter().any(|e| matches!(e, SchemaError::InputTypeMismatch { .. })));
         assert!(errors.iter().any(|e| matches!(e, SchemaError::DuplicateMappingTarget { .. })));
+    }
+
+    #[test]
+    fn one_resolver_may_feed_two_groups_but_not_one_group_twice() {
+        // §10 Q17: a declaration's identity is (anchor, resolver). Two
+        // SIRET blocks both declaring insee-sirene are fine — 11k DN
+        // procedures do exactly this; twice at one anchor is an error,
+        // as is an anchor the schema does not have or a target outside
+        // the anchor's subtree.
+        let block = |group: &str, col: &str| {
+            Element::Group(Group {
+                id: GroupId::new(group),
+                label: group.into(),
+                cardinality: Cardinality::One,
+                children: vec![col_of(col)],
+                included_from: None,
+            })
+        };
+        fn col_of(id: &str) -> Element {
+            Element::Column(Column {
+                id: ColumnId::new(id),
+                label: id.into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+            })
+        }
+        let decl = |anchor: &str, target: &str| ResolverDeclaration {
+            id: ResolverId::new("insee-sirene"),
+            version: 1,
+            anchor: GroupId::new(anchor),
+            input: vec![(ColumnId::new(target), ScalarType::Text)],
+            result_type: vec![ResultField { name: "n".into(), ty: ScalarType::Text }],
+            mapping: vec![Mapping { result_field: "n".into(), target: ColumnId::new(target) }],
+        };
+        let two_blocks = Schema {
+            root: vec![block("siege", "siret_siege"), block("filiale", "siret_filiale")],
+            resolvers: vec![decl("siege", "siret_siege"), decl("filiale", "siret_filiale")],
+        };
+        assert_eq!(validate(&two_blocks, DepthPolicy::default()), vec![]);
+
+        let twice = Schema {
+            root: vec![block("siege", "siret_siege")],
+            resolvers: vec![decl("siege", "siret_siege"), decl("siege", "siret_siege")],
+        };
+        assert!(validate(&twice, DepthPolicy::default())
+            .iter()
+            .any(|e| matches!(e, SchemaError::DuplicateDeclaration { .. })));
+
+        let nowhere = Schema {
+            root: vec![block("siege", "siret_siege")],
+            resolvers: vec![decl("hq", "siret_siege")],
+        };
+        assert!(validate(&nowhere, DepthPolicy::default())
+            .iter()
+            .any(|e| matches!(e, SchemaError::UnknownAnchor { .. })));
+
+        let outside = Schema {
+            root: vec![block("siege", "siret_siege"), block("filiale", "siret_filiale")],
+            resolvers: vec![decl("siege", "siret_filiale")],
+        };
+        assert!(validate(&outside, DepthPolicy::default())
+            .iter()
+            .any(|e| matches!(e, SchemaError::TargetOutsideAnchor { .. })));
     }
 }

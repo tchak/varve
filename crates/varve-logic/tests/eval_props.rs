@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use proptest::prelude::*;
 use varve_core::primitives::{Date, Decimal, Instant};
-use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, OptionId, PathSeg, ResolverId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, OptionId, PathSeg, RowPath};
 use varve_logic::{
     Atom, ColumnRef, Const, EvalContext, Expr, Operand, PendingSet, eval, sources, typecheck,
 };
@@ -145,8 +145,8 @@ fn operand() -> impl Strategy<Value = Operand> {
     ]
 }
 
-fn resolver() -> impl Strategy<Value = ResolverId> {
-    proptest::sample::select(RESOLVERS).prop_map(ResolverId::new)
+fn resolver() -> impl Strategy<Value = GroupId> {
+    proptest::sample::select(RESOLVERS).prop_map(GroupId::new)
 }
 
 fn option() -> impl Strategy<Value = OptionId> {
@@ -169,8 +169,8 @@ fn atom() -> impl Strategy<Value = Atom> {
         column_ref().prop_map(|source| Atom::IsFilled { source }),
         (column_ref(), option()).prop_map(|(source, option)| Atom::Contains { source, option }),
         (column_ref(), option()).prop_map(|(source, option)| Atom::Excludes { source, option }),
-        resolver().prop_map(|resolver| Atom::Pending { resolver }),
-        resolver().prop_map(|resolver| Atom::NotPending { resolver }),
+        resolver().prop_map(|group| Atom::Pending { group }),
+        resolver().prop_map(|group| Atom::NotPending { group }),
     ]
 }
 
@@ -425,8 +425,8 @@ proptest! {
     fn pending_pairs_are_complementary(r in resolver(), s in situation()) {
         let f = Fixture::new();
         let ctx = f.ctx(&s);
-        let p = eval(&atom_expr(Atom::Pending { resolver: r.clone() }), &ctx);
-        let np = eval(&atom_expr(Atom::NotPending { resolver: r }), &ctx);
+        let p = eval(&atom_expr(Atom::Pending { group: r.clone() }), &ctx);
+        let np = eval(&atom_expr(Atom::NotPending { group: r }), &ctx);
         prop_assert_ne!(p, np);
     }
 
@@ -471,7 +471,7 @@ proptest! {
             }
             // The schema declares no resolvers: a well-typed expression
             // has no pending atoms at all.
-            prop_assert!(varve_logic::resolver_sources(&e).is_empty());
+            prop_assert!(varve_logic::pending_sources(&e).is_empty());
         }
     }
 }

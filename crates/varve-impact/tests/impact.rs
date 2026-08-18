@@ -214,6 +214,7 @@ fn resolver_impact_questions() {
     let decl = |id: &str, version: u32, target: &str| ResolverDeclaration {
         id: ResolverId::new(id),
         version,
+        anchor: GroupId::new("g"),
         input: vec![(ColumnId::new("key"), ScalarType::Text)],
         result_type: vec![ResultField {
             name: "value".into(),
@@ -236,17 +237,20 @@ fn resolver_impact_questions() {
 
     let report = classify(&from, &to, &Default::default()).unwrap();
     assert!(report.resolvers.contains(&ResolverChange::Removed {
+        anchor: GroupId::new("g"),
         id: ResolverId::new("removed"),
         orphaned_columns: vec![ColumnId::new("fed")],
     }));
     // Remapped: `other` is now fed (stale, re-derivable from retained
     // snapshots) and `fed` is no longer fed by it (orphaned by the remap).
     assert!(report.resolvers.contains(&ResolverChange::MappingChanged {
+        anchor: GroupId::new("g"),
         id: ResolverId::new("remapped"),
         stale_columns: vec![ColumnId::new("other")],
         orphaned_columns: vec![ColumnId::new("fed")],
     }));
     assert!(report.resolvers.contains(&ResolverChange::Added {
+        anchor: GroupId::new("g"),
         id: ResolverId::new("brand-new"),
     }));
 
@@ -263,11 +267,16 @@ fn resolver_impact_questions() {
     // The result field `value` is now an integer landing in text `fed`:
     // that mapping breaks.
     assert!(report.resolvers.contains(&ResolverChange::ResultTypeChanged {
+        anchor: GroupId::new("g"),
         id: ResolverId::new("r"),
         broken_mappings: vec![Mapping { result_field: "value".into(), target: ColumnId::new("fed") }],
     }));
-    assert!(report.resolvers.contains(&ResolverChange::InputChanged { id: ResolverId::new("r") }));
+    assert!(report.resolvers.contains(&ResolverChange::InputChanged {
+        anchor: GroupId::new("g"),
+        id: ResolverId::new("r"),
+    }));
     assert!(report.resolvers.contains(&ResolverChange::VersionChanged {
+        anchor: GroupId::new("g"),
         id: ResolverId::new("r"),
         from: 1,
         to: 2,
@@ -404,7 +413,7 @@ fn assessment_turns_checked_into_exact_counts() {
     let none = BTreeSet::new();
     let under: Vec<RecordUnderAssessment<'_>> = records
         .iter()
-        .map(|v| RecordUnderAssessment { values: v, pending_resolvers: &none })
+        .map(|v| RecordUnderAssessment { values: v, pending: &none })
         .collect();
 
     let report = assess(&from, &to, &Default::default(), &[], under).unwrap();
@@ -426,6 +435,7 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
     let decl = ResolverDeclaration {
         id: ResolverId::new("insee"),
         version: 1,
+        anchor: GroupId::new("g"),
         input: vec![(ColumnId::new("siret"), ScalarType::Text)],
         result_type: vec![ResultField { name: "name".into(), ty: ScalarType::Text }],
         mapping: vec![Mapping { result_field: "name".into(), target: ColumnId::new("name") }],
@@ -451,12 +461,13 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
         v
     };
     let without = RecordValues::new();
-    let pending_insee: BTreeSet<ResolverId> = [ResolverId::new("insee")].into_iter().collect();
+    let pending_insee: BTreeSet<(GroupId, ResolverId)> =
+        [(GroupId::new("g"), ResolverId::new("insee"))].into_iter().collect();
     let none = BTreeSet::new();
     let records = [
-        RecordUnderAssessment { values: &with_geometry, pending_resolvers: &pending_insee },
-        RecordUnderAssessment { values: &without, pending_resolvers: &pending_insee },
-        RecordUnderAssessment { values: &with_geometry, pending_resolvers: &none },
+        RecordUnderAssessment { values: &with_geometry, pending: &pending_insee },
+        RecordUnderAssessment { values: &without, pending: &pending_insee },
+        RecordUnderAssessment { values: &with_geometry, pending: &none },
     ];
     let report = assess(&from, &to, &Default::default(), &[], records).unwrap();
     assert_eq!(report.columns[&ColumnId::new("g")].change, ColumnChange::Forbidden);
@@ -466,6 +477,6 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
     assert_eq!(a.cells_failed, 0);
     assert_eq!(a.records_with_uncastable, 2);
     assert_eq!(a.uncastable_by_column[&ColumnId::new("g")], 2);
-    assert_eq!(a.pending_on_removed_resolvers[&ResolverId::new("insee")], 2);
+    assert_eq!(a.pending_on_removed_resolvers[&(GroupId::new("g"), ResolverId::new("insee"))], 2);
     assert_eq!(report.worst(), ChangeClass::Breaking);
 }

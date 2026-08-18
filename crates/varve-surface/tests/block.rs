@@ -155,6 +155,7 @@ fn both_halves_must_be_self_contained() {
     block.resolvers.push(ResolverDeclaration {
         id: varve_core::ResolverId::new("x"),
         version: 1,
+        anchor: GroupId::new("rib"),
         input: vec![(ColumnId::new("iban"), ScalarType::Text)],
         result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
         mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("elsewhere") }],

@@ -92,12 +92,15 @@ pub struct ConstraintChange {
 /// The §2.8 impact questions, answered per resolver. One declaration
 /// may produce several entries (a version bump *and* a remap).
 #[derive(Debug, Clone, PartialEq)]
+/// A declaration is identified by `(anchor, id)` (§10 Q17): the same
+/// resolver at two groups is two declarations, judged independently.
 pub enum ResolverChange {
-    Added { id: ResolverId },
+    Added { anchor: GroupId, id: ResolverId },
     /// Which columns are orphaned (still exist in the new revision but
     /// nothing feeds them anymore); pending resolutions against this
-    /// resolver can never land — `assess` counts the records.
+    /// declaration can never land — `assess` counts the records.
     Removed {
+        anchor: GroupId,
         id: ResolverId,
         orphaned_columns: Vec<ColumnId>,
     },
@@ -105,6 +108,7 @@ pub enum ResolverChange {
     /// mappings whose result field vanished or no longer typechecks
     /// against its target column.
     ResultTypeChanged {
+        anchor: GroupId,
         id: ResolverId,
         broken_mappings: Vec<Mapping>,
     },
@@ -113,14 +117,15 @@ pub enum ResolverChange {
     /// differently or newly (stale), and the targets the old mapping fed
     /// that nothing feeds now (orphaned by the remap).
     MappingChanged {
+        anchor: GroupId,
         id: ResolverId,
         stale_columns: Vec<ColumnId>,
         orphaned_columns: Vec<ColumnId>,
     },
     /// The input signature changed: pending resolutions were requested
     /// against the old one (§2.8 rule 1 binds at request time).
-    InputChanged { id: ResolverId },
-    VersionChanged { id: ResolverId, from: u32, to: u32 },
+    InputChanged { anchor: GroupId, id: ResolverId },
+    VersionChanged { anchor: GroupId, id: ResolverId, from: u32, to: u32 },
 }
 
 /// A rule the caller wants judged against the new revision — Tier 2
@@ -148,8 +153,9 @@ pub enum BreakKind {
     OptionRemoved(ColumnId, OptionId),
     /// A projected nomenclature field disappeared.
     FieldRemoved(ColumnId, String),
-    /// `pending(r)` names a resolver the new revision does not declare.
-    ResolverRemoved(ResolverId),
+    /// `pending(g)` names a group with no resolver anchored to it in
+    /// the new revision (§10 Q17).
+    ResolverRemoved(GroupId),
     /// Anything else the typechecker refuses (policy, unknown
     /// nomenclature).
     Other(TypeError),
@@ -165,14 +171,14 @@ pub struct BrokenRule {
     pub already_broken: bool,
 }
 
-/// One record as `assess` sees it: its folded values and the resolvers
-/// with a pending resolution on it (§2.8 — resolutions sit beside
-/// cells; `varve_record::pending_set` yields them, project to resolver
-/// ids).
+/// One record as `assess` sees it: its folded values and the
+/// declarations with a pending resolution on it — `(anchor, resolver)`
+/// pairs, a declaration's identity (§10 Q17); project them from the
+/// record's `Resolution` instances.
 #[derive(Debug, Clone, Copy)]
 pub struct RecordUnderAssessment<'a> {
     pub values: &'a RecordValues,
-    pub pending_resolvers: &'a BTreeSet<ResolverId>,
+    pub pending: &'a BTreeSet<(GroupId, ResolverId)>,
 }
 
 /// Aggregated over a record set by `assess`.
@@ -190,9 +196,10 @@ pub struct RecordAssessment {
     /// column so a breaking verdict comes with its blast radius.
     pub records_with_uncastable: u64,
     pub uncastable_by_column: BTreeMap<ColumnId, u64>,
-    /// §2.8: records with a pending resolution against a resolver the
-    /// new revision removes — those can never land.
-    pub pending_on_removed_resolvers: BTreeMap<ResolverId, u64>,
+    /// §2.8: records with a pending resolution against a declaration
+    /// the new revision removes — those can never land. Keyed by the
+    /// declaration's identity, `(anchor, resolver)`.
+    pub pending_on_removed_resolvers: BTreeMap<(GroupId, ResolverId), u64>,
 }
 
 /// A block-level view of the transition (§2.1, Q5): what the per-column
@@ -271,7 +278,7 @@ pub fn broken_rules(
                 | TypeError::ScopeViolation(c) => BreakKind::SourceRetyped(c),
                 TypeError::UnknownOption(c, o) => BreakKind::OptionRemoved(c, o),
                 TypeError::UnknownField(c, f) => BreakKind::FieldRemoved(c, f),
-                TypeError::UnknownResolver(r) => BreakKind::ResolverRemoved(r),
+                TypeError::NoResolverAnchored(g) => BreakKind::ResolverRemoved(g),
                 other => BreakKind::Other(other),
             })
             .collect();
@@ -407,11 +414,11 @@ pub fn assess<'a>(
     records: impl IntoIterator<Item = RecordUnderAssessment<'a>>,
 ) -> Result<ImpactReport, CastError> {
     let mut report = classify_with_rules(from, to, nomenclatures, rules)?;
-    let removed_resolvers: BTreeSet<ResolverId> = report
+    let removed_resolvers: BTreeSet<(GroupId, ResolverId)> = report
         .resolvers
         .iter()
         .filter_map(|c| match c {
-            ResolverChange::Removed { id, .. } => Some(id.clone()),
+            ResolverChange::Removed { anchor, id, .. } => Some((anchor.clone(), id.clone())),
             _ => None,
         })
         .collect();
@@ -448,8 +455,8 @@ pub fn assess<'a>(
         if hit_uncastable {
             assessment.records_with_uncastable += 1;
         }
-        for resolver in record.pending_resolvers.intersection(&removed_resolvers) {
-            *assessment.pending_on_removed_resolvers.entry(resolver.clone()).or_default() += 1;
+        for declaration in record.pending.intersection(&removed_resolvers) {
+            *assessment.pending_on_removed_resolvers.entry(declaration.clone()).or_default() += 1;
         }
         for (column, col) in &projection.report.columns {
             if col.cells_failed > 0 {
@@ -545,18 +552,19 @@ fn resolver_changes(
     to: &Schema,
     to_index: &SchemaIndex,
 ) -> Vec<ResolverChange> {
-    let by_id = |s: &Schema| -> BTreeMap<ResolverId, ResolverDeclaration> {
+    let by_id = |s: &Schema| -> BTreeMap<(GroupId, ResolverId), ResolverDeclaration> {
         s.resolvers
             .iter()
-            .map(|r| (r.id.clone(), r.clone()))
+            .map(|r| ((r.anchor.clone(), r.id.clone()), r.clone()))
             .collect()
     };
     let from_resolvers = by_id(from);
     let to_resolvers = by_id(to);
     let mut changes = Vec::new();
 
-    for (id, fdecl) in &from_resolvers {
-        match to_resolvers.get(id) {
+    for ((anchor, id), fdecl) in &from_resolvers {
+        let key = (anchor.clone(), id.clone());
+        match to_resolvers.get(&key) {
             None => {
                 // §2.8: which columns are orphaned — mapped targets that
                 // still exist in the new revision, now fed by nothing.
@@ -567,6 +575,7 @@ fn resolver_changes(
                     .filter(|c| to_index.columns.contains_key(c))
                     .collect();
                 changes.push(ResolverChange::Removed {
+                    anchor: anchor.clone(),
                     id: id.clone(),
                     orphaned_columns: orphaned,
                 });
@@ -590,6 +599,7 @@ fn resolver_changes(
                         .cloned()
                         .collect();
                     changes.push(ResolverChange::ResultTypeChanged {
+                        anchor: anchor.clone(),
                         id: id.clone(),
                         broken_mappings,
                     });
@@ -612,16 +622,21 @@ fn resolver_changes(
                         .cloned()
                         .collect();
                     changes.push(ResolverChange::MappingChanged {
+                        anchor: anchor.clone(),
                         id: id.clone(),
                         stale_columns,
                         orphaned_columns,
                     });
                 }
                 if tdecl.input != fdecl.input {
-                    changes.push(ResolverChange::InputChanged { id: id.clone() });
+                    changes.push(ResolverChange::InputChanged {
+                        anchor: anchor.clone(),
+                        id: id.clone(),
+                    });
                 }
                 if tdecl.version != fdecl.version {
                     changes.push(ResolverChange::VersionChanged {
+                        anchor: anchor.clone(),
                         id: id.clone(),
                         from: fdecl.version,
                         to: tdecl.version,
@@ -630,9 +645,9 @@ fn resolver_changes(
             }
         }
     }
-    for id in to_resolvers.keys() {
-        if !from_resolvers.contains_key(id) {
-            changes.push(ResolverChange::Added { id: id.clone() });
+    for (anchor, id) in to_resolvers.keys() {
+        if !from_resolvers.contains_key(&(anchor.clone(), id.clone())) {
+            changes.push(ResolverChange::Added { anchor: anchor.clone(), id: id.clone() });
         }
     }
     changes

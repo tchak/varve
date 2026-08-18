@@ -213,6 +213,7 @@ fn resolver(decl: &ResolverDeclaration) -> CanonicalValue {
     obj(vec![
         ("id", string(&decl.id)),
         ("version", CanonicalValue::Int(i64::from(decl.version))),
+        ("anchor", string(&decl.anchor)),
         (
             "input",
             CanonicalValue::Array(
@@ -511,6 +512,7 @@ fn resolver_from(v: &CanonicalValue) -> Result<ResolverDeclaration, SchemaDecode
         id: ResolverId::new(get_str(m, "id")?),
         version: u32::try_from(get_int(m, "version")?)
             .map_err(|_| SchemaDecodeError("bad version".into()))?,
+        anchor: GroupId::new(get_str(m, "anchor")?),
         input,
         result_type,
         mapping,
@@ -542,6 +544,7 @@ mod tests {
             resolvers: vec![ResolverDeclaration {
                 id: ResolverId::new("r"),
                 version: 1,
+                anchor: GroupId::new("rib"),
                 input: vec![(ColumnId::new("iban"), ScalarType::Text)],
                 result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
                 mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("iban") }],
