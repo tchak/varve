@@ -18,19 +18,46 @@ pub enum Format {
     Regex(String),
 }
 
-impl Format {
+/// A format ready to check many values: the custom pattern is compiled
+/// once (per column, per admissibility run) instead of per cell.
+pub enum CompiledFormat {
+    Email,
+    Phone,
+    Iban,
+    Regex(regex::Regex),
+    /// An invalid pattern rejects nothing at runtime: it is a
+    /// publication error (`validate`), not an applicant's problem.
+    Invalid,
+}
+
+impl CompiledFormat {
     pub fn check(&self, value: &str) -> bool {
         match self {
-            Format::Email => email(value),
-            Format::Phone => phone(value),
-            Format::Iban => iban(value),
+            CompiledFormat::Email => email(value),
+            CompiledFormat::Phone => phone(value),
+            CompiledFormat::Iban => iban(value),
+            CompiledFormat::Regex(re) => re.is_match(value),
+            CompiledFormat::Invalid => true,
+        }
+    }
+}
+
+impl Format {
+    pub fn compile(&self) -> CompiledFormat {
+        match self {
+            Format::Email => CompiledFormat::Email,
+            Format::Phone => CompiledFormat::Phone,
+            Format::Iban => CompiledFormat::Iban,
             Format::Regex(pattern) => match compile(pattern) {
-                // An invalid pattern rejects nothing at runtime: it is
-                // a publication error, not an applicant's problem.
-                Err(_) => true,
-                Ok(re) => re.is_match(value),
+                Ok(re) => CompiledFormat::Regex(re),
+                Err(_) => CompiledFormat::Invalid,
             },
         }
+    }
+
+    /// One-off check; for many values compile once with [`Format::compile`].
+    pub fn check(&self, value: &str) -> bool {
+        self.compile().check(value)
     }
 
     /// Publication-time pattern verification for `validate()`.

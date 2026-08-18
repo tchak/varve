@@ -4,7 +4,7 @@ use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RevisionId, RowPa
 use varve_logic::{Atom, ColumnRef, Const, Expr, Operand};
 use varve_schema::{
     Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
-    ScalarType, Schema,
+    ScalarType, Schema, revision_id,
 };
 use varve_surface::{
     ColumnNode, Finding, Format, GroupNode, Ineligibility, Node, Section, Surface,
@@ -75,7 +75,7 @@ fn always() -> Expr {
 fn surface(nodes: Vec<Node>) -> Surface {
     Surface {
         id: SurfaceId::new("public"),
-        revision: RevisionId::new("rev-1"),
+        revision: revision_id(&schema()),
         nodes,
         ineligibility: None,
     }
@@ -91,6 +91,13 @@ fn set(values: &mut RecordValues, id: &str, scalar: Scalar) {
 #[test]
 fn validation_catches_structure_and_rules() {
     let s = schema();
+    // A surface authored against another revision.
+    let mut stale = surface(vec![]);
+    stale.revision = RevisionId::new("rev-0");
+    assert!(matches!(
+        validate(&stale, &s, &Default::default()).as_slice(),
+        [SurfaceError::RevisionMismatch { .. }]
+    ));
     let noms = Default::default();
 
     // Item column placed at root: misplaced.
@@ -303,7 +310,8 @@ fn formats_apply_to_every_element_of_a_many_text_cell() {
     };
     let mut emails = col_node("emails");
     emails.format = Some(Format::Email);
-    let surf = surface(vec![Node::Column(emails)]);
+    let mut surf = surface(vec![Node::Column(emails)]);
+    surf.revision = revision_id(&s);
     assert_eq!(validate(&surf, &s, &Default::default()), vec![]);
     let cell = |list: &[&str]| {
         let mut v = RecordValues::new();

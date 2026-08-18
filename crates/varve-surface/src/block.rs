@@ -110,7 +110,7 @@ impl BlockDefaults {
         };
         let surface = Surface {
             id: varve_core::SurfaceId::new("block-defaults"),
-            revision: varve_core::RevisionId::new("block"),
+            revision: varve_schema::revision_id(&schema),
             nodes: vec![Node::Group(self.node.clone())],
             ineligibility: None,
         };

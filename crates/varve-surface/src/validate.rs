@@ -4,14 +4,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use varve_core::{ColumnId, GroupId};
+use varve_core::{ColumnId, GroupId, RevisionId};
 use varve_logic::{RuleCycle, TypeError, check_acyclic, typecheck};
-use varve_schema::{Cardinality, NomenclatureTable, ScalarType, Schema, SchemaIndex};
+use varve_schema::{Cardinality, NomenclatureTable, ScalarType, Schema, SchemaIndex, revision_id};
 
 use crate::{Node, Surface, column_entries};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SurfaceError {
+    /// The surface names a revision that is not this schema's: it was
+    /// authored against something else (§2.6: surfaces compile against
+    /// a specific revision).
+    #[error("surface is for revision '{surface}', schema is revision '{schema}'")]
+    RevisionMismatch { surface: RevisionId, schema: RevisionId },
     #[error("unknown column '{0}'")]
     UnknownColumn(ColumnId),
     #[error("unknown group '{0}'")]
@@ -51,6 +56,10 @@ pub fn validate(
 ) -> Vec<SurfaceError> {
     let index = SchemaIndex::build(schema);
     let mut errors = Vec::new();
+    let actual = revision_id(schema);
+    if surface.revision != actual {
+        errors.push(SurfaceError::RevisionMismatch { surface: surface.revision.clone(), schema: actual });
+    }
     let mut seen = BTreeSet::new();
     walk(
         &surface.nodes,

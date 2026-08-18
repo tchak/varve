@@ -58,6 +58,8 @@ pub fn admissibility(
         let Some(info) = index.columns.get(column) else {
             continue;
         };
+        // Compile the format once per column, not once per cell.
+        let compiled = entry.node.format.as_ref().map(|f| (f, f.compile()));
         for path in paths_for_scope(&info.scope, values) {
             if !reach.is_visible(column, &path) {
                 continue;
@@ -97,7 +99,7 @@ pub fn admissibility(
             // A format applies to every text element of the cell — one
             // value or each of a many-valued list (§2.6); blanks are the
             // required rule's business, not the format's.
-            if let Some(format) = &entry.node.format
+            if let Some((format, compiled)) = &compiled
                 && let Some(CellState::Value(value)) = cell
             {
                 let texts: Vec<&str> = match value {
@@ -111,11 +113,11 @@ pub fn admissibility(
                         .collect(),
                     _ => vec![],
                 };
-                if texts.iter().any(|t| !t.is_empty() && !format.check(t)) {
+                if texts.iter().any(|t| !t.is_empty() && !compiled.check(t)) {
                     findings.push(Finding::FormatViolation {
                         column: column.clone(),
                         path: path.clone(),
-                        format: format.clone(),
+                        format: (*format).clone(),
                     });
                 }
             }
