@@ -7,7 +7,7 @@ use varve_projection::project;
 use varve_schema::{
     Arity, Column, Element, NomenclatureRef, OptionRow, ScalarType, Schema,
 };
-use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
+use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar, check};
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
     Element::Column(Column {
@@ -60,6 +60,74 @@ fn mixed_schema() -> Schema {
         ],
         resolvers: vec![],
     }
+}
+
+/// Readers a revision of `mixed_schema()` might become: retypes
+/// (widening, checked, lens), an arity narrowing, a removal, an addition.
+fn reader_variant() -> impl Strategy<Value = Schema> {
+    let base = || mixed_schema();
+    prop_oneof![
+        Just(base()),
+        Just(Schema {
+            root: base().root.into_iter().map(|e| match e {
+                Element::Column(mut c) if c.id.as_str() == "n" => {
+                    c.ty = ScalarType::Decimal(None);
+                    Element::Column(c)
+                }
+                other => other,
+            }).collect(),
+            resolvers: vec![],
+        }),
+        Just(Schema {
+            root: base().root.into_iter().map(|e| match e {
+                Element::Column(mut c) if c.id.as_str() == "n" => {
+                    c.ty = ScalarType::Text;
+                    Element::Column(c)
+                }
+                other => other,
+            }).collect(),
+            resolvers: vec![],
+        }),
+        Just(Schema {
+            root: base().root.into_iter().map(|e| match e {
+                Element::Column(mut c) if c.id.as_str() == "choice" => {
+                    c.ty = ScalarType::Text;
+                    Element::Column(c)
+                }
+                other => other,
+            }).collect(),
+            resolvers: vec![],
+        }),
+        Just(Schema {
+            root: base().root.into_iter().map(|e| match e {
+                Element::Column(mut c) if c.id.as_str() == "tags" => {
+                    c.arity = Arity::One;
+                    Element::Column(c)
+                }
+                other => other,
+            }).collect(),
+            resolvers: vec![],
+        }),
+        Just(Schema {
+            root: base().root.into_iter().filter(|e| !matches!(e, Element::Column(c) if c.id.as_str() == "t")).collect(),
+            resolvers: vec![],
+        }),
+        Just(Schema {
+            root: base().root.into_iter().chain([column("added", ScalarType::Boolean, Arity::One)]).collect(),
+            resolvers: vec![],
+        }),
+        // Text → enum: checked through labels.
+        Just(Schema {
+            root: base().root.into_iter().map(|e| match e {
+                Element::Column(mut c) if c.id.as_str() == "t" => {
+                    c.ty = ScalarType::Enum(options());
+                    Element::Column(c)
+                }
+                other => other,
+            }).collect(),
+            resolvers: vec![],
+        }),
+    ]
 }
 
 fn conforming_values() -> impl Strategy<Value = RecordValues> {
@@ -176,6 +244,36 @@ proptest! {
             }
             None => prop_assert_eq!(p.report.total_failed(), 1),
             other => prop_assert!(false, "unexpected projection: {other:?}"),
+        }
+    }
+
+    /// Whatever the reader, the projection's output conforms to it, and
+    /// every writer cell of a reader column is accounted for: projected
+    /// or failed, never lost in between (§3, §5.5).
+    #[test]
+    fn projection_output_conforms_to_the_reader(
+        v in conforming_values(),
+        reader in reader_variant(),
+    ) {
+        let writer = mixed_schema();
+        let p = project(&v, &writer, &reader, &Default::default()).unwrap();
+        prop_assert_eq!(check(&p.values, &reader, &Default::default()), vec![]);
+        for (column, report) in &p.report.columns {
+            let had = v.cells.keys().filter(|a| &a.column == column).count() as u64;
+            prop_assert_eq!(
+                report.cells_projected + report.cells_failed,
+                had,
+                "column {}: {:?}",
+                column,
+                report
+            );
+            prop_assert!(report.cells_lossy <= report.cells_projected);
+        }
+        // Reader-only columns read absent; nothing lands in them.
+        for (column, report) in &p.report.columns {
+            if report.status == varve_projection::ColumnStatus::AddedAbsent {
+                prop_assert!(!p.values.cells.keys().any(|a| &a.column == column));
+            }
         }
     }
 }
