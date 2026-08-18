@@ -252,7 +252,7 @@ fn record_and_item_lines_pin_canonical_shapes() {
     // a `WriteError`, not a rounded number and not a panic.
     assert!(matches!(
         write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 9007199254740993))]),
-        Err(WriteError { line: 1, .. })
+        Err(WriteError::Canonical { line: 1, .. })
     ));
     // And on the read side a too-large count literal is a double, which
     // is not a count.
@@ -463,6 +463,15 @@ fn imports_are_all_or_nothing() {
     assert!(matches!(import_snapshot(&stream, &mut store, &request), Err(ImportError::AlreadyExists(r)) if r == old));
     assert!(!store.contains_key(&fresh));
     assert_eq!(store[&old].entries().len(), 1, "existing record was touched despite the failure");
+}
+
+#[test]
+fn writers_refuse_a_manifest_of_the_other_mode() {
+    // History and snapshot never mix (§5): a real error, in release too.
+    let m = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    assert!(matches!(write_history(m, schema_lines(), &[]), Err(WriteError::Mode(Mode::Snapshot))));
+    let m = manifest(Mode::History, Intent::Upsert, 0);
+    assert!(matches!(write_snapshot(m, schema_lines(), &[]), Err(WriteError::Mode(Mode::History))));
 }
 
 #[test]

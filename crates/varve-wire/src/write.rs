@@ -125,11 +125,15 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
 /// 2^53 − 1 (schema validation and conformance bound those) — never
 /// with floats, which come only from parsed GeoJSON and are finite.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("line {line}: {error}")]
-pub struct WriteError {
-    /// 1-based line index in the stream.
-    pub line: usize,
-    pub error: CanonicalError,
+pub enum WriteError {
+    /// A line whose canonical form is not JCS-representable (see the
+    /// type's doc): 1-based line index and the cause.
+    #[error("line {line}: {error}")]
+    Canonical { line: usize, error: CanonicalError },
+    /// The manifest declares one mode, the writer was asked for the
+    /// other — history and snapshot never mix (§5).
+    #[error("manifest mode is {0:?}, not the mode this writer produces")]
+    Mode(Mode),
 }
 
 /// Serialize lines to JSONL bytes: one canonical JSON object per line,
@@ -138,7 +142,7 @@ pub fn write_lines(lines: &[Line]) -> Result<Vec<u8>, WriteError> {
     let mut out = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let bytes = canonical_bytes(&line_canonical(line))
-            .map_err(|error| WriteError { line: index + 1, error })?;
+            .map_err(|error| WriteError::Canonical { line: index + 1, error })?;
         out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
@@ -152,7 +156,9 @@ pub fn write_history(
     schema_lines: Vec<Line>,
     records: &[(varve_core::RecordId, &varve_record::RecordLog)],
 ) -> Result<Vec<u8>, WriteError> {
-    debug_assert_eq!(manifest.mode, Mode::History);
+    if manifest.mode != Mode::History {
+        return Err(WriteError::Mode(manifest.mode));
+    }
     let mut lines = vec![Line::Header(manifest)];
     lines.extend(schema_lines);
     for (record, log) in records {
@@ -171,7 +177,9 @@ pub fn write_snapshot(
     schema_lines: Vec<Line>,
     records: &[SnapshotRecord],
 ) -> Result<Vec<u8>, WriteError> {
-    debug_assert_eq!(manifest.mode, Mode::Snapshot);
+    if manifest.mode != Mode::Snapshot {
+        return Err(WriteError::Mode(manifest.mode));
+    }
     let mut lines = vec![Line::Header(manifest)];
     lines.extend(schema_lines);
     lines.extend(records.iter().flat_map(SnapshotRecord::lines));
