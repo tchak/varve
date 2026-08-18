@@ -37,6 +37,9 @@ pub enum TypeError {
     ColumnComparisonNotEnabled,
     #[error("column '{0}': published nomenclature not provided")]
     UnknownNomenclature(ColumnId),
+    /// Deeper than `MAX_DEPTH`: refused so evaluation stays total.
+    #[error("expression nests deeper than the {0} levels allowed")]
+    TooDeep(usize),
 }
 
 /// Check `expr` attached at `scope` (empty = record scope) against a
@@ -47,6 +50,9 @@ pub fn typecheck(
     nomenclatures: &NomenclatureTable,
     scope: &[GroupId],
 ) -> Vec<TypeError> {
+    if expr.depth() > crate::MAX_DEPTH {
+        return vec![TypeError::TooDeep(crate::MAX_DEPTH)];
+    }
     let index = SchemaIndex::build(schema);
     let mut errors = Vec::new();
     walk(expr, schema, &index, nomenclatures, scope, &mut errors);

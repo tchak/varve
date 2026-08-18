@@ -15,6 +15,30 @@ mod graph;
 mod typecheck;
 
 pub use canon::{DecodeError, from_canonical, to_canonical};
+
+/// Maximum combinator nesting an expression may have. Evaluation,
+/// typechecking and canonicalization recurse on it, so a bound keeps
+/// them total (§4) — the decoder and the typechecker refuse deeper
+/// expressions; a decoded or typechecked expression is safe to walk.
+/// Real conditions nest a handful of levels.
+pub const MAX_DEPTH: usize = 64;
+
+impl Expr {
+    /// Combinator nesting depth: an atom is 0.
+    pub fn depth(&self) -> usize {
+        // Iterative — this is the one walk that must not itself recurse
+        // on unbounded input.
+        let mut max = 0;
+        let mut stack: Vec<(&Expr, usize)> = vec![(self, 0)];
+        while let Some((e, d)) = stack.pop() {
+            max = max.max(d);
+            if let Expr::And(items) | Expr::Or(items) = e {
+                stack.extend(items.iter().map(|i| (i, d + 1)));
+            }
+        }
+        max
+    }
+}
 pub use eval::{EvalContext, PendingSet, eval};
 pub use graph::{RuleCycle, check_acyclic};
 pub use typecheck::{TypeError, typecheck};

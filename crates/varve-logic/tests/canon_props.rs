@@ -112,4 +112,38 @@ fn malformed_inputs_error_cleanly() {
     for value in &bad {
         assert!(from_canonical(value).is_err(), "{value:?} should be refused");
     }
+    // Depth is bounded so every walk stays total: 64 levels decode,
+    // 65 are refused; the typechecker refuses too if built in-process.
+    let nest = |depth: usize| {
+        let mut e = obj(&[("or", arr.clone())]);
+        for _ in 0..depth {
+            e = obj(&[("and", CanonicalValue::Array(vec![e]))]);
+        }
+        e
+    };
+    let deep_ok = from_canonical(&nest(varve_logic::MAX_DEPTH)).unwrap();
+    assert_eq!(deep_ok.depth(), varve_logic::MAX_DEPTH);
+    assert!(from_canonical(&nest(varve_logic::MAX_DEPTH + 1)).is_err());
+    let mut too_deep = varve_logic::Expr::Or(vec![]);
+    for _ in 0..=varve_logic::MAX_DEPTH {
+        too_deep = varve_logic::Expr::And(vec![too_deep]);
+    }
+    let schema = varve_schema::Schema::default();
+    assert!(matches!(
+        varve_logic::typecheck(&too_deep, &schema, &Default::default(), &[]).as_slice(),
+        [varve_logic::TypeError::TooDeep(_)]
+    ));
+    // The very deep expression itself is fine to construct and measure
+    // (depth() is iterative) even at thousands of levels.
+    let mut huge = varve_logic::Expr::Or(vec![]);
+    for _ in 0..5000 {
+        huge = varve_logic::Expr::And(vec![huge]);
+    }
+    assert_eq!(huge.depth(), 5000);
+    assert!(matches!(
+        varve_logic::typecheck(&huge, &schema, &Default::default(), &[]).as_slice(),
+        [varve_logic::TypeError::TooDeep(_)]
+    ));
+    // Dropping a 5000-deep expression must not overflow either.
+    drop(huge);
 }

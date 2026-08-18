@@ -122,16 +122,23 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
 /// `to_canonical ∘ from_canonical` is the identity on every accepted
 /// value and no two texts decode to one expression.
 pub fn from_canonical(value: &CanonicalValue) -> Result<Expr, DecodeError> {
+    expr_from(value, 0)
+}
+
+fn expr_from(value: &CanonicalValue, depth: usize) -> Result<Expr, DecodeError> {
+    if depth > crate::MAX_DEPTH {
+        return Err(DecodeError(format!("expression nests deeper than {}", crate::MAX_DEPTH)));
+    }
     let map = as_object(value)?;
     match (map.get("and"), map.get("or")) {
         (Some(_), Some(_)) => Err(DecodeError("an expression is 'and' or 'or', not both".into())),
         (Some(operands), None) => {
             only_keys(map, &["and"])?;
-            Ok(Expr::And(exprs(operands)?))
+            Ok(Expr::And(exprs(operands, depth + 1)?))
         }
         (None, Some(operands)) => {
             only_keys(map, &["or"])?;
-            Ok(Expr::Or(exprs(operands)?))
+            Ok(Expr::Or(exprs(operands, depth + 1)?))
         }
         (None, None) => Ok(Expr::Atom(atom_from(map)?)),
     }
@@ -155,11 +162,11 @@ fn single_key<'a>(map: &'a Object, what: &str) -> Result<(&'a String, &'a Canoni
     }
 }
 
-fn exprs(value: &CanonicalValue) -> Result<Vec<Expr>, DecodeError> {
+fn exprs(value: &CanonicalValue, depth: usize) -> Result<Vec<Expr>, DecodeError> {
     let CanonicalValue::Array(items) = value else {
         return Err(DecodeError("combinator operands must be an array".into()));
     };
-    items.iter().map(from_canonical).collect()
+    items.iter().map(|v| expr_from(v, depth)).collect()
 }
 
 type Object = BTreeMap<String, CanonicalValue>;
