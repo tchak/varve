@@ -301,6 +301,20 @@ fn required_only_when_reachable_and_formats_only_when_filled() {
 }
 
 #[test]
+fn reachability_refuses_a_duplicated_column_node() {
+    // validate reports duplicates; reachability must not silently keep
+    // the last node's rule if handed an unvalidated surface.
+    let s = schema();
+    let mut shown = col_node("detail");
+    shown.visibility = Some(always());
+    let surf = surface(vec![Node::Column(col_node("detail")), Node::Column(shown)]);
+    assert!(matches!(
+        reachability(&surf, &s, &Default::default(), &RecordValues::new(), &BTreeSet::new()),
+        Err(SurfaceError::DuplicateColumn(c)) if c == ColumnId::new("detail")
+    ));
+}
+
+#[test]
 fn formats_apply_to_every_element_of_a_many_text_cell() {
     // A multi-valued email column: the format holds for each element;
     // one bad address is a violation, blanks are the required rule's.

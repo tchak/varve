@@ -9,12 +9,12 @@ use std::collections::BTreeSet;
 use varve_core::{ColumnId, RowPath};
 // `eval` is varve-logic's pure predicate-AST evaluator (no code
 // execution — see its definition).
-use varve_logic::{EvalContext, PendingSet, RuleCycle, eval};
+use varve_logic::{EvalContext, PendingSet, eval};
 use varve_schema::{NomenclatureTable, Schema, SchemaIndex};
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
 
 use crate::reach::paths_for_scope;
-use crate::{Format, Surface, column_entries, reachability};
+use crate::{Format, Surface, SurfaceError, column_entries, reachability};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Finding {
@@ -48,7 +48,7 @@ pub fn admissibility(
     nomenclatures: &NomenclatureTable,
     values: &RecordValues,
     pending: &PendingSet,
-) -> Result<AdmissibilityReport, RuleCycle> {
+) -> Result<AdmissibilityReport, SurfaceError> {
     let index = SchemaIndex::build(schema);
     let reach = reachability(surface, schema, nomenclatures, values, pending)?;
     let mut findings = Vec::new();

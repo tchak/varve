@@ -8,11 +8,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RowPath};
 // `eval` is varve-logic's pure predicate-AST evaluator (no code
 // execution — see its definition).
-use varve_logic::{EvalContext, Expr, PendingSet, RuleCycle, check_acyclic, eval};
+use varve_logic::{EvalContext, Expr, PendingSet, check_acyclic, eval};
 use varve_schema::{NomenclatureTable, Schema, SchemaIndex};
 use varve_value::{ItemsAddr, RecordValues};
 
-use crate::{Surface, column_entries};
+use crate::{Surface, SurfaceError, column_entries};
 
 /// Which `(column, path)` pairs this surface hides on this record.
 /// Everything else the surface presents is reachable.
@@ -58,16 +58,23 @@ pub fn reachability(
     nomenclatures: &NomenclatureTable,
     values: &RecordValues,
     pending: &PendingSet,
-) -> Result<Reachability, RuleCycle> {
+) -> Result<Reachability, SurfaceError> {
     let index = SchemaIndex::build(schema);
     let entries = column_entries(surface);
     let mut rules: BTreeMap<ColumnId, Expr> = BTreeMap::new();
+    let mut seen: BTreeSet<&ColumnId> = BTreeSet::new();
     for entry in &entries {
+        // A duplicated column node is a validation error — refuse it
+        // here too rather than silently keeping the last node's rule:
+        // a pure function has no business with unstated preconditions.
+        if !seen.insert(&entry.node.column) {
+            return Err(SurfaceError::DuplicateColumn(entry.node.column.clone()));
+        }
         if let Some(rule) = entry.effective_visibility() {
             rules.insert(entry.node.column.clone(), rule);
         }
     }
-    let order = check_acyclic(&rules)?;
+    let order = check_acyclic(&rules).map_err(SurfaceError::Cycle)?;
 
     let mut hidden: BTreeSet<(ColumnId, RowPath)> = BTreeSet::new();
     for column in order {
