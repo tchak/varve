@@ -47,6 +47,10 @@ pub enum ConformanceError {
     MisplacedItems(GroupId),
     #[error("duplicate item in group '{0}'")]
     DuplicateItem(GroupId),
+    /// An item list whose parent path names an item absent from group
+    /// `{1}` — hanging off nothing.
+    #[error("item list for group '{0}' hangs off an item absent from group '{1}'")]
+    OrphanItemList(GroupId, GroupId),
     /// One state, one encoding (§2.4): a `many` group with no items has
     /// no item list at all.
     #[error("group '{0}': an empty item list is not stored — omit it")]
@@ -151,6 +155,22 @@ pub fn check(
         for item in list {
             if !seen.insert(item) {
                 errors.push(ConformanceError::DuplicateItem(addr.group.clone()));
+            }
+        }
+        // The parent path must name items that exist, segment by
+        // segment — a list hanging off a ghost item is misplaced.
+        let segments = addr.parent.segments();
+        for depth in 0..segments.len() {
+            let parent =
+                segments[..depth].iter().fold(varve_core::RowPath::root(), |p, s| p.child(s.clone()));
+            let seg = &segments[depth];
+            let exists = values
+                .items
+                .get(&ItemsAddr { group: seg.group.clone(), parent })
+                .is_some_and(|items| items.contains(&seg.item));
+            if !exists {
+                errors.push(ConformanceError::OrphanItemList(addr.group.clone(), seg.group.clone()));
+                break;
             }
         }
     }

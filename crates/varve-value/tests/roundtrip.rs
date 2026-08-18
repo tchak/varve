@@ -380,6 +380,31 @@ fn one_state_one_encoding_no_empty_lists() {
 }
 
 #[test]
+fn item_lists_must_hang_off_existing_items() {
+    // A nested list whose parent path names a ghost item is misplaced;
+    // and a reorder that repeats an item is not a permutation.
+    let mut v = sample();
+    v.items.insert(
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new("ghost") }),
+        },
+        vec![ItemId::new("x")],
+    );
+    let errors = check(&v, &schema(), &Default::default());
+    assert!(errors.iter().any(|e| matches!(e, ConformanceError::OrphanItemList(g, p) if g == &GroupId::new("contacts") && p == &GroupId::new("contacts"))));
+
+    let mut v = sample();
+    let list = v.items[&ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() }].clone();
+    let mut repeated = list.clone();
+    repeated[1] = repeated[0].clone();
+    assert_eq!(
+        apply(&mut v, &Op::Reorder { group: GroupId::new("contacts"), parent: RowPath::root(), order: repeated }),
+        Err(ApplyError::BadReorder(GroupId::new("contacts")))
+    );
+}
+
+#[test]
 fn geometry_is_validated_geojson() {
     use varve_value::{Feature, GeometryError};
     let point = r#"{"type":"Feature","id":7,"geometry":{"type":"Point","coordinates":[2.35,48.85]},"properties":null}"#;

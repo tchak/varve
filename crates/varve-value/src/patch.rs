@@ -141,11 +141,13 @@ pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
             let Some(list) = values.items.get_mut(&addr) else {
                 return Err(ApplyError::BadReorder(group.clone()));
             };
+            // A permutation: same length, same elements, no repeats.
             let mut a = list.clone();
             let mut b = order.clone();
             a.sort();
             b.sort();
-            if a != b {
+            let repeats = b.windows(2).any(|w| w[0] == w[1]);
+            if a != b || repeats {
                 return Err(ApplyError::BadReorder(group.clone()));
             }
             *list = order.clone();
