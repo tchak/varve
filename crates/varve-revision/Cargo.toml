@@ -9,3 +9,6 @@ license.workspace = true
 varve-core = { path = "../varve-core" }
 varve-schema = { path = "../varve-schema" }
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

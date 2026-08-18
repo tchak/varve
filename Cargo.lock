@@ -638,6 +638,7 @@ dependencies = [
 name = "varve-revision"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "thiserror",
  "varve-core",
  "varve-schema",
