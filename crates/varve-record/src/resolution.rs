@@ -170,6 +170,11 @@ pub fn pending_scans(scans: &[Scan]) -> Vec<&Scan> {
 pub struct ExpectedResolution {
     pub resolver: ResolverId,
     pub scope: RowPath,
+    /// §2.8 rule 1: the versions bound at request time. A late write
+    /// under other versions is not the resolution the checkpoint
+    /// expected — a re-map is a deliberate act, reported.
+    pub resolver_version: u32,
+    pub mapping_version: u32,
 }
 
 /// §2.9: a named entry hash (the hash, not the seq, pins content), plus
@@ -257,7 +262,10 @@ pub fn validate_after_checkpoint(
         let expected = entry.envelope.actor.kind == ActorKind::Resolver
             && match &entry.content.origin {
                 Origin::Derived(d) => checkpoint.expected.iter().any(|exp| {
-                    exp.resolver == d.source && ops_within(&entry.content.ops, &exp.scope)
+                    exp.resolver == d.source
+                        && exp.resolver_version == d.source_version
+                        && exp.mapping_version == d.mapping_version
+                        && ops_within(&entry.content.ops, &exp.scope)
                 }),
                 _ => false,
             };

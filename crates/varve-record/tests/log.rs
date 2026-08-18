@@ -524,6 +524,8 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
         expected: vec![ExpectedResolution {
             resolver: ResolverId::new("insee-sirene"),
             scope: RowPath::root(),
+            resolver_version: 1,
+            mapping_version: 1,
         }],
         frozen_columns: ["name", "raison_sociale", "adresse"]
             .into_iter()
@@ -598,6 +600,23 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
         CheckpointViolation::IllegalWrite { seq: 5, groups, .. } if groups.contains(&GroupId::new("g1"))
     ));
 
+    // A derived write under other versions than the ones bound at
+    // request time (§2.8 rule 1) is not the expected resolution.
+    let rebound = Checkpoint {
+        expected: vec![ExpectedResolution {
+            resolver: ResolverId::new("insee-sirene"),
+            scope: RowPath::root(),
+            resolver_version: 2,
+            mapping_version: 1,
+        }],
+        ..checkpoint.clone()
+    };
+    assert!(
+        validate_after_checkpoint(&log, &rebound, None)
+            .iter()
+            .any(|v| matches!(v, CheckpointViolation::IllegalWrite { seq: 1, .. }))
+    );
+
     // Out-of-scope derived write (targets outside the expected scope).
     let scoped = Checkpoint {
         expected: vec![ExpectedResolution {
@@ -606,6 +625,8 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
                 group: GroupId::new("g1"),
                 item: ItemId::new("i1"),
             }),
+            resolver_version: 1,
+            mapping_version: 1,
         }],
         ..checkpoint.clone()
     };
