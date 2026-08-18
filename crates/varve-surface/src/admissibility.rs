@@ -94,16 +94,30 @@ pub fn admissibility(
                     path: path.clone(),
                 });
             }
+            // A format applies to every text element of the cell — one
+            // value or each of a many-valued list (§2.6); blanks are the
+            // required rule's business, not the format's.
             if let Some(format) = &entry.node.format
-                && let Some(CellState::Value(CellValue::One(Scalar::Text(text)))) = cell
-                && !text.is_empty()
-                && !format.check(text)
+                && let Some(CellState::Value(value)) = cell
             {
-                findings.push(Finding::FormatViolation {
-                    column: column.clone(),
-                    path: path.clone(),
-                    format: format.clone(),
-                });
+                let texts: Vec<&str> = match value {
+                    CellValue::One(Scalar::Text(t)) => vec![t.as_str()],
+                    CellValue::Many(items) => items
+                        .iter()
+                        .filter_map(|s| match s {
+                            Scalar::Text(t) => Some(t.as_str()),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => vec![],
+                };
+                if texts.iter().any(|t| !t.is_empty() && !format.check(t)) {
+                    findings.push(Finding::FormatViolation {
+                        column: column.clone(),
+                        path: path.clone(),
+                        format: format.clone(),
+                    });
+                }
             }
         }
     }

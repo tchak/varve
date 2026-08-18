@@ -294,6 +294,32 @@ fn required_only_when_reachable_and_formats_only_when_filled() {
 }
 
 #[test]
+fn formats_apply_to_every_element_of_a_many_text_cell() {
+    // A multi-valued email column: the format holds for each element;
+    // one bad address is a violation, blanks are the required rule's.
+    let s = Schema {
+        root: vec![column("emails", ScalarType::Text, Arity::Many)],
+        resolvers: vec![],
+    };
+    let mut emails = col_node("emails");
+    emails.format = Some(Format::Email);
+    let surf = surface(vec![Node::Column(emails)]);
+    assert_eq!(validate(&surf, &s, &Default::default()), vec![]);
+    let cell = |list: &[&str]| {
+        let mut v = RecordValues::new();
+        v.cells.insert(
+            CellAddr { column: ColumnId::new("emails"), path: RowPath::root() },
+            CellState::Value(CellValue::Many(list.iter().map(|t| Scalar::Text((*t).into())).collect())),
+        );
+        v
+    };
+    let ok = admissibility(&surf, &s, &Default::default(), &cell(&["a@b.fr", "c@d.fr"]), &BTreeSet::new()).unwrap();
+    assert!(ok.findings.is_empty());
+    let bad = admissibility(&surf, &s, &Default::default(), &cell(&["a@b.fr", "nope"]), &BTreeSet::new()).unwrap();
+    assert!(matches!(bad.findings.as_slice(), [Finding::FormatViolation { column, .. }] if column == &ColumnId::new("emails")));
+}
+
+#[test]
 fn ineligibility_and_columns() {
     let s = schema();
     let noms = Default::default();
