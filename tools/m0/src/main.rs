@@ -10,6 +10,8 @@
 //!   surface-side, not modeled at M0)
 //! - LinkedDropDownList → primary enum + one secondary enum per primary
 //! - DossierLink → text holding an opaque id (record refs are on ice, §6)
+
+#![forbid(unsafe_code)]
 //! - Header/Explication → surface nodes, no column
 //!
 //! Resolver-fed champs become block-shaped groups + synthesized resolver
@@ -418,19 +420,36 @@ impl<'a> Converter<'a> {
 }
 
 fn main() {
-    let path = std::env::args()
-        .nth(1)
+    // Usage: m0 [PATH] [--wire] — flags and the path in any order.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let wire_mode = args.iter().any(|a| a == "--wire");
+    if let Some(unknown) = args.iter().find(|a| a.starts_with("--") && *a != "--wire") {
+        eprintln!("unknown flag {unknown}\nusage: m0 [corpus.json] [--wire]");
+        std::process::exit(2);
+    }
+    let path = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .cloned()
         .unwrap_or_else(|| DEFAULT_CORPUS.to_string());
     eprintln!("reading {path}…");
-    let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-        panic!("cannot read corpus at {path}: {e}\nfetch it with scripts/fetch-corpus.sh")
-    });
-    let procedures: Vec<Value> =
-        serde_json::from_slice(&bytes).expect("cannot parse corpus JSON");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("cannot read corpus at {path}: {e}\nfetch it with scripts/fetch-corpus.sh");
+            std::process::exit(1);
+        }
+    };
+    let procedures: Vec<Value> = match serde_json::from_slice(&bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("cannot parse corpus JSON: {e}");
+            std::process::exit(1);
+        }
+    };
     drop(bytes);
     eprintln!("parsed {} procedures", procedures.len());
 
-    let wire_mode = std::env::args().any(|a| a == "--wire");
     let mut stats = Stats::default();
     let mut schemas: Vec<Schema> = Vec::new();
     for procedure in &procedures {
