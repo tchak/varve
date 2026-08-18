@@ -126,6 +126,11 @@ pub fn block_from_canonical(v: &CanonicalValue) -> Result<Block, SchemaDecodeErr
     })
 }
 
+#[cfg(test)]
+pub(crate) fn scalar_type_canonical_for_test(ty: &ScalarType) -> CanonicalValue {
+    scalar_type(ty)
+}
+
 fn scalar_type(ty: &ScalarType) -> CanonicalValue {
     let simple = |kind: &str| obj(vec![("kind", string(kind))]);
     match ty {
@@ -136,6 +141,10 @@ fn scalar_type(ty: &ScalarType) -> CanonicalValue {
         // §2.15: constraints are identity-bearing — narrowing the
         // accept set is a revision.
         ScalarType::Attachment(constraints) => {
+            // The accept set is a set (case-insensitive, unordered):
+            // canonicalize its normalized form so order and case are
+            // not identity-bearing.
+            let constraints = constraints.normalized();
             let mut pairs = vec![("kind", string("attachment"))];
             if !constraints.accept.is_empty() {
                 pairs.push((

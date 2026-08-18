@@ -13,6 +13,8 @@ mod units;
 
 pub use block::{Block, BlockError, IncludeError, included_blocks};
 
+#[cfg(test)]
+pub(crate) use canon::scalar_type_canonical_for_test;
 pub use canon::{
     SchemaDecodeError, block_canonical, block_from_canonical, block_hash,
     option_row_canonical, option_row_from_canonical, revision_id,
@@ -92,9 +94,27 @@ pub struct AttachmentConstraints {
 }
 
 impl AttachmentConstraints {
+    /// The accept set as a *set*: media types are case-insensitive
+    /// (RFC 2045) and unordered, so patterns are lowercased, sorted and
+    /// deduplicated, and `*/*` — everything — is the empty
+    /// (unrestricted) set. This is the form the canonical bytes, casts
+    /// and joins see, so `["image/*","application/pdf"]` and
+    /// `["Application/PDF","image/*"]` are one constraint.
+    pub fn normalized(&self) -> AttachmentConstraints {
+        let mut accept: Vec<String> =
+            self.accept.iter().map(|p| media_type(p).to_string()).collect();
+        accept.sort();
+        accept.dedup();
+        if accept.iter().any(|p| p == "*/*") {
+            accept.clear();
+        }
+        AttachmentConstraints { accept, max_bytes: self.max_bytes }
+    }
+
     pub fn accepts(&self, content_type: &str) -> bool {
-        self.accept.is_empty()
-            || self.accept.iter().any(|pattern| pattern_covers(pattern, content_type))
+        let claim = media_type(content_type);
+        let this = self.normalized();
+        this.accept.is_empty() || this.accept.iter().any(|pattern| pattern_covers(pattern, &claim))
     }
 
     pub fn admits_size(&self, byte_size: u64) -> bool {
@@ -104,12 +124,13 @@ impl AttachmentConstraints {
     /// Every file this set admits, the other admits too (semantic
     /// pattern subsumption — the §2.15 cast/join relation).
     pub fn covers(&self, other: &AttachmentConstraints) -> bool {
-        let types_ok = self.accept.is_empty()
+        let (this, other) = (self.normalized(), other.normalized());
+        let types_ok = this.accept.is_empty()
             || (!other.accept.is_empty()
                 && other
                     .accept
                     .iter()
-                    .all(|p| self.accept.iter().any(|q| pattern_covers(q, p))));
+                    .all(|p| this.accept.iter().any(|q| pattern_covers(q, p))));
         let size_ok = match (self.max_bytes, other.max_bytes) {
             (None, _) => true,
             (Some(_), None) => false,
@@ -119,8 +140,16 @@ impl AttachmentConstraints {
     }
 }
 
+/// The media type proper: lowercased, parameters (`; charset=…`) and
+/// surrounding whitespace dropped (RFC 2045: types and subtypes are
+/// case-insensitive; parameters are not part of the type).
+fn media_type(s: &str) -> String {
+    s.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
+}
+
 /// `q` covers `p`: exact match, or `q` is a `type/*` wildcard covering
-/// `p`'s type (including `p == q == "type/*"`).
+/// `p`'s type (including `p == q == "type/*"`). Both already
+/// normalized.
 fn pattern_covers(q: &str, p: &str) -> bool {
     if q == p {
         return true;

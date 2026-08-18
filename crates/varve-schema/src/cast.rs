@@ -222,6 +222,9 @@ pub fn scalar_cast(
         // §2.15: broaden free, narrow checked — the enum id-set rules
         // replayed over media-type patterns and size limits.
         (Attachment(from), Attachment(to)) => {
+            if from.normalized() == to.normalized() {
+                return Ok(Cast::IDENTITY);
+            }
             if to.covers(from) {
                 Cast::WIDENING
             } else {
@@ -444,6 +447,7 @@ fn attachment_join(
     a: &AttachmentConstraints,
     b: &AttachmentConstraints,
 ) -> AttachmentConstraints {
+    let (a, b) = (&a.normalized(), &b.normalized());
     let accept = if a.accept.is_empty() || b.accept.is_empty() {
         Vec::new() // unrestricted is the top
     } else {
@@ -599,6 +603,31 @@ mod tests {
             scalar_cast(&v1, &Enum(NomenclatureRef::Published { id: cog.clone(), version: 3 }), &n),
             Err(CastError::UnknownNomenclature(cog, 3))
         );
+    }
+
+    #[test]
+    fn attachment_accept_sets_are_case_insensitive_unordered_sets() {
+        use ScalarType::Attachment;
+        let n = no_noms();
+        let a = Attachment(AttachmentConstraints {
+            accept: vec!["image/*".into(), "application/pdf".into()],
+            max_bytes: None,
+        });
+        let b = Attachment(AttachmentConstraints {
+            accept: vec!["Application/PDF".into(), "IMAGE/*".into(), "image/*".into()],
+            max_bytes: None,
+        });
+        assert_eq!(scalar_cast(&a, &b, &n).unwrap().class(), CastClass::Identity);
+        assert_eq!(crate::scalar_type_canonical_for_test(&a), crate::scalar_type_canonical_for_test(&b));
+        // Claims are matched case-insensitively and without parameters.
+        let c = AttachmentConstraints { accept: vec!["image/*".into()], max_bytes: None };
+        assert!(c.accepts("IMAGE/PNG"));
+        assert!(c.accepts("image/png; charset=binary"));
+        assert!(!c.accepts("application/pdf"));
+        // `*/*` is unrestricted.
+        let any = AttachmentConstraints { accept: vec!["*/*".into()], max_bytes: None };
+        assert!(any.accepts("video/mp4"));
+        assert_eq!(any.normalized().accept, Vec::<String>::new());
     }
 
     #[test]
