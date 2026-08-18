@@ -215,33 +215,39 @@ fn record_and_item_lines_pin_canonical_shapes() {
             Scalar::Enum(OptionId::new("b")),
         ])),
     );
-    let rec = SnapshotRecord { record: RecordId::new("r1"), lens: RevisionId::new("lens"), values };
+    let lens = revision_id(&schema());
+    let rec = SnapshotRecord { record: RecordId::new("r1"), lens: lens.clone(), values };
     let lines = rec.lines();
     let text = String::from_utf8(write_lines(&lines).unwrap()).unwrap();
     assert_eq!(
         text,
-        concat!(
-            r#"{"cells":{"blank":null,"g":{"geometry":{"geometry":{"coordinates":[0,2.5,1e+21],"type":"Point"},"id":1,"properties":null,"type":"Feature"}},"n":{"integer":"9223372036854775807"}},"id":"r1","k":"record","lens":"lens"}"#,
-            "\n",
-            r#"{"cells":{},"group":"contacts","id":"c1","k":"item","ord":0,"parent":[],"record":"r1"}"#,
-            "\n",
-            r#"{"cells":{"tags":[{"option":"a"},{"option":"b"}]},"group":"contacts","id":"c2","k":"item","ord":1,"parent":[],"record":"r1"}"#,
-            "\n",
+        format!(
+            concat!(
+                r#"{{"cells":{{"blank":null,"g":{{"geometry":{{"geometry":{{"coordinates":[0,2.5,1e+21],"type":"Point"}},"id":1,"properties":null,"type":"Feature"}}}},"n":{{"integer":"9223372036854775807"}}}},"id":"r1","k":"record","lens":"{lens}"}}"#,
+                "\n",
+                r#"{{"cells":{{}},"group":"contacts","id":"c1","k":"item","ord":0,"parent":[],"record":"r1"}}"#,
+                "\n",
+                r#"{{"cells":{{"tags":[{{"option":"a"}},{{"option":"b"}}]}},"group":"contacts","id":"c2","k":"item","ord":1,"parent":[],"record":"r1"}}"#,
+                "\n",
+            ),
+            lens = lens
         )
     );
     // Reads back to the same lines, and reassembles to the same record.
-    let mut bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let mut prelude = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))];
+    prelude.extend(schema_lines());
+    let mut bytes = write_lines(&prelude).unwrap();
     bytes.extend_from_slice(text.as_bytes());
     let stream = read_stream(&bytes).unwrap();
-    assert_eq!(&stream.lines[1..], lines.as_slice());
+    assert_eq!(&stream.lines[2..], lines.as_slice());
     assert_eq!(snapshot_records(&stream), vec![rec]);
 
     // A structural count that is not a JCS-safe integer is refused —
     // it can never have been produced by a JCS serializer.
     let bad = text.replace(r#""integer":"9223372036854775807""#, r#""integer":"007""#);
-    let mut bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let mut bytes = write_lines(&prelude).unwrap();
     bytes.extend_from_slice(bad.as_bytes());
-    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 2, .. })));
+    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 3, .. })));
     // Nor can the writer produce one: a count beyond the safe range is
     // a `WriteError`, not a rounded number and not a panic.
     assert!(matches!(
@@ -261,11 +267,13 @@ fn record_and_item_lines_pin_canonical_shapes() {
 fn item_lines_obey_the_contiguity_rule() {
     // §5: a record's item lines follow its record line immediately,
     // parents before children, in order; any other line closes it.
-    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 2))]).unwrap();
+    let mut prelude = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 2))];
+    prelude.extend(schema_lines());
+    let header = write_lines(&prelude).unwrap();
     let rec = |id: &str| {
         Line::Record(RecordLine {
             record: RecordId::new(id),
-            lens: RevisionId::new("lens"),
+            lens: revision_id(&schema()),
             cells: Default::default(),
         })
     };
@@ -307,17 +315,17 @@ fn item_lines_obey_the_contiguity_rule() {
     // Item for a record that is not the open one.
     assert!(matches!(
         stream(&[rec("r1"), rec("r2"), item("r1", "g1", RowPath::root(), "a", 0)]),
-        Err(ReadError::Malformed { line: 4, .. })
+        Err(ReadError::Malformed { line: 5, .. })
     ));
     // Ord out of sequence.
     assert!(matches!(
         stream(&[rec("r1"), item("r1", "g1", RowPath::root(), "a", 1), rec("r2")]),
-        Err(ReadError::Malformed { line: 3, .. })
+        Err(ReadError::Malformed { line: 4, .. })
     ));
     // Child before its parent.
     assert!(matches!(
         stream(&[rec("r1"), item("r1", "g2", g1("a"), "x", 0), rec("r2")]),
-        Err(ReadError::Malformed { line: 3, .. })
+        Err(ReadError::Malformed { line: 4, .. })
     ));
     // Duplicate item id in one list.
     assert!(matches!(
@@ -327,21 +335,24 @@ fn item_lines_obey_the_contiguity_rule() {
             item("r1", "g1", RowPath::root(), "a", 1),
             rec("r2")
         ]),
-        Err(ReadError::Malformed { line: 4, .. })
+        Err(ReadError::Malformed { line: 5, .. })
     ));
     // Duplicate record: a stream is authoritative for a record once.
-    assert!(matches!(stream(&[rec("r1"), rec("r1")]), Err(ReadError::Malformed { line: 3, .. })));
+    assert!(matches!(stream(&[rec("r1"), rec("r1")]), Err(ReadError::Malformed { line: 4, .. })));
 }
 
 #[test]
 fn reader_refuses_the_alternative_blank_encodings() {
     // §2.4 one state, one encoding: `{"many":[]}` and an empty item
     // list are not what the writer emits and are refused on read.
-    let header = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))]).unwrap();
+    let mut prelude = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))];
+    prelude.extend(schema_lines());
+    let header = write_lines(&prelude).unwrap();
+    let lens = revision_id(&schema());
     let with = |cells: &str| {
         let mut bytes = header.clone();
         bytes.extend_from_slice(
-            format!(r#"{{"cells":{{{cells}}},"id":"r1","k":"record","lens":"lens"}}"#).as_bytes(),
+            format!(r#"{{"cells":{{{cells}}},"id":"r1","k":"record","lens":"{lens}"}}"#).as_bytes(),
         );
         bytes.push(b'\n');
         bytes
@@ -352,12 +363,12 @@ fn reader_refuses_the_alternative_blank_encodings() {
     // stream is authoritative for each cell once — malformed, never
     // last-wins.
     let dup = with(r#""tags":null,"tags":{"text":"x"}"#);
-    assert!(matches!(read_stream(&dup), Err(ReadError::Malformed { line: 2, .. })));
+    assert!(matches!(read_stream(&dup), Err(ReadError::Malformed { line: 3, .. })));
     let empty_many = with(r#""tags":[]"#);
-    assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 2, .. })));
+    assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 3, .. })));
     // The old wrapped shapes are not the encoding.
     let wrapped = with(r#""tags":{"many":[{"option":"a"}]}"#);
-    assert!(matches!(read_stream(&wrapped), Err(ReadError::Malformed { line: 2, .. })));
+    assert!(matches!(read_stream(&wrapped), Err(ReadError::Malformed { line: 3, .. })));
     // Strict scalars: one value, one text — a multi-kind scalar object,
     // an unknown key, a non-normalized decimal or datetime, uppercase or
     // signed hex are all refused rather than read as something.
@@ -369,7 +380,7 @@ fn reader_refuses_the_alternative_blank_encodings() {
         r#""x":{"attachment":{"id":"f","hash":"sha256:+f00000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1}}"#,
         r#""x":{"attachment":{"id":"f","hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1,"extra":1}}"#,
     ] {
-        assert!(matches!(read_stream(&with(bad)), Err(ReadError::Malformed { line: 2, .. })), "{bad}");
+        assert!(matches!(read_stream(&with(bad)), Err(ReadError::Malformed { line: 3, .. })), "{bad}");
     }
     assert!(read_stream(&with(r#""x":{"decimal":"1.5"}"#)).is_ok());
 }
@@ -567,9 +578,52 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
 }
 
 #[test]
+fn reader_checks_versions_first_and_revisions_for_consistency() {
+    // A header from another version may not have this version's shape:
+    // the verdict must be "unsupported version", not "malformed".
+    let foreign = br#"{"format_version":7,"k":"header","something":"else"}"#;
+    assert!(matches!(read_stream(foreign), Err(ReadError::UnsupportedVersion(7))));
+
+    // A revision line whose id is not its schema's hash lies about
+    // identity.
+    let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))];
+    lines.push(Line::Revision { id: RevisionId::new("bogus"), schema: schema() });
+    let bytes = write_lines(&lines).unwrap();
+    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 2, .. })));
+
+    // The manifest declares exactly the revisions the stream carries.
+    let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))]).unwrap();
+    assert!(matches!(read_stream(&bytes), Err(ReadError::RevisionsMismatch)));
+
+    // A lens the stream does not carry: the data would arrive without
+    // its schema.
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 1);
+    let other = revision_id(&Schema::default());
+    m.revisions.push(other.clone());
+    let mut lines = vec![Line::Header(m)];
+    lines.extend(schema_lines());
+    lines.push(Line::Revision { id: other, schema: Schema::default() });
+    lines.push(Line::Record(RecordLine {
+        record: RecordId::new("r1"),
+        lens: RevisionId::new("elsewhere"),
+        cells: Default::default(),
+    }));
+    let bytes = write_lines(&lines).unwrap();
+    assert!(matches!(read_stream(&bytes), Err(ReadError::RevisionNotCarried(r)) if r == RevisionId::new("elsewhere")));
+
+    // Unknown keys on a line are refused.
+    let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))];
+    lines.extend(schema_lines());
+    let text = String::from_utf8(write_lines(&lines).unwrap()).unwrap().replace(r#""k":"revision""#, r#""k":"revision","junk":1"#);
+    assert!(matches!(read_stream(text.as_bytes()), Err(ReadError::Malformed { line: 2, .. })));
+}
+
+#[test]
 fn schema_and_nomenclature_lines_round_trip() {
+    let mut header = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    header.revisions.push(revision_id(&with_rib()));
     let lines = vec![
-        Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
+        Line::Header(header),
         Line::Revision { id: revision_id(&schema()), schema: schema() },
         Line::Nomenclature {
             id: varve_core::NomenclatureId::new("cog"),
@@ -604,6 +658,9 @@ fn schema_and_nomenclature_lines_round_trip() {
         lens: revision_id(&schema()),
         cells: [(ColumnId::new("name"), CellState::Empty)].into_iter().collect(),
     });
-    let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1)), rec.clone()]).unwrap();
-    assert_eq!(read_stream(&bytes).unwrap().lines[1], rec);
+    let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))];
+    lines.extend(schema_lines());
+    lines.push(rec.clone());
+    let bytes = write_lines(&lines).unwrap();
+    assert_eq!(read_stream(&bytes).unwrap().lines[2], rec);
 }

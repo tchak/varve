@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
 use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
 use varve_record::canon as record_canon;
-use varve_schema::{block_from_canonical, option_row_from_canonical, schema_from_canonical};
+use varve_schema::{block_from_canonical, option_row_from_canonical, revision_id, schema_from_canonical};
 use varve_value::{CellAddr, CellState, ItemsAddr, RecordValues};
 
 use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
@@ -30,6 +30,14 @@ pub enum ReadError {
     ModeMismatch { line: usize, kind: String, mode: Mode },
     #[error("stream ends without the {expected} records the manifest declared (got {got})")]
     RecordCountMismatch { expected: u64, got: u64 },
+    /// The manifest's revision ids and the stream's `revision` lines
+    /// disagree (§5: line 1 declares what the stream carries).
+    #[error("the manifest's revision ids do not match the stream's revision lines")]
+    RevisionsMismatch,
+    /// A record's lens or an entry's authored-against revision is not
+    /// carried in the stream — the data would arrive without its schema.
+    #[error("revision '{0}' is named by a record or entry but not carried in the stream")]
+    RevisionNotCarried(RevisionId),
 }
 
 /// A parsed stream, validated for structure (not yet applied).
@@ -49,6 +57,10 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     // the item paths seen so far, and per-(group, parent) item counts
     // so `ord` is checked in sequence.
     let mut open: Option<OpenRecord> = None;
+    let mut revisions_seen: std::collections::BTreeSet<RevisionId> = Default::default();
+    // Every revision a record or entry names must be declared on line 1
+    // and travel in-stream (§5: the writer schema travels with the data).
+    let mut revisions_named: std::collections::BTreeSet<RevisionId> = Default::default();
 
     for (index, raw) in text.lines().enumerate() {
         let line_no = index + 1;
@@ -78,10 +90,14 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             if kind != "header" {
                 return Err(ReadError::MissingHeader);
             }
-            let m = manifest_from(map).map_err(malformed)?;
-            if m.format_version != FORMAT_VERSION {
-                return Err(ReadError::UnsupportedVersion(m.format_version));
+            // Version first: a header from another format version may
+            // not even have this version's shape, and the answer must be
+            // "unsupported version", not "malformed".
+            let version = get_u32(map, "format_version").map_err(malformed)?;
+            if version != FORMAT_VERSION {
+                return Err(ReadError::UnsupportedVersion(version));
             }
+            let m = manifest_from(map).map_err(malformed)?;
             manifest = Some(m.clone());
             lines.push(Line::Header(m));
             continue;
@@ -91,13 +107,36 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             open = None; // Any other line kind closes the open record (§5).
         }
 
+        // Exactly the keys each kind's canonical form emits.
+        let allowed: &[&str] = match kind {
+            "revision" => &["k", "id", "schema"],
+            "nomenclature" => &["k", "id", "version", "rows"],
+            "block" => &["k", "id", "version", "group", "resolvers"],
+            "attachment" => &["k", "hash", "byte_size", "content_type"],
+            "record" => &["k", "id", "lens", "cells"],
+            "item" => &["k", "record", "group", "parent", "id", "ord", "cells"],
+            _ => &[], // entry: checked by its decoder; unknown kinds: below
+        };
+        if !allowed.is_empty()
+            && let Some(extra) = map.keys().find(|k| !allowed.contains(&k.as_str()))
+        {
+            return Err(malformed(format!("unexpected key '{extra}'")));
+        }
+
         let line = match kind {
             "header" => return Err(malformed("duplicate header".into())),
-            "revision" => Line::Revision {
-                id: RevisionId::new(get_str(map, "id").map_err(malformed)?),
-                schema: schema_from_canonical(get(map, "schema").map_err(malformed)?)
-                    .map_err(|e| malformed(e.to_string()))?,
-            },
+            "revision" => {
+                let id = RevisionId::new(get_str(map, "id").map_err(malformed)?);
+                let schema = schema_from_canonical(get(map, "schema").map_err(malformed)?)
+                    .map_err(|e| malformed(e.to_string()))?;
+                // The id *is* the content (§2.13): a revision line whose
+                // id is not its schema's hash is lying about identity.
+                if revision_id(&schema) != id {
+                    return Err(malformed(format!("revision id '{id}' is not the schema's content hash")));
+                }
+                revisions_seen.insert(id.clone());
+                Line::Revision { id, schema }
+            }
             "nomenclature" => Line::Nomenclature {
                 id: NomenclatureId::new(get_str(map, "id").map_err(malformed)?),
                 version: get_u32(map, "version").map_err(malformed)?,
@@ -126,6 +165,7 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     });
                 }
                 let r = record_line_from(map).map_err(malformed)?;
+                revisions_named.insert(r.lens.clone());
                 // A stream is authoritative for each record it contains
                 // exactly once (§5) — a second `record` line for one id
                 // is malformed, never a second version.
@@ -180,6 +220,7 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                 let entry = record_canon::entry_from(&value)
                     .map_err(|e| malformed(e.to_string()))?;
                 records_seen.insert(record.clone());
+                revisions_named.insert(entry.envelope.revision.clone());
                 Line::Entry { record, entry }
             }
             other => return Err(malformed(format!("unknown line kind '{other}'"))),
@@ -191,6 +232,15 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     let got = records_seen.len() as u64;
     if got != manifest.record_count {
         return Err(ReadError::RecordCountMismatch { expected: manifest.record_count, got });
+    }
+    // The manifest's revision list is the stream's revision lines, and
+    // every lens / authored-against revision is among them.
+    let declared: std::collections::BTreeSet<RevisionId> = manifest.revisions.iter().cloned().collect();
+    if declared != revisions_seen {
+        return Err(ReadError::RevisionsMismatch);
+    }
+    if let Some(missing) = revisions_named.difference(&declared).next() {
+        return Err(ReadError::RevisionNotCarried(missing.clone()));
     }
     Ok(Stream { manifest, lines })
 }

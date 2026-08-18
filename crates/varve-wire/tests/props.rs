@@ -4,7 +4,7 @@
 
 use proptest::prelude::*;
 use varve_core::primitives::Decimal;
-use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RevisionId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RowPath};
 use varve_value::{CellAddr, CellState, CellValue, Feature, ItemsAddr, RecordValues, Scalar};
 use varve_wire::{Intent, Line, Manifest, Mode, SnapshotRecord, read_stream, snapshot_records, write_lines};
 
@@ -100,14 +100,18 @@ fn record_values() -> impl Strategy<Value = RecordValues> {
 fn snapshot_stream() -> impl Strategy<Value = (Vec<SnapshotRecord>, Vec<Line>)> {
     proptest::collection::vec(("[a-z0-9]{1,6}", record_values()), 0..4).prop_map(|records| {
         // Distinct record ids: dedup by id.
+        // The lens travels in-stream as a revision line (§5), and its
+        // id is its content hash.
+        let schema = varve_schema::Schema::default();
+        let lens = varve_schema::revision_id(&schema);
         let mut seen = std::collections::BTreeSet::new();
         let mut logical = Vec::new();
-        let mut lines = Vec::new();
+        let mut lines = vec![Line::Revision { id: lens.clone(), schema }];
         for (id, values) in records {
             if seen.insert(id.clone()) {
                 let rec = SnapshotRecord {
                     record: RecordId::new(id),
-                    lens: RevisionId::new("lens"),
+                    lens: lens.clone(),
                     values,
                 };
                 lines.extend(rec.lines());
@@ -119,7 +123,7 @@ fn snapshot_stream() -> impl Strategy<Value = (Vec<SnapshotRecord>, Vec<Line>)> 
             source_instance: "gen".into(),
             mode: Mode::Snapshot,
             intent: Intent::Upsert,
-            revisions: vec![RevisionId::new("lens")],
+            revisions: vec![lens],
             record_count: seen.len() as u64,
             attachments_bundled: false,
         });
