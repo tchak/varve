@@ -8,7 +8,7 @@
 use std::cmp::Ordering;
 
 use proptest::prelude::*;
-use varve_core::primitives::{Date, Decimal, Instant};
+use varve_core::primitives::{Date, Decimal, Instant, MAX_YEAR};
 
 // ---------------------------------------------------------------------
 // Decimal
@@ -133,9 +133,10 @@ fn days_in_month(year: i64, month: u8) -> u8 {
     }
 }
 
-/// A valid calendar date in the four-digit year range, as components.
+/// A valid calendar date in the shared `Date`/`Instant` range
+/// (`0000-01-01` through `9998-12-31`, `MAX_YEAR`), as components.
 fn civil() -> impl Strategy<Value = (i64, u8, u8)> {
-    (0i64..=9999, 1u8..=12, 1u8..=31).prop_map(|(y, m, d)| (y, m, d.min(days_in_month(y, m))))
+    (0i64..=i64::from(MAX_YEAR), 1u8..=12, 1u8..=31).prop_map(|(y, m, d)| (y, m, d.min(days_in_month(y, m))))
 }
 
 fn date_text(y: i64, m: u8, d: u8) -> String {
@@ -172,10 +173,6 @@ proptest! {
     /// characters of the instant's rendering.
     #[test]
     fn date_embeds_at_midnight_and_narrows_back((y, m, d) in civil()) {
-        // Known deviation (see `instant_year_range_edges`): the last
-        // day of 9999 has no representable midnight and `at_midnight_utc`
-        // panics there today.
-        prop_assume!(!(y == 9999 && m == 12 && d == 31));
         let date = Date::parse(&date_text(y, m, d)).unwrap();
         let instant = date.at_midnight_utc();
         prop_assert_eq!(instant.utc_date(), date);
@@ -196,11 +193,13 @@ fn date_refuses_unpadded_and_out_of_range_forms() {
     for refused in [
         "2024-2-29", "2024-02-9", "24-02-29", "2024/02/29", "2024-02-30", "2024-00-10",
         "2024-13-01", "10000-01-01", "-001-01-01", "2024-02-29T", "2024-02-29 ",
+        // Past MAX_YEAR: a valid calendar date the shared range leaves out.
+        "9999-01-01", "9999-12-31",
     ] {
         assert!(Date::parse(refused).is_err(), "{refused:?} should be refused");
     }
     assert!(Date::parse("0000-01-01").is_ok());
-    assert!(Date::parse("9999-12-31").is_ok());
+    assert!(Date::parse("9998-12-31").is_ok());
     assert!(Date::parse("2000-02-29").is_ok());
     assert!(Date::parse("1900-02-29").is_err());
 }
@@ -255,26 +254,23 @@ fn spelled() -> impl Strategy<Value = Spelled> {
 
 /// `0000-01-01T00:00:00Z` in epoch seconds: the bottom of the range.
 const YEAR_0000: i64 = -62_167_219_200;
-/// The last whole second an instant may fall in: `9999-12-30T22:00:00Z`
-/// (the backing timestamp type's maximum is `…22:00:00.999999999Z`).
-/// The doc's "same year range as `Date`" is short by ~26 h at the top:
-/// `9999-12-30T22:00:01Z` through `9999-12-31T23:59:59Z` are refused
-/// even though their dates exist — see `instant_year_range_edges`.
-const LAST_SECOND: i64 = 253_402_207_200;
+/// `9998-12-31T23:59:59Z` in epoch seconds: the last whole second of
+/// the shared range (`MAX_YEAR`).
+const LAST_SECOND: i64 = 253_370_764_799;
 
 proptest! {
     /// A strictly-spelled instant parses iff its UTC normalization
-    /// stays in the representable range (§2.13: the canonical form has
-    /// no rendering outside four-digit years — and the backing type
-    /// stops at `LAST_SECOND`); when it does, `Display` is the
-    /// normalized `…Z` form with a four-digit year and re-parses to an
-    /// equal value.
+    /// stays in the shared `Date` range (§2.13: the canonical form has
+    /// no rendering outside four-digit years; `MAX_YEAR` keeps the
+    /// two casts total); when it does, `Display` is the normalized
+    /// `…Z` form with a four-digit year and re-parses to an equal
+    /// value.
     #[test]
     fn instant_parses_iff_utc_year_has_four_digits(s in spelled()) {
         let in_range = (YEAR_0000..=LAST_SECOND).contains(&s.utc_seconds);
         match Instant::parse(&s.text) {
             Ok(instant) => {
-                prop_assert!(in_range, "{} normalizes outside 0000–9999", s.text);
+                prop_assert!(in_range, "{} normalizes outside 0000–9998", s.text);
                 let rendered = instant.to_string();
                 prop_assert!(rendered.ends_with('Z'), "{rendered}");
                 prop_assert!(rendered.as_bytes()[..4].iter().all(u8::is_ascii_digit), "{rendered}");
@@ -340,20 +336,18 @@ proptest! {
 
 #[test]
 fn instant_year_range_edges() {
-    // Refused: an offset that carries the UTC date out of 0000–9999,
-    // and anything past the backing type's maximum. NOTE: the top of
-    // the range is `9999-12-30T22:00:00.999999999Z`, not
-    // `9999-12-31T23:59:59Z` as the `Instant::parse` doc claims —
-    // `Date::parse("9999-12-31").at_midnight_utc()` panics today. A
-    // known deviation, pinned here so a fix (or a doc correction) is
-    // deliberate.
+    // Refused: an offset that carries the UTC date out of the shared
+    // range (`MAX_YEAR`), and anything in 9999 or beyond — including
+    // instants the backing type could represent: the range is a
+    // contract, not the backing type's limit.
     for refused in [
         "0000-01-01T00:00:00+01:00",
         "0000-01-01T00:00:00+00:01",
-        "9999-12-31T23:30:00-01:00",
-        "9999-12-31T23:59:59-00:01",
+        "9998-12-31T23:30:00-01:00",
+        "9998-12-31T23:59:59-00:01",
+        "9999-01-01T00:00:00Z",
+        "9999-06-15T12:00:00Z",
         "9999-12-31T23:59:59Z",
-        "9999-12-30T22:00:01Z",
         "10000-01-01T00:00:00Z",
     ] {
         assert!(Instant::parse(refused).is_err(), "{refused:?} should be refused");
@@ -362,9 +356,9 @@ fn instant_year_range_edges() {
     for (accepted, rendered) in [
         ("0000-01-01T00:00:00Z", "0000-01-01T00:00:00Z"),
         ("0000-01-01T01:00:00+01:00", "0000-01-01T00:00:00Z"),
-        ("9999-12-30T22:00:00Z", "9999-12-30T22:00:00Z"),
-        ("9999-12-30T21:00:00-01:00", "9999-12-30T22:00:00Z"),
-        ("9999-12-30T22:00:00.999999999Z", "9999-12-30T22:00:00.999999999Z"),
+        ("9998-12-31T23:59:59Z", "9998-12-31T23:59:59Z"),
+        ("9999-01-01T00:59:59+01:00", "9998-12-31T23:59:59Z"),
+        ("9998-12-31T23:59:59.999999999Z", "9998-12-31T23:59:59.999999999Z"),
     ] {
         let instant = Instant::parse(accepted).unwrap_or_else(|e| panic!("{accepted}: {e}"));
         assert_eq!(instant.to_string(), rendered, "{accepted}");

@@ -320,28 +320,45 @@ pub mod primitives {
         a.max(1)
     }
 
-    /// A calendar date. Wraps `jiff::civil::Date`; jiff never appears in
+    /// The last year a `Date` or an `Instant` may fall in. Both types
+    /// share one range, `0000-01-01` through `9998-12-31`, so that the
+    /// two casts between them are total: every date embeds at midnight
+    /// UTC (§3 widening) and every instant narrows to a date. Four
+    /// digits, as the canonical form pins (§2.13); the last four-digit
+    /// year is left out because the backing timestamp type ends inside
+    /// it (jiff's `Timestamp::MAX` is `9999-12-30T22:00:00.999999999Z`)
+    /// — stopping at a year boundary keeps the contract independent of
+    /// that detail.
+    pub const MAX_YEAR: i16 = 9998;
+
+    /// A calendar date, `0000-01-01` through `9998-12-31` (see
+    /// [`MAX_YEAR`]). Wraps `jiff::civil::Date`; jiff never appears in
     /// the public API, so the backing crate stays swappable.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
     pub struct Date(jiff::civil::Date);
 
     impl Date {
-        /// Strict `YYYY-MM-DD`.
+        /// Strict `YYYY-MM-DD`, within [`MAX_YEAR`].
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
             if s.len() != 10 {
                 return Err(PrimitiveError::Malformed("expected YYYY-MM-DD"));
             }
-            s.parse()
-                .map(Self)
-                .map_err(|_| PrimitiveError::Malformed("expected YYYY-MM-DD"))
+            let date: jiff::civil::Date = s
+                .parse()
+                .map_err(|_| PrimitiveError::Malformed("expected YYYY-MM-DD"))?;
+            if date.year() > MAX_YEAR {
+                return Err(PrimitiveError::OutOfRange("date past 9998-12-31"));
+            }
+            Ok(Self(date))
         }
     }
 
     impl Date {
         /// The injective embedding of the date→datetime widening cast
-        /// (§3): midnight UTC.
+        /// (§3): midnight UTC. Total: every date is within
+        /// [`MAX_YEAR`], and so is its midnight.
         pub fn at_midnight_utc(&self) -> Instant {
-            Instant::parse(&format!("{self}T00:00:00Z")).expect("valid by construction")
+            Instant::parse(&format!("{self}T00:00:00Z")).expect("every date's midnight is an instant")
         }
     }
 
@@ -361,10 +378,11 @@ pub mod primitives {
     impl Instant {
         /// Strict RFC 3339: `YYYY-MM-DDTHH:MM:SS[.fraction](Z|±HH:MM)`,
         /// uppercase `T`/`Z`, seconds mandatory, no leap second (`:60`
-        /// has no normalized form), no time-zone annotation, and the
-        /// same year range as `Date` (0000–9999) — so a datetime always
-        /// narrows to a date (§3) and never leaves the four-digit year
-        /// the canonical form pins (§2.13). jiff's own parser is more
+        /// has no normalized form), no time-zone annotation, and — once
+        /// normalized to UTC — the same range as `Date` (through
+        /// [`MAX_YEAR`]), so a datetime always narrows to a date (§3)
+        /// and never leaves the four-digit year the canonical form pins
+        /// (§2.13). jiff's own parser is more
         /// liberal (space separators, lowercase, `[Europe/Paris]`
         /// annotations); those are one instant with several spellings,
         /// which a strict decoder must refuse.
@@ -414,11 +432,12 @@ pub mod primitives {
             }
             let ts: jiff::Timestamp = s.parse().map_err(|_| ERR)?;
             let instant = Self(ts);
-            // Normalizing to UTC can carry a date past 9999 or before
-            // 0000 (an offset near the range's edge): refuse it, the
-            // canonical form has no rendering for it.
+            // Normalizing to UTC can carry the calendar date out of the
+            // `Date` range (an offset near an edge, or the year 9999):
+            // refuse it — an instant is in range iff its UTC date is a
+            // `Date`, which is what makes `utc_date` total.
             let rendered = instant.to_string();
-            if rendered.len() < 10 || !rendered.as_bytes()[..4].iter().all(u8::is_ascii_digit) {
+            if rendered.get(..10).is_none_or(|date| Date::parse(date).is_err()) {
                 return Err(ERR);
             }
             Ok(instant)
@@ -426,10 +445,10 @@ pub mod primitives {
 
         /// The lossy datetime→date cast (§3): the UTC calendar date.
         /// Display is normalized UTC RFC 3339 with a four-digit year
-        /// (guaranteed by `parse`), so the first ten characters are
-        /// exactly the date.
+        /// within the `Date` range (guaranteed by `parse`), so the
+        /// first ten characters are exactly the date.
         pub fn utc_date(&self) -> Date {
-            Date::parse(&self.to_string()[..10]).expect("four-digit year guaranteed by parse")
+            Date::parse(&self.to_string()[..10]).expect("parse keeps the UTC date in range")
         }
     }
 
@@ -477,6 +496,15 @@ pub mod primitives {
             assert!(Date::parse("2023-13-01").is_err());
             assert!(Date::parse("2023-1-01").is_err());
             assert_eq!(Date::parse("2024-02-29").unwrap().to_string(), "2024-02-29");
+            // The shared range: every date embeds at midnight and comes
+            // back; the first day past MAX_YEAR is refused, not a panic.
+            assert!(Date::parse("0000-01-01").is_ok());
+            let last = Date::parse("9998-12-31").unwrap();
+            assert_eq!(last.at_midnight_utc().utc_date(), last);
+            assert_eq!(
+                Date::parse("9999-01-01"),
+                Err(PrimitiveError::OutOfRange("date past 9998-12-31"))
+            );
         }
 
         #[test]
@@ -521,11 +549,12 @@ pub mod primitives {
                 "2026-08-16T12:00:00+0200",   // offset without colon
                 "-000001-06-01T00:00:00Z",    // signed six-digit year
                 "+012026-08-16T12:00:00Z",
-                "9999-12-31T23:00:00-02:00",  // normalizes past 9999
+                "9998-12-31T23:00:00-02:00",  // normalizes past MAX_YEAR
+                "9999-01-01T00:00:00Z",       // past MAX_YEAR outright
             ] {
                 assert!(Instant::parse(liberal).is_err(), "{liberal} should be refused");
             }
-            for strict in ["2026-08-16T12:00:00Z", "0000-01-01T00:00:00Z", "9999-12-30T12:00:00.5Z"] {
+            for strict in ["2026-08-16T12:00:00Z", "0000-01-01T00:00:00Z", "9998-12-31T23:59:59.5Z"] {
                 let i = Instant::parse(strict).unwrap();
                 // Never panics, always the first ten characters.
                 assert_eq!(i.utc_date().to_string(), &strict[..10]);

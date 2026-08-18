@@ -613,7 +613,7 @@ mod tests {
             any::<i64>().prop_map(Scalar::Integer),
             // Fractional and integral, negative and zero, normalized by parse.
             "-?[0-9]{1,12}(\\.[0-9]{1,6})?".prop_map(|s| Scalar::Decimal(Decimal::parse(&s).unwrap())),
-            (0i32..=9999, 1u8..=12, 1u8..=28).prop_map(|(y, m, d)| {
+            (0i32..=9998, 1u8..=12, 1u8..=28).prop_map(|(y, m, d)| {
                 Scalar::Date(Date::parse(&format!("{y:04}-{m:02}-{d:02}")).unwrap())
             }),
             (1970i32..=2100, 1u8..=12, 1u8..=28, 0u8..24, 0u8..60, 0u8..60, proptest::option::of(1u32..1_000_000_000))

@@ -46,7 +46,7 @@ fn column_ref() -> impl Strategy<Value = ColumnRef> {
 
 /// A calendar date anywhere in the canonical year range (§2.13).
 fn date() -> impl Strategy<Value = Date> {
-    (0i32..=9999, 1u8..=12, 1u8..=28)
+    (0i32..=9998, 1u8..=12, 1u8..=28)
         .prop_map(|(y, m, d)| Date::parse(&format!("{y:04}-{m:02}-{d:02}")).unwrap())
 }
 
