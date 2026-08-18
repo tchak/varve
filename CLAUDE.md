@@ -20,7 +20,7 @@ workspace holds every crate below the IO tier (`varve-core`, `-schema`,
 holds the analyses (M0: all 42,723 published DN procedures express with
 zero residue; M3: they round-trip byte-stably through the wire). M1 and
 M2 machinery is built and awaits DN-internal data (revision history,
-rule extraction). Run `cargo test --workspace` (262 tests incl. property
+rule extraction). Run `cargo test --workspace` (263 tests incl. property
 suites) and `cargo clippy --workspace --all-targets` before committing.
 
 ## Version control: jj, not git

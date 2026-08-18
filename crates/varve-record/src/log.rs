@@ -318,10 +318,11 @@ impl RecordLog {
         Ok(diff(&a.values, &b.values))
     }
 
-    /// Same-cell writes by two actors from the same base (§2.9: detect,
+    /// Same-cell writes the later actor had not seen (§2.9: detect,
     /// do not merge): entry B conflicts with an earlier entry A by another
     /// actor when A wrote a cell B also writes and `B.base_version <=
-    /// A.seq` (B did not see A's write). One forward pass with a per-cell
+    /// A.seq` (B did not see A's write; same base is the boundary case,
+    /// not the criterion). One forward pass with a per-cell
     /// write history — linear in the ops of the log.
     pub fn detect_conflicts(&self) -> Vec<Conflict> {
         // Per cell: the entries that wrote it, in seq order.

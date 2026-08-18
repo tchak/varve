@@ -521,10 +521,15 @@ record's id** (settled 2026-08-17, open question 16): a log verifies only
 under the record it belongs to and cannot be transplanted under another —
 still per-record, nothing global (§2.10). `base_version` is the **log
 version the writer read** before computing its ops — the number of entries
-then present, i.e. the seq its entry would get if nothing intervened; two
-entries touching one cell from the same `base_version` are the §2.9
-conflict. It cannot serve as the chain link: concurrent entries
-deliberately share a base (that is how conflict detection works), so it is
+then present, i.e. the seq its entry would get if nothing intervened. Two
+entries by different actors touching one cell are the §2.9 conflict when
+the later one's base does not cover the earlier write —
+`later.base_version ≤ earlier.seq`, "the later writer had not seen it".
+Same base is the boundary case, not the criterion (corrected 2026-08-18,
+found by audit: an earlier "same `base_version`" wording missed the
+classic lost update — bases differ whenever unrelated entries land in
+between, and the unseen write is just as lost). `base_version` cannot
+serve as the chain link: concurrent entries may share a base, so it is
 not a linear pointer. `prev` and `seq` are assigned together, at append
 time, by whoever owns the log.
 
@@ -573,9 +578,10 @@ re-interpret when the live lens moves.
 ### Concurrency: detect, do not merge
 
 Per-cell LWW (§6) still holds, but with multiple actors it can no longer be
-silent. Every entry carries the `base_version` it was computed against, so the
-kernel detects that two actors wrote the same cell from the same base and
-**reports** it.
+silent. Every entry carries the `base_version` it was computed against, so
+the kernel detects that two actors wrote the same cell without the later
+having seen the earlier write (`later.base_version ≤ earlier.seq` — the
+same-base case is only the boundary) and **reports** it.
 
 Detect-and-report is not merge. Cheap, and exactly what an instructor needs to
 see. **Record branching stays cut.**

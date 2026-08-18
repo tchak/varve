@@ -77,7 +77,7 @@ async — timestamps and salts are inputs.
 Version control is [jj](https://github.com/jj-vcs/jj) (colocated git).
 
 ```sh
-cargo test --workspace              # 262 tests, incl. property suites
+cargo test --workspace              # 263 tests, incl. property suites
 cargo clippy --workspace --all-targets
 scripts/fetch-corpus.sh             # download the DN corpus (~124 MB gz)
 cargo run --release -p m0           # M0 harness over the corpus

@@ -273,6 +273,31 @@ fn conflicts_are_detected_not_merged() {
 }
 
 #[test]
+fn lost_updates_with_different_bases_are_conflicts() {
+    // Same base is the boundary case, not the criterion (§2.9): here the
+    // two rival writers read at *different* versions — an unrelated
+    // entry landed in between — and the later still never saw the
+    // earlier's write.
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
+        .unwrap();
+    // Unrelated write, so the rivals' bases differ.
+    log.append(draft(human("a2"), 1, 1, Origin::Entered, vec![set("email", "d@ex.fr")]))
+        .unwrap();
+    // a1 read at version 1 (before the email entry), a3 at version 2 —
+    // neither saw the other's "name" write.
+    log.append(draft(human("a1"), 2, 1, Origin::Entered, vec![set("name", "Durand")]))
+        .unwrap();
+    log.append(draft(human("a3"), 3, 2, Origin::Entered, vec![set("name", "Martin")]))
+        .unwrap();
+
+    let conflicts = log.detect_conflicts();
+    assert_eq!(conflicts.len(), 1);
+    assert_eq!(conflicts[0].addr, addr("name"));
+    assert_eq!((conflicts[0].earlier, conflicts[0].later), (2, 3));
+}
+
+#[test]
 fn diff_between_log_points() {
     let mut log = RecordLog::new(RecordId::new("r1"));
     log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
