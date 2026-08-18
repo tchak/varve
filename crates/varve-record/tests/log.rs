@@ -89,6 +89,9 @@ fn append_fold_and_verify() {
         .unwrap();
 
     log.verify_chain().unwrap();
+    // A log point past the end is an error, never the head.
+    assert!(matches!(log.fold_at(4), Err(varve_record::FoldError::OutOfRange { upto: 4, version: 3 })));
+    assert!(log.diff_between(0, 9).is_err());
 
     let folded = log.fold().unwrap();
     assert_eq!(

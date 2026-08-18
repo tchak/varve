@@ -53,10 +53,15 @@ pub enum ChainError {
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-#[error("entry {seq}: {error}")]
-pub struct FoldError {
-    pub seq: u64,
-    pub error: ApplyError,
+pub enum FoldError {
+    /// Entry `seq`'s ops do not apply — a poisoned or tampered log.
+    #[error("entry {seq}: {error}")]
+    Apply { seq: u64, error: ApplyError },
+    /// A log point past the end: `upto` entries were asked for, the log
+    /// has `version`. Never clamped silently — "the state at entry 40"
+    /// of a 30-entry log is a caller error, not the head.
+    #[error("log point {upto} is past the log's version {version}")]
+    OutOfRange { upto: u64, version: u64 },
 }
 
 /// Folded state plus derived cell provenance (§2.7). Provenance is
@@ -111,6 +116,9 @@ pub enum SnapshotError {
     HashMismatch,
     #[error("snapshot's state does not match a refold")]
     StateMismatch,
+    /// The log itself does not fold up to the snapshot point.
+    #[error("the log does not fold: {0}")]
+    Unfoldable(FoldError),
 }
 
 /// Cell provenance after a write with `origin` lands on a cell whose
@@ -171,7 +179,7 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
                 continue;
             }
         }
-        apply(&mut result.values, op).map_err(|error| FoldError { seq, error })?;
+        apply(&mut result.values, op).map_err(|error| FoldError::Apply { seq, error })?;
         match op {
             Op::Set { column, path, .. } => {
                 let addr = CellAddr { column: column.clone(), path: path.clone() };
@@ -252,7 +260,10 @@ impl RecordLog {
         // The entry must apply to the current state — through the very
         // fold that will read it back — or the log would be poisoned.
         let mut state = self.fold().map_err(AppendError::Unfoldable)?;
-        fold_entry(&mut state, &entry).map_err(|e| AppendError::DoesNotApply(e.error))?;
+        fold_entry(&mut state, &entry).map_err(|e| match e {
+            FoldError::Apply { error, .. } => AppendError::DoesNotApply(error),
+            FoldError::OutOfRange { .. } => unreachable!("fold_entry never ranges"),
+        })?;
         self.entries.push(entry);
         Ok(self.entries.last().expect("just pushed"))
     }
@@ -283,6 +294,9 @@ impl RecordLog {
 
     /// Fold the first `upto` entries into state + provenance.
     pub fn fold_at(&self, upto: u64) -> Result<FoldResult, FoldError> {
+        if upto > self.version() {
+            return Err(FoldError::OutOfRange { upto, version: self.version() });
+        }
         let mut result = FoldResult::default();
         for entry in self.entries.iter().take(upto as usize) {
             fold_entry(&mut result, entry)?;
@@ -391,9 +405,7 @@ impl RecordLog {
         if upto == 0 || upto > self.version() {
             return Err(SnapshotError::OutOfRange);
         }
-        let state = self
-            .fold_at(upto)
-            .map_err(|_| SnapshotError::StateMismatch)?;
+        let state = self.fold_at(upto).map_err(SnapshotError::Unfoldable)?;
         Ok(Snapshot {
             at: upto,
             entry_hash: self.entries[upto as usize - 1].hash(),
@@ -408,9 +420,7 @@ impl RecordLog {
         if self.entries[snapshot.at as usize - 1].hash() != snapshot.entry_hash {
             return Err(SnapshotError::HashMismatch);
         }
-        let refolded = self
-            .fold_at(snapshot.at)
-            .map_err(|_| SnapshotError::StateMismatch)?;
+        let refolded = self.fold_at(snapshot.at).map_err(SnapshotError::Unfoldable)?;
         if refolded != snapshot.state {
             return Err(SnapshotError::StateMismatch);
         }
