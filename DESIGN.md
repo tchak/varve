@@ -248,6 +248,13 @@ Load-bearing for three reasons:
 Versioned like everything else:
 
 - ID and version
+- **anchor group** — the block the declaration sits beside. Its identity
+  in a revision is `(anchor, id)`, not the resolver's id alone (**settled,
+  was open question 17**): one resolver may be declared at several groups —
+  two SIRET blocks — without collision, while a duplicate `(anchor, id)` is
+  a validation error. The anchor must exist, and every mapping target must
+  lie inside its subtree. Resolutions (§2.8) and `pending` in rules name
+  the anchor, not the resolver.
 - **input signature** — which columns feed it, with types
 - **declared result type** — the shape of what comes back
 - **mapping** from result fields to columns
@@ -275,11 +282,11 @@ it owns:
 - **Schema** — a published block ("entreprise") of *plain* columns:
   `siret: text` (the key), `raison_sociale: text`, `date_creation: date`,
   address columns… nothing special about any of them. Beside the block, a
-  **resolver declaration**: id + version, input signature (`siret: text`),
-  declared result type (the INSEE payload shape), mapping from result
-  fields to the block's columns. The declaration is a versioned schema
-  *object* — like a block, not like a type. Publishing typechecks the
-  mapping against the columns it feeds.
+  **resolver declaration**, anchored at the block's group: id + version,
+  input signature (`siret: text`), declared result type (the INSEE payload
+  shape), mapping from result fields to the block's columns. The
+  declaration is a versioned schema *object* — like a block, not like a
+  type. Publishing typechecks the mapping against the columns it feeds.
 - **Surface** — trigger mode (typed key on blur, or explicit button),
   candidate presentation if autocomplete, and whether the mapped cells may
   be overridden *here* (back-office yes, public form no).
@@ -352,8 +359,9 @@ sourcing (§6 still holds), but "the log is optional" is now false.
 
 ### Resolution instances have a lifecycle
 
-Confirms they sit *beside* cells, not inside them. Per
-`(group instance, resolver)`:
+Confirms they sit *beside* cells, not inside them. Per **anchor-group
+instance** — `(anchor, scope)`, the declaration's anchor group (§2.7, Q17)
+plus the instance's row path — so two SIRET blocks resolve independently:
 
 ```
 pending → resolved | not_found | ambiguous | failed | abandoned
@@ -1101,7 +1109,7 @@ Expr  ::= and(Expr…) | or(Expr…) | Atom
 Atom  ::= eq | not_eq | lt | le | gt | ge     (typed comparison)
         | is_empty | is_filled
         | contains | excludes                  (arity-many enum)
-        | pending | not_pending (resolver)     (§2.8 rule 3; paired
+        | pending | not_pending (anchor group) (§2.8 rule 3, Q17; paired
                                                 negative — "required
                                                 unless pending" needs it,
                                                 found building surfaces)
@@ -1894,20 +1902,37 @@ Only then: `surface`, `store`, service.
     migration — §5 already forbids (adoption keeps ids). Considered and
     rejected: leaving it to the store (the row a log lives in), which
     would make the chain's meaning depend on storage.
-17. **Declaration identity vs resolver identity.** A resolver
-    declaration carries "ID and version" (§2.7) and resolutions are keyed
-    per `(group instance, resolver)` (§2.8) — but one resolver feeds
-    several groups in one revision: 11,271 DN procedures declare
-    `ban-address` more than once, 1,002 `insee-sirene` (found 2026-08-18
-    when a duplicate-id check was tried in `validate` and the corpus
-    refused it). Today the declaration's id *is* the resolver's, so two
-    root-scoped SIRET blocks would collide on `(root, insee-sirene)` for
-    pending resolutions and `pending(r)` in rules. Candidates: give
-    declarations their own id (resolver id + version stay fields, like a
-    block referencing a resolver); or key resolutions and `pending` by
-    the *target group* rather than the resolver. Decide with the §12.6
-    resolver census; until then `validate` does not treat repeated
-    resolver ids as an error.
+17. ~~Declaration identity vs resolver identity.~~ **Resolved (§2.7,
+    §2.8 rule 3, §4.1, 2026-08-18): declarations are anchored to their
+    target group — identity is `(anchor, id)`.** A resolver declaration
+    carried only "ID and version" and resolutions were keyed per
+    `(group instance, resolver)` — but one resolver feeds several groups
+    in one revision: 11,271 DN procedures declare `ban-address` more
+    than once, 1,002 `insee-sirene` (found 2026-08-18 when a
+    duplicate-id check was tried in `validate` and the corpus refused
+    it), so two root-scoped SIRET blocks collided on
+    `(root, insee-sirene)` for pending resolutions and `pending` in
+    rules. Settled from §2.7's own decomposition: the declaration sits
+    *beside the block*, so its identity is the block's group plus the
+    resolver. `anchor` is an identity-bearing field (golden hashes
+    repinned; corpus re-emit byte-stable, 34,302 distinct revision ids
+    unchanged — `corpus/M3-round-trip.md`). `validate` requires the
+    anchor to exist, every mapping target inside its subtree, and no
+    duplicate `(anchor, id)` — the same resolver at another anchor is
+    legal. Resolutions and the evaluator's pending set key by
+    `(anchor, scope)`; the logic atom is `pending(group)` naming the
+    anchor; impact judges declarations per `(anchor, id)` and counts
+    pending resolutions against removed declarations by that identity.
+    Considered and rejected: a free-standing declaration id — a third
+    identity with no natural home, when the anchor already names the
+    thing surfaces and rules point at. Residual: checkpoint matching
+    (§2.8) sees only an entry's derived origin — resolver id, versions,
+    scope, no anchor — so it cannot distinguish two declarations of one
+    resolver at different anchors in the same scope without consulting
+    the schema; distinguishing them would mean the `derived` origin
+    (§2.7) carrying the anchor. Decide with the §12.6 resolver census:
+    it only matters if one resolver is ever declared at two anchors
+    sharing a scope.
 
 ## 11. Prior art to consult
 
@@ -1964,7 +1989,9 @@ With access to open DN schema statistics:
    under a pure, total, two-scope language.
 6. **Resolver census** — how many procedures use externally-fed fields, against
    which sources, direct-match vs autocomplete, how many columns each mapping
-   populates, and how often mappings changed. Drives open question 8.
+   populates, and how often mappings changed. Drives open question 8, and
+   Q17's residual (is one resolver ever declared at two anchors sharing a
+   scope?).
 7. **Deferred-resolution frequency** — how often were records submitted with
    unresolved lookups, and how long did they stay pending? Sizes the retry and
    abandonment machinery.
