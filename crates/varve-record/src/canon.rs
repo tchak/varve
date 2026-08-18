@@ -201,6 +201,38 @@ fn as_arr(v: &CanonicalValue) -> Result<&[CanonicalValue], RecordDecodeError> {
     }
 }
 
+/// Strict decoding: exactly the keys the canonical form emits.
+fn only_keys(m: &Obj, allowed: &[&str]) -> Result<(), RecordDecodeError> {
+    match m.keys().find(|k| !allowed.contains(&k.as_str())) {
+        Some(extra) => err(format!("unexpected key '{extra}'")),
+        None => Ok(()),
+    }
+}
+
+/// A tagged union: exactly one key.
+fn single_key<'a>(m: &'a Obj, what: &str) -> Result<(&'a String, &'a CanonicalValue), RecordDecodeError> {
+    let mut it = m.iter();
+    match (it.next(), it.next()) {
+        (Some(entry), None) => Ok(entry),
+        (None, _) => err(format!("empty {what}")),
+        (Some(_), Some(_)) => err(format!("{what} must have exactly one key")),
+    }
+}
+
+/// A text that must be the normalized rendering of what it parses to —
+/// one value, one text.
+fn normalized<T: std::fmt::Display>(
+    text: &str,
+    parse: impl Fn(&str) -> Result<T, RecordDecodeError>,
+    what: &str,
+) -> Result<T, RecordDecodeError> {
+    let value = parse(text)?;
+    if value.to_string() != text {
+        return err(format!("{what} must be in normalized form"));
+    }
+    Ok(value)
+}
+
 fn get_str(m: &Obj, key: &str) -> Result<String, RecordDecodeError> {
     match m.get(key) {
         Some(CanonicalValue::String(s)) => Ok(s.clone()),
@@ -249,10 +281,7 @@ pub fn scalar_canonical(s: &Scalar) -> CanonicalValue {
 
 pub fn scalar_from(v: &CanonicalValue) -> Result<Scalar, RecordDecodeError> {
     let m = as_obj(v)?;
-    let (kind, inner) = m
-        .iter()
-        .next()
-        .ok_or_else(|| RecordDecodeError("empty scalar".into()))?;
+    let (kind, inner) = single_key(m, "scalar")?;
     let text = |v: &CanonicalValue| match v {
         CanonicalValue::String(s) => Ok(s.clone()),
         _ => err("expected a string"),
@@ -272,18 +301,23 @@ pub fn scalar_from(v: &CanonicalValue) -> Result<Scalar, RecordDecodeError> {
                 _ => return err("integer must be a normalized decimal string"),
             }
         }
-        "decimal" => Scalar::Decimal(
-            Decimal::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?,
-        ),
+        "decimal" => Scalar::Decimal(normalized(
+            &text(inner)?,
+            |t| Decimal::parse(t).map_err(|e| RecordDecodeError(e.to_string())),
+            "decimal",
+        )?),
         "date" => Scalar::Date(
             Date::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?,
         ),
-        "datetime" => Scalar::Datetime(
-            Instant::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?,
-        ),
+        "datetime" => Scalar::Datetime(normalized(
+            &text(inner)?,
+            |t| Instant::parse(t).map_err(|e| RecordDecodeError(e.to_string())),
+            "datetime",
+        )?),
         "option" => Scalar::Enum(OptionId::new(text(inner)?)),
         "attachment" => {
             let a = as_obj(inner)?;
+            only_keys(a, &["id", "hash", "filename", "content_type", "byte_size"])?;
             Scalar::Attachment(Box::new(AttachmentRef {
                 id: get_str(a, "id")?,
                 hash: get_str(a, "hash")?
@@ -329,7 +363,16 @@ pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
     let column = || Ok::<_, RecordDecodeError>(ColumnId::new(get_str(m, "column")?));
     let group = || Ok::<_, RecordDecodeError>(GroupId::new(get_str(m, "group")?));
     let item = || Ok::<_, RecordDecodeError>(ItemId::new(get_str(m, "item")?));
-    Ok(match get_str(m, "op")?.as_str() {
+    let op = get_str(m, "op")?;
+    match op.as_str() {
+        "set" => only_keys(m, &["op", "column", "path", "state"])?,
+        "unset" => only_keys(m, &["op", "column", "path"])?,
+        "add_item" => only_keys(m, &["op", "group", "parent", "item", "at"])?,
+        "remove_item" => only_keys(m, &["op", "group", "parent", "item"])?,
+        "reorder" => only_keys(m, &["op", "group", "parent", "order"])?,
+        _ => {}
+    }
+    Ok(match op.as_str() {
         "set" => Op::Set {
             column: column()?,
             path: path_from(get(m, "path")?)?,
@@ -365,6 +408,7 @@ pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
 
 fn derivation_from(v: &CanonicalValue) -> Result<Derivation, RecordDecodeError> {
     let m = as_obj(v)?;
+    only_keys(m, &["source", "source_version", "mapping_version", "snapshot_ref"])?;
     Ok(Derivation {
         source: ResolverId::new(get_str(m, "source")?),
         source_version: u32::try_from(get_int(m, "source_version")?)
@@ -384,18 +428,16 @@ pub fn origin_from(v: &CanonicalValue) -> Result<Origin, RecordDecodeError> {
         return Ok(Origin::Entered);
     }
     let m = as_obj(v)?;
-    if let Some(d) = m.get("derived") {
-        return Ok(Origin::Derived(derivation_from(d)?));
-    }
-    if let Some(o) = m.get("overridden") {
-        return Ok(Origin::Overridden {
+    match single_key(m, "origin")? {
+        (k, d) if k == "derived" => Ok(Origin::Derived(derivation_from(d)?)),
+        (k, o) if k == "overridden" => Ok(Origin::Overridden {
             superseded: match o {
                 CanonicalValue::Null => None,
                 d => Some(derivation_from(d)?),
             },
-        });
+        }),
+        _ => err("origin must be 'entered', 'derived' or 'overridden'"),
     }
-    err("origin must be 'entered', 'derived' or 'overridden'")
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -405,6 +447,11 @@ fn hex(bytes: &[u8]) -> String {
 fn unhex(s: &str) -> Result<[u8; 32], RecordDecodeError> {
     if s.len() != 64 {
         return err("salt must be 32 bytes hex");
+    }
+    // Lowercase hex digits only — `from_str_radix` would also take a
+    // leading `+` and uppercase, giving one salt several spellings.
+    if !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return err("salt must be lowercase hex");
     }
     let mut out = [0u8; 32];
     for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
@@ -464,6 +511,14 @@ fn origin_canonical(origin: &Origin) -> CanonicalValue {
 
 pub fn entry_from(v: &CanonicalValue) -> Result<Entry, RecordDecodeError> {
     let m = as_obj(v)?;
+    // The wire adds `k` and `record` around the entry's own fields.
+    only_keys(
+        m,
+        &[
+            "k", "record", "seq", "prev", "actor", "actor_kind", "timestamp", "revision",
+            "base_version", "content_hash", "origin", "note", "ops", "meta_salt", "op_salts",
+        ],
+    )?;
     let ops = as_arr(get(m, "ops")?)?
         .iter()
         .map(op_from)

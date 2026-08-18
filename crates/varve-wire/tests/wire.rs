@@ -358,6 +358,20 @@ fn reader_refuses_the_alternative_blank_encodings() {
     // The old wrapped shapes are not the encoding.
     let wrapped = with(r#""tags":{"many":[{"option":"a"}]}"#);
     assert!(matches!(read_stream(&wrapped), Err(ReadError::Malformed { line: 2, .. })));
+    // Strict scalars: one value, one text — a multi-kind scalar object,
+    // an unknown key, a non-normalized decimal or datetime, uppercase or
+    // signed hex are all refused rather than read as something.
+    for bad in [
+        r#""x":{"text":"a","boolean":true}"#,
+        r#""x":{"decimal":"1.50"}"#,
+        r#""x":{"decimal":".5"}"#,
+        r#""x":{"datetime":"2026-08-16T14:00:00+02:00"}"#,
+        r#""x":{"attachment":{"id":"f","hash":"sha256:+f00000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1}}"#,
+        r#""x":{"attachment":{"id":"f","hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1,"extra":1}}"#,
+    ] {
+        assert!(matches!(read_stream(&with(bad)), Err(ReadError::Malformed { line: 2, .. })), "{bad}");
+    }
+    assert!(read_stream(&with(r#""x":{"decimal":"1.5"}"#)).is_ok());
 }
 
 #[test]

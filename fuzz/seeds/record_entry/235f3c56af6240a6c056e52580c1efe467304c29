@@ -1,0 +1,18 @@
+{"actor":"a1","actor_kind":"human","ba+e_version":0,"content_hash":"shc256:0000000000000000000000000000000000000000000000000000000000000000","meta_salt":"010101010101001110101010101","note":null,"op_salts":["0000000000000000000000000000000000000000000000000000000000000000000081701746611,1931188"],"ops":[{"op":"set","column":"name","path":[],"state":{"text":"Dupont"}},{"op":"add_item","group":"g","parent":[],"item":"i1","at":0}],"origin":{"derived":{"source":"insee","source_version":1,"mapping_version":												
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+										õ														1,"snapshot_ref":}},"prev":"sha0000000000000000000000000000"}

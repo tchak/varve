@@ -227,7 +227,9 @@ impl std::str::FromStr for ContentHash {
 
     fn from_str(s: &str) -> Result<Self, ParseHashError> {
         let hex = s.strip_prefix("sha256:").ok_or(ParseHashError)?;
-        if hex.len() != 64 {
+        // Lowercase hex only: one address, one text (`from_str_radix`
+        // would also take `+` and uppercase).
+        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
             return Err(ParseHashError);
         }
         let mut digest = [0u8; 32];
