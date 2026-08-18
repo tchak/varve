@@ -466,6 +466,35 @@ fn imports_are_all_or_nothing() {
 }
 
 #[test]
+fn a_schema_at_the_nesting_bound_survives_the_wire() {
+    // The schema policy's structural bound exists for this: the deepest
+    // valid schema stays inside the reader's JSON nesting budget.
+    let policy = varve_schema::DepthPolicy::default();
+    let mut el = Element::Column(Column {
+        id: ColumnId::new("leaf"),
+        label: "leaf".into(),
+        ty: ScalarType::Text,
+        arity: Arity::One,
+    });
+    for i in 0..policy.max_group_depth {
+        el = Element::Group(varve_schema::Group {
+            id: varve_core::GroupId::new(format!("g{i}")),
+            label: "g".into(),
+            cardinality: varve_schema::Cardinality::One,
+            children: vec![el],
+            included_from: None,
+        });
+    }
+    let deep = Schema { root: vec![el], resolvers: vec![] };
+    assert_eq!(varve_schema::validate(&deep, policy), vec![]);
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    m.revisions = vec![revision_id(&deep)];
+    let bytes = write_lines(&[Line::Header(m), Line::Revision { id: revision_id(&deep), schema: deep.clone() }]).unwrap();
+    let stream = read_stream(&bytes).unwrap();
+    assert!(matches!(&stream.lines[1], Line::Revision { schema, .. } if schema == &deep));
+}
+
+#[test]
 fn writers_refuse_a_manifest_of_the_other_mode() {
     // History and snapshot never mix (§5): a real error, in release too.
     let m = manifest(Mode::Snapshot, Intent::Upsert, 0);

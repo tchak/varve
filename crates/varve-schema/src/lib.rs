@@ -302,11 +302,16 @@ pub struct DepthPolicy {
     /// Maximum nesting of `many` groups. `one` groups contribute nothing
     /// to the row path and are not counted.
     pub max_many_depth: usize,
+    /// Maximum nesting of groups of any cardinality — a structural bound
+    /// (not a row-path one) so a schema always fits the wire reader's
+    /// JSON nesting budget: each group is a few JSON levels deep, and
+    /// the reader parses at most 128.
+    pub max_group_depth: usize,
 }
 
 impl Default for DepthPolicy {
     fn default() -> Self {
-        Self { max_many_depth: 1 }
+        Self { max_many_depth: 1, max_group_depth: 24 }
     }
 }
 
@@ -315,6 +320,14 @@ pub enum SchemaError {
     /// §2.3: a validation rule with an error message, never a type.
     #[error("group '{group}' nests `many` groups to depth {depth}, policy allows {max}")]
     DepthExceeded {
+        group: GroupId,
+        depth: usize,
+        max: usize,
+    },
+    /// Groups nest deeper than the structural bound (`one` groups
+    /// included): the wire could not carry it.
+    #[error("group '{group}' nests groups to depth {depth}, policy allows {max}")]
+    GroupDepthExceeded {
         group: GroupId,
         depth: usize,
         max: usize,
@@ -360,9 +373,11 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
     let mut column_ids = HashSet::new();
     let mut group_ids = HashSet::new();
 
+    #[allow(clippy::too_many_arguments)] // a recursive walk over one schema, not an API
     fn walk(
         elements: &[Element],
         many_depth: usize,
+        group_depth: usize,
         policy: DepthPolicy,
         errors: &mut Vec<SchemaError>,
         columns: &mut Vec<(ColumnId, ScalarType)>,
@@ -397,9 +412,18 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                             max: policy.max_many_depth,
                         });
                     }
+                    let nesting = group_depth + 1;
+                    if nesting > policy.max_group_depth {
+                        errors.push(SchemaError::GroupDepthExceeded {
+                            group: g.id.clone(),
+                            depth: nesting,
+                            max: policy.max_group_depth,
+                        });
+                    }
                     walk(
                         &g.children,
                         depth,
+                        nesting,
                         policy,
                         errors,
                         columns,
@@ -413,6 +437,7 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
 
     walk(
         &schema.root,
+        0,
         0,
         policy,
         &mut errors,
@@ -504,6 +529,33 @@ mod tests {
             errors.as_slice(),
             [SchemaError::DepthExceeded { depth: 2, max: 1, .. }]
         ));
+    }
+
+    #[test]
+    fn total_group_nesting_is_bounded_too() {
+        // `one` groups do not count toward the row-path policy, but a
+        // schema still has a structural nesting bound so the wire reader
+        // (128 JSON levels) can always read what the writer emits.
+        fn nested(depth: usize) -> Element {
+            let mut el = col("leaf", ScalarType::Text);
+            for i in 0..depth {
+                el = Element::Group(Group {
+                    id: GroupId::new(format!("g{i}")),
+                    label: "g".into(),
+                    cardinality: Cardinality::One,
+                    children: vec![el],
+                    included_from: None,
+                });
+            }
+            el
+        }
+        let policy = DepthPolicy::default();
+        let ok = Schema { root: vec![nested(policy.max_group_depth)], resolvers: vec![] };
+        assert_eq!(validate(&ok, policy), vec![]);
+        let deep = Schema { root: vec![nested(policy.max_group_depth + 1)], resolvers: vec![] };
+        assert!(validate(&deep, policy)
+            .iter()
+            .any(|e| matches!(e, SchemaError::GroupDepthExceeded { .. })));
     }
 
     #[test]
