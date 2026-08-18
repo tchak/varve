@@ -1,8 +1,8 @@
 //! Tier 1 (§7): types, arity, groups, cardinality, blocks, nomenclatures,
 //! resolver declarations, structural constraints, depth policy.
 //!
-//! M0 scope: enough to express every DN procedure. The cast table and the
-//! type join (§5.5) come with M1.
+//! Enough to express every DN procedure (M0), plus the cast table and
+//! its dual, the type join (§5.5), and the schema-side half of blocks.
 
 #![forbid(unsafe_code)]
 

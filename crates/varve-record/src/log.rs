@@ -97,8 +97,10 @@ pub struct Conflict {
     pub later: u64,
 }
 
-/// A folded state pinned to the entry it folds up to — the erasure
-/// horizon and performance foothold of §2.9/§2.10.
+/// A folded state pinned to the entry it folds up to: the performance
+/// foothold of §2.9, and what a §2.10 erasure horizon will be once a
+/// fold can start from a snapshot instead of empty (not built — see
+/// §10 Q11's residual).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     /// Number of entries folded (seq of the next entry).

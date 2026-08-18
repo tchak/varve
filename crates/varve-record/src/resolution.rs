@@ -121,7 +121,7 @@ pub fn pending_resolutions(resolutions: &[Resolution]) -> Vec<&Resolution> {
 pub struct Scan {
     /// The attachment element id (§2.4 value-internal identity).
     pub element: String,
-    pub hash: varve_core::canonical::ContentHash,
+    pub hash: ContentHash,
     pub status: ScanStatus,
     pub attempts: u32,
 }

@@ -253,7 +253,9 @@ fn resolver(decl: &ResolverDeclaration) -> CanonicalValue {
 // ---------------------------------------------------------------------
 // Decoding — the parse direction the wire (§5) uses. Strict and total:
 // every malformation is a `SchemaDecodeError`, never a panic. Round-trip
-// with `schema_canonical` is the law tested in the crate.
+// with `schema_canonical` is the law: tested below on schemas with
+// blocks and units, over the whole corpus by `tools/m0 --wire`, and by
+// the wire property suite.
 
 use crate::{Column, Group, Mapping, ResultField, AttachmentConstraints, Unit};
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
@@ -513,4 +515,46 @@ fn resolver_from(v: &CanonicalValue) -> Result<ResolverDeclaration, SchemaDecode
         result_type,
         mapping,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Arity, Cardinality, Column, Group, Mapping, ResolverDeclaration, ResultField, Unit};
+    use varve_core::{ColumnId, GroupId, ResolverId};
+
+    #[test]
+    fn schema_round_trips_through_its_canonical_form() {
+        let column = |id: &str, ty: ScalarType| {
+            Element::Column(Column { id: ColumnId::new(id), label: id.into(), ty, arity: Arity::Many })
+        };
+        let schema = Schema {
+            root: vec![
+                column("n", ScalarType::Integer(Some(Unit::Day))),
+                Element::Group(Group {
+                    id: GroupId::new("rib"),
+                    label: "RIB".into(),
+                    cardinality: Cardinality::One,
+                    children: vec![column("iban", ScalarType::Text)],
+                    included_from: Some(BlockRef { id: BlockId::new("rib"), version: 3 }),
+                }),
+            ],
+            resolvers: vec![ResolverDeclaration {
+                id: ResolverId::new("r"),
+                version: 1,
+                input: vec![(ColumnId::new("iban"), ScalarType::Text)],
+                result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
+                mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("iban") }],
+            }],
+        };
+        let canonical = schema_canonical(&schema);
+        assert_eq!(schema_from_canonical(&canonical).unwrap(), schema);
+        assert_eq!(schema_canonical(&schema_from_canonical(&canonical).unwrap()), canonical);
+        // Identity-bearing provenance: dropping it changes the id.
+        let mut by_hand = schema.clone();
+        if let Element::Group(g) = &mut by_hand.root[1] {
+            g.included_from = None;
+        }
+        assert_ne!(revision_id(&by_hand), revision_id(&schema));
+    }
 }
