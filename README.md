@@ -46,15 +46,26 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
 
 - `crates/varve-core` — ids, row paths, scalar primitives, canonical
   bytes and content addresses (JCS, SHA-256, salted commitments)
-- `crates/varve-schema` — types, groups, nomenclatures, resolver
-  declarations, validation, the cast table and type join
+- `crates/varve-schema` — types, groups, blocks (schema side),
+  nomenclatures, resolver declarations, validation, the cast table and
+  type join
 - `crates/varve-value` — cells, typed conformance, structural diff/patch
-- `crates/varve-record` — the append-only record log: entries, fold,
-  provenance, chain verification, snapshots, checkpoints, resolutions
+- `crates/varve-logic` — the predicate language: AST and canonical form,
+  typechecker, total evaluator, rule-graph acyclicity
 - `crates/varve-projection` — records viewed through revisions they
   weren't written on; casts applied, lossiness reported
-- `crates/varve-impact` — the impact report
+- `crates/varve-impact` — the impact report: change classification,
+  resolver questions, broken rule references, record assessment
+- `crates/varve-record` — the append-only record log: entries, fold,
+  provenance, chain verification, snapshots, checkpoints, resolutions
+- `crates/varve-surface` — presentation and admissibility: reachability,
+  requiredness, formats, write policy, block defaults
+- `crates/varve-revision` — revision DAG and publication, block and
+  nomenclature registries, three-way schema merge, aggregate revisions
+- `crates/varve-wire` — tagged JSONL: writer, reader, history and
+  snapshot import
 - `tools/m0` — the corpus harness (oracle over the public DN dataset)
+- `fuzz/` — cargo-fuzz targets (see below)
 - `corpus/` — corpus analyses and results
 - `DESIGN.md` — the design document
 
