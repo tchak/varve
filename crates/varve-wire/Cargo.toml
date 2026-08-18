@@ -19,5 +19,11 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # CanonicalValue and refuses duplicate object keys (§5 reader).
 serde = "1"
 
+[features]
+# Deterministic salts for tests and examples — never in production
+# (§2.13 decision 5: salts are random inputs from Tier 5).
+test-util = []
+
 [dev-dependencies]
 proptest.workspace = true
+varve-wire = { path = ".", features = ["test-util"] }

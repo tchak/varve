@@ -22,8 +22,9 @@ mod write;
 
 pub use import::{
     ImportError, ImportOutcome, SnapshotImportRequest, adopt_history, import_snapshot,
-    test_salts,
 };
+#[cfg(feature = "test-util")]
+pub use import::test_salts;
 pub use line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
 pub use read::{ReadError, Stream, read_stream, snapshot_records};
 pub use write::{WriteError, write_history, write_lines, write_snapshot};

@@ -8,7 +8,6 @@
 use std::collections::BTreeMap;
 
 use varve_core::RecordId;
-use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::RevisionId;
 use varve_record::{Actor, Draft, Entry, EntrySalts, Origin, RecordLog};
@@ -183,10 +182,12 @@ pub fn import_snapshot(
     Ok(outcome)
 }
 
-/// Convenience for callers/tests: deterministic salts from a counter.
-/// **Never use in production** — Tier 5 must supply random salts
-/// (§2.13 decision 5).
+/// Deterministic salts from a counter, for tests and examples only —
+/// behind the `test-util` feature so it cannot reach production by
+/// accident: Tier 5 must supply random salts (§2.13 decision 5).
+#[cfg(feature = "test-util")]
 pub fn test_salts(seed: u8) -> impl Fn(usize) -> EntrySalts {
+    use varve_core::canonical::Salt;
     move |n| EntrySalts {
         meta: Salt([seed; 32]),
         ops: (0..n).map(|i| Salt([seed.wrapping_add(i as u8 + 1); 32])).collect(),
