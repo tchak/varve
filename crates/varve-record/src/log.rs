@@ -316,44 +316,46 @@ impl RecordLog {
         Ok(diff(&a.values, &b.values))
     }
 
-    /// Same-cell writes from the same base, pairwise: entry B conflicts
-    /// with an earlier entry A when A wrote a cell B also writes and
-    /// `B.base_version <= A.seq` (B did not see A's write).
+    /// Same-cell writes by two actors from the same base (§2.9: detect,
+    /// do not merge): entry B conflicts with an earlier entry A by another
+    /// actor when A wrote a cell B also writes and `B.base_version <=
+    /// A.seq` (B did not see A's write). One forward pass with a per-cell
+    /// write history — linear in the ops of the log.
     pub fn detect_conflicts(&self) -> Vec<Conflict> {
-        fn written(entry: &Entry) -> Vec<CellAddr> {
-            entry
-                .content
-                .ops
-                .iter()
-                .filter_map(|op| match op {
-                    Op::Set { column, path, .. } | Op::Unset { column, path } => {
-                        Some(CellAddr {
-                            column: column.clone(),
-                            path: path.clone(),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect()
-        }
+        // Per cell: the entries that wrote it, in seq order.
+        let mut writes: BTreeMap<CellAddr, Vec<usize>> = BTreeMap::new();
         let mut conflicts = Vec::new();
         for (i, later) in self.entries.iter().enumerate() {
-            let later_writes = written(later);
-            for earlier in &self.entries[..i] {
-                if later.envelope.base_version > earlier.envelope.seq {
-                    continue; // later saw earlier's write: ordinary LWW.
-                }
-                for addr in &later_writes {
-                    if written(earlier).contains(addr) {
-                        conflicts.push(Conflict {
-                            addr: addr.clone(),
-                            earlier: earlier.envelope.seq,
-                            later: later.envelope.seq,
-                        });
+            let base = later.envelope.base_version;
+            let mut touched: Vec<CellAddr> = Vec::new();
+            for op in &later.content.ops {
+                let (Op::Set { column, path, .. } | Op::Unset { column, path }) = op else { continue };
+                let addr = CellAddr { column: column.clone(), path: path.clone() };
+                if let Some(history) = writes.get(&addr) {
+                    // Writes `later` did not see: seq >= base. History is
+                    // in seq order, so walk back from the end.
+                    for &j in history.iter().rev() {
+                        let earlier = &self.entries[j];
+                        if earlier.envelope.seq < base {
+                            break; // seen: ordinary LWW from here down.
+                        }
+                        if earlier.envelope.actor.id != later.envelope.actor.id {
+                            conflicts.push(Conflict {
+                                addr: addr.clone(),
+                                earlier: earlier.envelope.seq,
+                                later: later.envelope.seq,
+                            });
+                        }
                     }
                 }
+                touched.push(addr);
+            }
+            for addr in touched {
+                writes.entry(addr).or_default().push(i);
             }
         }
+        conflicts.sort_by_key(|c| (c.later, c.earlier));
+        conflicts.dedup();
         conflicts
     }
 

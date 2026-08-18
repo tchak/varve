@@ -255,6 +255,10 @@ fn conflicts_are_detected_not_merged() {
     // A fourth write that saw everything: no conflict.
     log.append(draft(human("a2"), 3, 3, Origin::Entered, vec![set("name", "Bernard")]))
         .unwrap();
+    // The same actor rewriting its own cell from a stale base is not a
+    // two-actor conflict.
+    log.append(draft(human("a2"), 4, 3, Origin::Entered, vec![set("name", "Bernard-Durand")]))
+        .unwrap();
 
     let conflicts = log.detect_conflicts();
     assert_eq!(conflicts.len(), 1);
@@ -264,7 +268,7 @@ fn conflicts_are_detected_not_merged() {
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("name")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("Bernard".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text("Bernard-Durand".into()))))
     );
 }
 
