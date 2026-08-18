@@ -118,15 +118,41 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
     }
 }
 
+/// Strict: exactly the keys the canonical form emits, no more — so
+/// `to_canonical ∘ from_canonical` is the identity on every accepted
+/// value and no two texts decode to one expression.
 pub fn from_canonical(value: &CanonicalValue) -> Result<Expr, DecodeError> {
     let map = as_object(value)?;
-    if let Some(operands) = map.get("and") {
-        return Ok(Expr::And(exprs(operands)?));
+    match (map.get("and"), map.get("or")) {
+        (Some(_), Some(_)) => Err(DecodeError("an expression is 'and' or 'or', not both".into())),
+        (Some(operands), None) => {
+            only_keys(map, &["and"])?;
+            Ok(Expr::And(exprs(operands)?))
+        }
+        (None, Some(operands)) => {
+            only_keys(map, &["or"])?;
+            Ok(Expr::Or(exprs(operands)?))
+        }
+        (None, None) => Ok(Expr::Atom(atom_from(map)?)),
     }
-    if let Some(operands) = map.get("or") {
-        return Ok(Expr::Or(exprs(operands)?));
+}
+
+/// Refuse keys the canonical form never emits.
+fn only_keys(map: &Object, allowed: &[&str]) -> Result<(), DecodeError> {
+    match map.keys().find(|k| !allowed.contains(&k.as_str())) {
+        Some(extra) => Err(DecodeError(format!("unexpected key '{extra}'"))),
+        None => Ok(()),
     }
-    Ok(Expr::Atom(atom_from(map)?))
+}
+
+/// A tagged union: exactly one key.
+fn single_key<'a>(map: &'a Object, what: &str) -> Result<(&'a String, &'a CanonicalValue), DecodeError> {
+    let mut it = map.iter();
+    match (it.next(), it.next()) {
+        (Some(entry), None) => Ok(entry),
+        (None, _) => Err(DecodeError(format!("empty {what}"))),
+        (Some(_), Some(_)) => Err(DecodeError(format!("{what} must have exactly one key"))),
+    }
 }
 
 fn exprs(value: &CanonicalValue) -> Result<Vec<Expr>, DecodeError> {
@@ -152,11 +178,9 @@ fn text(map: &Object, key: &str) -> Result<String, DecodeError> {
     }
 }
 
-fn source_from(map: &Object) -> Result<ColumnRef, DecodeError> {
-    let source = as_object(
-        map.get("source")
-            .ok_or_else(|| DecodeError("missing 'source'".into()))?,
-    )?;
+fn column_ref_from(value: &CanonicalValue) -> Result<ColumnRef, DecodeError> {
+    let source = as_object(value)?;
+    only_keys(source, &["column", "field"])?;
     Ok(ColumnRef {
         column: ColumnId::new(text(source, "column")?),
         field: match source.get("field") {
@@ -167,12 +191,13 @@ fn source_from(map: &Object) -> Result<ColumnRef, DecodeError> {
     })
 }
 
+fn source_from(map: &Object) -> Result<ColumnRef, DecodeError> {
+    column_ref_from(map.get("source").ok_or_else(|| DecodeError("missing 'source'".into()))?)
+}
+
 fn const_from(value: &CanonicalValue) -> Result<Const, DecodeError> {
     let map = as_object(value)?;
-    let (kind, inner) = map
-        .iter()
-        .next()
-        .ok_or_else(|| DecodeError("empty constant".into()))?;
+    let (kind, inner) = single_key(map, "constant")?;
     Ok(match kind.as_str() {
         "boolean" => match inner {
             CanonicalValue::Bool(b) => Const::Boolean(*b),
@@ -180,6 +205,7 @@ fn const_from(value: &CanonicalValue) -> Result<Const, DecodeError> {
         },
         "number" => {
             let number = as_object(inner)?;
+            only_keys(number, &["value", "unit"])?;
             let value = Decimal::parse(&text(number, "value")?)
                 .map_err(|e| DecodeError(format!("bad number: {e}")))?;
             let unit = match number.get("unit") {
@@ -214,32 +240,26 @@ fn string_of(value: &CanonicalValue) -> Result<String, DecodeError> {
 }
 
 fn operand_from(map: &Object) -> Result<Operand, DecodeError> {
-    let right = as_object(
-        map.get("right")
-            .ok_or_else(|| DecodeError("missing 'right'".into()))?,
-    )?;
-    if let Some(constant) = right.get("const") {
-        return Ok(Operand::Const(const_from(constant)?));
+    let right = as_object(map.get("right").ok_or_else(|| DecodeError("missing 'right'".into()))?)?;
+    match single_key(right, "operand")? {
+        (k, constant) if k == "const" => Ok(Operand::Const(const_from(constant)?)),
+        (k, column) if k == "column_ref" => Ok(Operand::Column(column_ref_from(column)?)),
+        _ => Err(DecodeError("operand must be 'const' or 'column_ref'".into())),
     }
-    if let Some(column) = right.get("column_ref") {
-        let column = as_object(column)?;
-        return Ok(Operand::Column(ColumnRef {
-            column: ColumnId::new(text(column, "column")?),
-            field: match column.get("field") {
-                None => None,
-                Some(CanonicalValue::String(s)) => Some(s.clone()),
-                Some(_) => return Err(DecodeError("'field' must be a string".into())),
-            },
-        }));
-    }
-    Err(DecodeError("operand must be 'const' or 'column_ref'".into()))
 }
 
 fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
     let op = text(map, "op")?;
     let comparison = |ctor: fn(ColumnRef, Operand) -> Atom| -> Result<Atom, DecodeError> {
+        only_keys(map, &["op", "source", "right"])?;
         Ok(ctor(source_from(map)?, operand_from(map)?))
     };
+    match op.as_str() {
+        "is_empty" | "is_filled" => only_keys(map, &["op", "source"])?,
+        "contains" | "excludes" => only_keys(map, &["op", "source", "option"])?,
+        "pending" | "not_pending" => only_keys(map, &["op", "resolver"])?,
+        _ => {}
+    }
     match op.as_str() {
         "eq" => comparison(|source, right| Atom::Eq { source, right }),
         "not_eq" => comparison(|source, right| Atom::NotEq { source, right }),

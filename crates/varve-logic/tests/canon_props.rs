@@ -80,12 +80,36 @@ proptest! {
 #[test]
 fn malformed_inputs_error_cleanly() {
     use varve_core::canonical::CanonicalValue;
+    let obj = |pairs: &[(&str, CanonicalValue)]| {
+        CanonicalValue::Object(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect())
+    };
+    let s = |t: &str| CanonicalValue::String(t.into());
+    let arr = CanonicalValue::Array(vec![]);
     let bad = [
         CanonicalValue::Null,
-        CanonicalValue::String("eq".into()),
-        CanonicalValue::Object(Default::default()),
+        s("eq"),
+        obj(&[]),
+        // Strict: one meaning, one text.
+        obj(&[("and", arr.clone()), ("or", arr.clone())]),
+        obj(&[("and", arr.clone()), ("junk", CanonicalValue::Null)]),
+        obj(&[("op", s("is_empty")), ("source", obj(&[("column", s("a"))])), ("right", obj(&[]))]),
+        obj(&[
+            ("op", s("eq")),
+            ("source", obj(&[("column", s("a"))])),
+            ("right", obj(&[("const", obj(&[("boolean", CanonicalValue::Bool(true)), ("text", s("x"))]))])),
+        ]),
+        obj(&[
+            ("op", s("eq")),
+            ("source", obj(&[("column", s("a")), ("extra", s("x"))])),
+            ("right", obj(&[("const", obj(&[("text", s("x"))]))])),
+        ]),
+        obj(&[
+            ("op", s("eq")),
+            ("source", obj(&[("column", s("a"))])),
+            ("right", obj(&[("const", obj(&[("text", s("x"))])), ("column_ref", obj(&[("column", s("b"))]))])),
+        ]),
     ];
     for value in &bad {
-        assert!(from_canonical(value).is_err());
+        assert!(from_canonical(value).is_err(), "{value:?} should be refused");
     }
 }
