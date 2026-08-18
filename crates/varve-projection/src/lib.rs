@@ -98,6 +98,8 @@ pub fn project(
     let reader_index = SchemaIndex::build(reader);
     let mut out = RecordValues::new();
     let mut report = ProjectionReport::default();
+    let mut castable: std::collections::BTreeMap<&ColumnId, (&ColumnInfo, &ColumnInfo)> =
+        std::collections::BTreeMap::new();
 
     for (column, rinfo) in &reader_index.columns {
         let Some(winfo) = writer_index.columns.get(column) else {
@@ -129,7 +131,7 @@ pub fn project(
             (&rinfo.ty, rinfo.arity),
             nomenclatures,
         )?;
-        let mut column_report = ColumnReport {
+        let column_report = ColumnReport {
             status: if !cast.possible {
                 ColumnStatus::Forbidden
             } else if cast.class() == varve_schema::CastClass::Identity {
@@ -141,21 +143,28 @@ pub fn project(
             cells_lossy: 0,
             cells_failed: 0,
         };
-        if cast.possible {
-            for (addr, state) in values.cells.iter().filter(|(a, _)| a.column == *column) {
-                match project_state(state, winfo, rinfo, nomenclatures)? {
-                    Outcome::Kept { state, lossy } => {
-                        column_report.cells_projected += 1;
-                        if lossy {
-                            column_report.cells_lossy += 1;
-                        }
-                        out.cells.insert(addr.clone(), state);
-                    }
-                    Outcome::Failed => column_report.cells_failed += 1,
-                }
-            }
-        }
         report.columns.insert(column.clone(), column_report);
+        if cast.possible {
+            castable.insert(column, (winfo, rinfo));
+        }
+    }
+
+    // One pass over the cells (not one per reader column): each cell is
+    // routed to its column's cast, or dropped as the report already
+    // says (added/scope-moved/forbidden/writer-only).
+    for (addr, state) in &values.cells {
+        let Some((winfo, rinfo)) = castable.get(&addr.column) else { continue };
+        let column_report = report.columns.get_mut(&addr.column).expect("inserted above");
+        match project_state(state, winfo, rinfo, nomenclatures)? {
+            Outcome::Kept { state, lossy } => {
+                column_report.cells_projected += 1;
+                if lossy {
+                    column_report.cells_lossy += 1;
+                }
+                out.cells.insert(addr.clone(), state);
+            }
+            Outcome::Failed => column_report.cells_failed += 1,
+        }
     }
 
     for column in writer_index.columns.keys() {
