@@ -49,8 +49,10 @@ pub enum ColumnChange {
     /// Same type, arity, and scope. Moves *within* a scope are this —
     /// order is presentation, not addressing.
     Identical,
-    /// Type or arity changed; the cast tells the story.
-    Retyped { cast: Cast },
+    /// The column's type, arity, unit, options or constraints changed
+    /// — anything with a non-identity cast; the cast tells the story,
+    /// `unit_change` / `removed_options` / `constraint_change` name it.
+    Cast { cast: Cast },
     /// §3 correction: moved into or out of a `many` group — breaking.
     ScopeMoved,
     /// No cast exists between the types.
@@ -342,21 +344,21 @@ pub fn classify(
                         constraint_change: constraint_change.clone(),
                     },
                     CastClass::Widening => ColumnImpact {
-                        change: ColumnChange::Retyped { cast },
+                        change: ColumnChange::Cast { cast },
                         class: ChangeClass::Safe,
                         removed_options,
                         unit_change,
                         constraint_change: constraint_change.clone(),
                     },
                     CastClass::Lossy => ColumnImpact {
-                        change: ColumnChange::Retyped { cast },
+                        change: ColumnChange::Cast { cast },
                         class: ChangeClass::Lossy,
                         removed_options,
                         unit_change,
                         constraint_change: constraint_change.clone(),
                     },
                     CastClass::Checked => ColumnImpact {
-                        change: ColumnChange::Retyped { cast },
+                        change: ColumnChange::Cast { cast },
                         class: ChangeClass::Checked,
                         removed_options,
                         unit_change,
