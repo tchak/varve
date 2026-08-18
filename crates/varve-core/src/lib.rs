@@ -219,6 +219,12 @@ pub mod primitives {
             Some(Decimal { mantissa, scale })
         }
 
+        /// Parse `[-]digits[.digits]`. Deliberately accepts what people
+        /// type — `.5`, `5.`, `007`, `-0`, `1.50` — and normalizes: this
+        /// is the entry point of the checked text→decimal cast (§3),
+        /// where refusing `1.50` would be pedantry. Decoders that need
+        /// one-value-one-text (the wire, §5) require the parsed value's
+        /// `Display` to equal the input; `parse` alone is not that check.
         pub fn parse(s: &str) -> Result<Self, PrimitiveError> {
             let (neg, rest) = match s.strip_prefix('-') {
                 Some(rest) => (true, rest),
