@@ -365,9 +365,42 @@ plus the instance's row path — so two SIRET blocks resolve independently:
 
 ```
 pending → resolved | not_found | ambiguous | failed | abandoned
+          failed | abandoned → pending        (re-request: deliberate, recorded)
 ```
 
-plus attempt count, last error, deadline.
+plus, on each terminal transition, a summary of how it was reached
+(attempt count, last error) — and a deadline.
+
+**Settled (2026-08-19): transient failures are not record state;
+outcomes are.** Institutional memory decides this one: the upstream
+APIs go down for hours and sometimes days, so a pending lookup retried
+every fifteen minutes accumulates hundreds of attempts *in the normal
+case*. If every attempt were a chained, hashed, exported entry, the
+common path would bloat every record log — the afterthought in reverse.
+So the split follows meaning. **Record meaning** (lifecycle ops, §2.8
+above): that a lookup was *requested* — when (entry timestamp), under
+which bound versions — and *how it ended*: `resolved`; `not_found` /
+`ambiguous` (the référentiel answered); `failed` — the resolver gave a
+**definitive** answer, "this will never work" (malformed input, refused
+query), not a timeout; `abandoned` — an instance's policy gave up on
+transient failures. **Scheduler-local** (Tier 5, instance-only like the
+endpoint and credentials): attempt timestamps, transient errors,
+backoff state, next try. The terminal op carries a summary as content —
+`attempts`, `last_error` — so "abandoned after 212 attempts over 71 h,
+last error 503" is auditable in one entry. The earlier `failed →
+pending` retry loop is therefore gone from the kernel: transients never
+reach `failed`. In its place, **re-request is a first-class, deliberate,
+recorded event** — `request` on an instance in `failed` or `abandoned`
+reopens it, resetting nothing in the log (the old outcome stays, the new
+request follows it) — and it is bulk-able, like re-map (rule 1): the
+morning after a three-day outage, an operator reopens every abandoned
+lookup for a procedure in one reported act. That is the mechanism DN
+had to bolt on after the fact; here it is designed in. Per-attempt
+history as record state was considered and rejected (bloat under the
+normal case); a mutable counter beside the log (today's
+`attempts`/`last_error` fields) was rejected with decision A — unchained
+state is not a record. Code follows: those fields move from the
+`Resolution` struct to the terminal ops' content.
 
 **Abandonment must be an explicit recorded event.** Pending-forever is a leak;
 silent give-up is unauditable.
