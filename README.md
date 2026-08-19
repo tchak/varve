@@ -1,5 +1,10 @@
 # Varve
 
+[![CI](https://github.com/tchak/varve/actions/workflows/ci.yml/badge.svg)](https://github.com/tchak/varve/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](Cargo.toml)
+![Status: pre-publication, 0.1.0 placeholder](https://img.shields.io/badge/status-pre--publication-lightgrey.svg)
+
 A generic, embeddable Rust kernel for **versioned, multi-party case
 files**, extracted from ~10 years of building a large French
 public-service platform (administrations publish *procedures* — schemas —
