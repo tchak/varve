@@ -40,11 +40,20 @@ their place by existing in DN.
 
 - **topcoat** (tokio-rs, announced 2026-07): server-rendered reactive
   app; components paired with colocated GraphQL fragments (P.9 Q2).
+  Topcoat is also the HTTP layer — it sits on hyper directly, with its
+  own router (`#[route]` API routes alongside `#[page]`/`#[layout]`,
+  tower layers, and a `tower` interop module for mounting tower
+  services). No separate web framework. **Settled 2026-08-19** (was
+  listed as a fourth stack item, axum): `/graphql`, upload slots, and
+  export downloads are ordinary topcoat `#[route]` handlers; execution
+  is `schema.execute(request)` in-process, so the transport binding is
+  a few lines of handler, not a framework. Worst case, a tower service
+  mounts through the interop module.
 - **toasty** (tokio-rs): platform models, and the first `varve-store`
   substrate (DESIGN Q19 — gated on the dynamic-query spike, P.9 Q1).
-- **async-graphql**: schema, resolvers, in-process execution.
-- **axum**: HTTP transport — `/graphql` with token auth, upload slots,
-  export downloads.
+- **async-graphql**: schema, resolvers, in-process execution; no
+  transport adapter crate (`async-graphql-axum` etc.) — the topcoat
+  route handlers above are the transport.
 
 All of topcoat/toasty are early-stage with breaking changes expected.
 The hedges are structural: the `varve-store` trait (swap the ORM), the
@@ -66,7 +75,8 @@ schema (transport-independent by construction), and thin resolvers
 - `platform-client` — typed client generated from the SDL, for Rust
   integrators and for integration tests that exercise the real HTTP
   path.
-- `platform-server` — the binary: axum router + the app + the
+- `platform-server` — the binary: the topcoat router (app + `/graphql`
+  and upload/download `#[route]` handlers) + the
   schedulers (`varve-service` resolution retries, blob sweep, outbox
   delivery). One process to start with; the seams are already crates.
 
