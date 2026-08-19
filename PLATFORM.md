@@ -267,3 +267,44 @@ where the keys live. Crate placement: the `varve-files` trait stays
 plaintext-in/plaintext-out streaming; encryption is the S3
 implementation's concern; key custody is Tier 5 platform
 configuration (DESIGN §2.10: "key management at Tier 5").
+
+## P.11 Attachment scanning (settled 2026-08-19)
+
+Scanning happens behind a **`Scanner` trait** (streaming bytes in,
+verdict out) — the same pluggability argument as resolvers (DESIGN open
+question 8's lesson). First implementation: **ClamAV** as a clamd
+sidecar (freshclam for signatures), streamed over `INSTREAM` via the
+`clamav-client` crate's Tokio API — what DN runs today,
+sovereignty-clean, operationally boring. In-process libclamav FFI was
+considered and rejected: a large C library in-process and
+signature-reload lifecycle, for latency the design doesn't need.
+Later implementations behind the same trait, only on demonstrated
+need: `yara-x` (Rust-native, in-process) for custom rules; an ICAP
+client if procurement ever mandates a certified commercial engine
+(ESET, WithSecure, MetaDefender — all speak ICAP; the protocol is
+small enough to hand-write a client). **Ruled out**: cloud scanning
+APIs (VirusTotal-style) — they ship citizens' documents to third
+parties; disqualified on GDPR and sovereignty grounds.
+
+Two consequences of P.10 (ciphertext-only storage). Nothing that
+crawls the bucket can ever scan, so scanning happens **in the byte
+gateway at ingest, on plaintext** — the gateway's single streaming
+pass becomes a tee: *hash-verify ⊕ scan ⊕ encrypt*, one read doing
+all three. And **rescans against new signatures** (why §2.15 made scan
+status a lifecycle, not a boolean) are a `varve-service` sweep that
+stream-decrypts and rescans — a real, bounded cost the sweep
+scheduling must budget for. The verdict is asynchronous by design:
+store pending, flip on verdict, let surface admissibility refuse
+submission of un-scanned attachments (§2.15) — which is what makes
+clamd latency, slow rescans, and scanner swaps all non-events for the
+kernel.
+
+Alongside, regardless of engine: **magic-byte type validation at
+ingest** (claimed MIME vs actual bytes — `infer`/`file-format`-class
+crates), near-zero cost and catches masquerading. Config note: clamd's
+`MaxScanSize`/`StreamMaxLength` must be aligned with the platform's
+max upload size or large files silently get partial scans. Stated
+honestly: ClamAV is a known-signature compliance layer, not protection
+against novel malware — reviewer safety leans at least as much on
+serving attachments with `Content-Disposition: attachment` and
+sandboxed, no-inline-HTML preview rendering.
