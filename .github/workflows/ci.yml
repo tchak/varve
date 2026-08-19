@@ -64,6 +64,9 @@ jobs:
     env:
       # Nightly-only lints must not break the fuzz build.
       RUSTFLAGS: ""
+      # install-action ships a musl-built cargo-fuzz, whose default
+      # target is its own build triple; ASan needs the gnu one.
+      CARGO_FUZZ_TARGET: --target x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -75,13 +78,13 @@ jobs:
           workspaces: fuzz -> target
       - name: build fuzz targets
         working-directory: fuzz
-        run: cargo fuzz build
+        run: cargo fuzz build $CARGO_FUZZ_TARGET
       - name: run seeds
         working-directory: fuzz
         run: |
           for target in $(cargo fuzz list); do
             echo "::group::$target ($(ls "seeds/$target" | wc -l) seeds)"
-            cargo fuzz run "$target" "seeds/$target" -- -runs=0
+            cargo fuzz run $CARGO_FUZZ_TARGET "$target" "seeds/$target" -- -runs=0
             echo "::endgroup::"
           done
 
@@ -101,6 +104,9 @@ jobs:
     env:
       # Nightly-only lints must not break the fuzz build.
       RUSTFLAGS: ""
+      # install-action ships a musl-built cargo-fuzz, whose default
+      # target is its own build triple; ASan needs the gnu one.
+      CARGO_FUZZ_TARGET: --target x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -122,7 +128,7 @@ jobs:
         working-directory: fuzz
         run: |
           mkdir -p "corpus/${{ matrix.target }}"
-          cargo fuzz run "${{ matrix.target }}" \
+          cargo fuzz run $CARGO_FUZZ_TARGET "${{ matrix.target }}" \
             "corpus/${{ matrix.target }}" "seeds/${{ matrix.target }}" \
             -- -max_total_time=600
       - name: upload crash artifacts
