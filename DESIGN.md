@@ -2270,8 +2270,13 @@ The blob trait is async and **plaintext-streaming on both sides**
   contract, not caller discipline** — the caller compares the returned
   hash to the cell's claim (§2.15). Idempotent by hash: re-putting
   existing content stores nothing — that *is* the §2.15 dedup path.
-- `get(hash) → seekable stream` — seek is what serves HTTP Range
-  through age's chunk-aligned ciphertext math (P.10).
+- `get(hash) → plaintext stream` and `get_range(hash, range) →
+  plaintext stream` — range access is a **first-class operation**, not
+  client-side seek. *Correction, found in implementation:* age offers
+  seek only on its sync reader, and the S3 impl serves a range as a
+  ranged GET plus chunk-aligned decryption anyway (P.10) — a seekable
+  return type would have modeled the local-fs impl, not the contract.
+  Past-the-end ranges truncate, HTTP-style.
 - `has(hash)` / `stat(hash) → BlobInfo`.
 - `delete(hash)` — key row first (shred), object second: the order
   that fails safe.
