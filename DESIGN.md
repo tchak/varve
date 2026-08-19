@@ -563,6 +563,33 @@ meaningful on an instance with no access to INSEE.** That is the difference
 between portable records and records that decay. Pending resolutions import as
 pending-and-unresolvable, which is correct and honest.
 
+**Settled (2026-08-19): import adopts pending as pending; every outcome
+is explicit.** History import replays the lifecycle ops with the chain
+(§5), so instances arrive in the state they left, with their bound
+versions. What happens next is not import's business:
+
+- the receiving instance serves that resolver at those versions → its
+  scheduler picks them up through `pending_resolutions()`, exactly as
+  it picks up its own — no import-specific machinery, the same "import
+  is never a side door" principle as §5;
+- it serves the resolver but not those versions → landing them is a
+  **re-map**, the deliberate bulk act of rule 1, never an implicit
+  upgrade;
+- it has no implementation → they stay pending-and-unresolvable until
+  an operator either gains the resolver and re-requests, or abandons
+  with reason `resolver_unavailable` — a recorded decision, never an
+  import side effect.
+
+A checkpoint's expected resolutions are part of the chain and survive
+unchanged, so checkpoint validation continues across the move. The
+lifecycle travels only with **history** export, which §5 already names
+as the one lossless transfer; a snapshot export is folded cells through
+a lens and carries no resolution state (a pending lookup shows as its
+empty derived cells) — an importer that wants the lookups re-requests
+them. Auto-abandoning on import was considered and rejected: it turns a
+data move into a decision about the record, and the decision belongs to
+the receiving operator with the census (§12.7) in hand.
+
 ### New impact-report questions
 
 - resolver result type changed → which mappings break
@@ -1489,7 +1516,10 @@ Modes are distinguished by **stream kind, never by flag** — the two line
 kinds cannot mix (above), so one format can never do both:
 
 - **History import** — `entry` lines: migration. Verify and adopt each
-  record's chain, continue appending (§6: one-way, one-time).
+  record's chain, continue appending (§6: one-way, one-time). Lifecycle
+  ops replay with it: pending resolutions arrive pending and are the
+  receiving scheduler's to continue, re-map, or explicitly abandon —
+  never import's (§2.8, settled 2026-08-19).
 - **Snapshot import** — `record`/`item` cell lines: **whole-record
   replace**. A stream is authoritative for the full state of each record
   it contains; within a record, absent means unset. Finer bulk updates
