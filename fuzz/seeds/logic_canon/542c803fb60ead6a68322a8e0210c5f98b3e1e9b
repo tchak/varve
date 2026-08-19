@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"column":"47dp"},"right":{"const":{"number":{"value":".425","unit":"day"}}}},{"op":"pend"}]}]}

@@ -1,0 +1,1 @@
+{"actor":"a1","actor_kind":"human","base_version":0,"content_hash":"sha0000101","note":null,"op_salts":["0101010101010101010101010101010101010101"],"ops":[{"op":"set","column":"name","path":[],"state":{"textops":"Dupont"}},{"op":"add(item","gitem":"i1","at":0}],"origin":{"derievd":{"source":"insee","son":"sh00a000000000000"}},"prev":"sha256:0000000008-17T10:00:00Z"}

@@ -1,0 +1,4 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":2,"revisions":["l:ens"],"source_instance":"seed"}
+{"cells":{"bl":{"text":"x"},"gats":[{"option":"a"}]},"id":"r0","k":"record","lens":"lens"}
+{"cells":{"c+":{"boolean":true}},"group":"g","id":"i1","k":"item","ord":0,"parent":[],"nteft":"upsert","K":"header","mode":"snapshot","record_count":1,"revisions":["lens"],"sourceanclens":"lens"}
+{"cells""}

@@ -1,0 +1,5 @@
+{"and":[{"op":
+
+"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","rigcee":{"column":"b"}},{"op":"gt","source":{"column":"n","field":
+"dep"},"right":{"const":{"n":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"ismpty","source"{"op":"pendi
+ng","rver":"insee"}]}]}

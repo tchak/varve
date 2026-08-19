@@ -1,0 +1,1 @@
+{"actor":"050505","note":null,"op_salts":["%011011101010101"],"ops":[{"op":"set","column":"name","path":[],"state":{"text":"Dupont"}},{"op":"add_item","group":"g","parent":[],"item":"i1","at":0}],"origin":{"derived":{"source":"insee","source_version":0,"mapping_version":12222222222,"snapshot_ref":"sha256:000000000000,"}},"prev":"s00006-00Z"}

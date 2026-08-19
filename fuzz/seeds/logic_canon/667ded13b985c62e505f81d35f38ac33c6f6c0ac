@@ -1,0 +1,2 @@
+{"op":"eq","srce":{"op":"ys_empty","Soe":{"mn":"b"
+,"source":{"column":"nrucep"},"right":{"cumber":{"value":"3.5","unit":"day"}}}},{"op":"p"}]}]}

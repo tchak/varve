@@ -1,0 +1,2 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":2,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"blank":null,"n":{"text":true}},"group":"g","id":"i1","k":"item","ord":1,"parent":[],"record":"r1"}

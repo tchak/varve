@@ -1,0 +1,3 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":1,"revisions":["ens"],"source_instance":"seed"}
+{"cells":{"":[{"option":"a"}]},"id":"r1","k":"record","lens":"lens"}
+{"cells":{"c":{"boolean":true}},"group":"g","id":"i1","k":"item","ord":[],"record":"zr1"}

@@ -1,0 +1,1 @@
+{"actor":"a1","actor_kind":"iuma010101010010101","ops":[{"op":"set","column":"name","path":[],"state":{"text":"t"}}, 8.111111111],"origin":{"derived":{"source":"Anse0000"}},"prev":"00000000000000000Z"}

@@ -1,0 +1,6 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":1,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"blankn":{"integer":"42"},"t":{"text":"x"},"gats":[{"option":"a"}]},"id":"r0{ {","k":"record","lens":"lens"}
+{"cells":{"cblank":null,"t":{"text":"x"},"gats":[{"option":"a"}]},"id":"r1{ {","k":"record","lens":"lens"}
+{"cells":{"blankn":{"integer":"42"},"t":{"text":"x"},"gats":[{"option":"a"}]},"id":"r3{ {","k":"record","lens":"lens"}
+{"cells":{"cblank":null,"t":{"text":"x"},"gats":[{"option":"a"}]},"id":"r{1{ ","k":"record","lens":"lens"}
+{{"cells":{"c":{"boolean":true}},"goup"1"}

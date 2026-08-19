@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"column":"dep"},"right":{"const":{"number":{"value":"4          .5","unit":"dai"}}}},{"op":"pending","resolver":"insee"}]}]}

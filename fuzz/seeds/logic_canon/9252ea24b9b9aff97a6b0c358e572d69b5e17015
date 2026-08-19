@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"number":"oui"}}},{"or":[{"ce":{"cumn":"b"}},{"op":"gt","sr":"insee"}]}]}
