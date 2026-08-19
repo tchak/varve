@@ -14,6 +14,7 @@ use varve_core::canonical::CanonicalValue;
 use varve_value::{CellState, CellValue, Op, Scalar};
 
 use crate::resolution::{AbandonReason, Checkpoint, ExpectedResolution, Outcome, Transition};
+use crate::scan::ScanTransition;
 use crate::{Derivation, EntryOp, Origin};
 
 fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
@@ -91,18 +92,6 @@ pub fn op(op: &EntryOp) -> CanonicalValue {
                 ("anchor", string(anchor)),
                 ("scope", path(scope)),
             ];
-            let outcome_pairs = |o: &Outcome| {
-                vec![
-                    ("attempts", CanonicalValue::Int(o.attempts as i64)),
-                    (
-                        "last_error",
-                        match &o.last_error {
-                            None => CanonicalValue::Null,
-                            Some(e) => string(e),
-                        },
-                    ),
-                ]
-            };
             match transition {
                 Transition::Request {
                     resolver,
@@ -138,6 +127,43 @@ pub fn op(op: &EntryOp) -> CanonicalValue {
                     pairs.extend(outcome_pairs(outcome));
                 }
                 Transition::Abandon { reason, outcome } => {
+                    pairs.push(("transition", string("abandon")));
+                    pairs.push(("reason", string(abandon_reason(*reason))));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+            }
+            obj(pairs)
+        }
+        EntryOp::Scan {
+            element,
+            transition,
+        } => {
+            let mut pairs = vec![("op", string("scan")), ("element", string(element))];
+            match transition {
+                ScanTransition::Request { hash } => {
+                    pairs.push(("transition", string("request")));
+                    pairs.push(("hash", string(hash)));
+                }
+                ScanTransition::Clean { outcome } => {
+                    pairs.push(("transition", string("clean")));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                ScanTransition::Infected { threat, outcome } => {
+                    pairs.push(("transition", string("infected")));
+                    pairs.push((
+                        "threat",
+                        match threat {
+                            None => CanonicalValue::Null,
+                            Some(t) => string(t),
+                        },
+                    ));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                ScanTransition::Failed { outcome } => {
+                    pairs.push(("transition", string("failed")));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                ScanTransition::Abandon { reason, outcome } => {
                     pairs.push(("transition", string("abandon")));
                     pairs.push(("reason", string(abandon_reason(*reason))));
                     pairs.extend(outcome_pairs(outcome));
@@ -184,11 +210,24 @@ pub fn op(op: &EntryOp) -> CanonicalValue {
     }
 }
 
+fn outcome_pairs(o: &Outcome) -> Vec<(&'static str, CanonicalValue)> {
+    vec![
+        ("attempts", CanonicalValue::Int(o.attempts as i64)),
+        (
+            "last_error",
+            match &o.last_error {
+                None => CanonicalValue::Null,
+                Some(e) => string(e),
+            },
+        ),
+    ]
+}
+
 fn abandon_reason(r: AbandonReason) -> &'static str {
     match r {
         AbandonReason::Deadline => "deadline",
         AbandonReason::Operator => "operator",
-        AbandonReason::ResolverUnavailable => "resolver_unavailable",
+        AbandonReason::Unavailable => "unavailable",
         AbandonReason::Superseded => "superseded",
     }
 }
@@ -500,6 +539,16 @@ fn outcome_from(m: &Obj) -> Result<Outcome, RecordDecodeError> {
     })
 }
 
+fn abandon_reason_from(m: &Obj) -> Result<AbandonReason, RecordDecodeError> {
+    Ok(match get_str(m, "reason")?.as_str() {
+        "deadline" => AbandonReason::Deadline,
+        "operator" => AbandonReason::Operator,
+        "unavailable" => AbandonReason::Unavailable,
+        "superseded" => AbandonReason::Superseded,
+        other => return err(format!("unknown abandon reason '{other}'")),
+    })
+}
+
 fn expected_from(v: &CanonicalValue) -> Result<ExpectedResolution, RecordDecodeError> {
     let m = as_obj(v)?;
     only_keys(
@@ -587,13 +636,7 @@ pub fn op_from(v: &CanonicalValue) -> Result<EntryOp, RecordDecodeError> {
                     outcome: outcome_from(m)?,
                 },
                 "abandon" => Transition::Abandon {
-                    reason: match get_str(m, "reason")?.as_str() {
-                        "deadline" => AbandonReason::Deadline,
-                        "operator" => AbandonReason::Operator,
-                        "resolver_unavailable" => AbandonReason::ResolverUnavailable,
-                        "superseded" => AbandonReason::Superseded,
-                        other => return err(format!("unknown abandon reason '{other}'")),
-                    },
+                    reason: abandon_reason_from(m)?,
                     outcome: outcome_from(m)?,
                 },
                 _ => unreachable!("filtered above"),
@@ -601,6 +644,49 @@ pub fn op_from(v: &CanonicalValue) -> Result<EntryOp, RecordDecodeError> {
             EntryOp::Resolution {
                 anchor: GroupId::new(get_str(m, "anchor")?),
                 scope: path_from(get(m, "scope")?)?,
+                transition,
+            }
+        }
+        "scan" => {
+            let base = ["op", "element", "transition"];
+            let outcome = ["attempts", "last_error"];
+            let transition = get_str(m, "transition")?;
+            let allowed: Vec<&str> = match transition.as_str() {
+                "request" => [&base[..], &["hash"]].concat(),
+                "clean" | "failed" => [&base[..], &outcome[..]].concat(),
+                "infected" => [&base[..], &["threat"], &outcome[..]].concat(),
+                "abandon" => [&base[..], &["reason"], &outcome[..]].concat(),
+                other => return err(format!("unknown scan transition '{other}'")),
+            };
+            only_keys(m, &allowed)?;
+            let transition = match transition.as_str() {
+                "request" => ScanTransition::Request {
+                    hash: get_str(m, "hash")?
+                        .parse::<ContentHash>()
+                        .map_err(|_| RecordDecodeError("bad blob hash".into()))?,
+                },
+                "clean" => ScanTransition::Clean {
+                    outcome: outcome_from(m)?,
+                },
+                "infected" => ScanTransition::Infected {
+                    threat: match get(m, "threat")? {
+                        CanonicalValue::Null => None,
+                        CanonicalValue::String(t) => Some(t.clone()),
+                        _ => return err("threat must be a string or null"),
+                    },
+                    outcome: outcome_from(m)?,
+                },
+                "failed" => ScanTransition::Failed {
+                    outcome: outcome_from(m)?,
+                },
+                "abandon" => ScanTransition::Abandon {
+                    reason: abandon_reason_from(m)?,
+                    outcome: outcome_from(m)?,
+                },
+                _ => unreachable!("filtered above"),
+            };
+            EntryOp::Scan {
+                element: get_str(m, "element")?,
                 transition,
             }
         }
@@ -1023,13 +1109,29 @@ mod tests {
         })
     }
 
-    fn any_transition() -> impl Strategy<Value = Transition> {
-        let reason = prop_oneof![
+    fn any_reason() -> impl Strategy<Value = AbandonReason> {
+        prop_oneof![
             Just(AbandonReason::Deadline),
             Just(AbandonReason::Operator),
-            Just(AbandonReason::ResolverUnavailable),
+            Just(AbandonReason::Unavailable),
             Just(AbandonReason::Superseded),
-        ];
+        ]
+    }
+
+    fn any_scan_transition() -> impl Strategy<Value = ScanTransition> {
+        prop_oneof![
+            content_hash().prop_map(|hash| ScanTransition::Request { hash }),
+            any_outcome().prop_map(|outcome| ScanTransition::Clean { outcome }),
+            (proptest::option::of("\\PC{0,12}"), any_outcome())
+                .prop_map(|(threat, outcome)| ScanTransition::Infected { threat, outcome }),
+            any_outcome().prop_map(|outcome| ScanTransition::Failed { outcome }),
+            (any_reason(), any_outcome())
+                .prop_map(|(reason, outcome)| ScanTransition::Abandon { reason, outcome }),
+        ]
+    }
+
+    fn any_transition() -> impl Strategy<Value = Transition> {
+        let reason = any_reason();
         prop_oneof![
             ("[a-z-]{1,8}", any::<u32>(), any::<u32>()).prop_map(
                 |(resolver, resolver_version, mapping_version)| Transition::Request {
@@ -1093,6 +1195,12 @@ mod tests {
                     transition,
                 }
             ),
+            2 => ("[a-z0-9]{1,4}", any_scan_transition()).prop_map(|(element, transition)| {
+                EntryOp::Scan {
+                    element,
+                    transition,
+                }
+            }),
             1 => any_checkpoint().prop_map(EntryOp::Checkpoint),
         ]
     }
@@ -1583,6 +1691,38 @@ mod tests {
         abandon.push(("reason", s("bored")));
         assert!(op_from(&resolution(abandon)).is_err());
         assert!(op_from(&resolution(vec![("transition", s("retry"))])).is_err());
+
+        // Scans (§2.15): the same strictness per transition.
+        let scan = |pairs: Vec<(&str, CanonicalValue)>| {
+            let mut all = vec![("op", s("scan")), ("element", s("f1"))];
+            all.extend(pairs);
+            obj(all)
+        };
+        assert!(
+            op_from(&scan(vec![
+                ("transition", s("request")),
+                ("hash", s(&hash))
+            ]))
+            .is_ok()
+        );
+        assert!(op_from(&scan(vec![("transition", s("request"))])).is_err());
+        let mut infected = vec![("transition", s("infected")), ("threat", s("EICAR"))];
+        infected.extend(outcome());
+        assert!(op_from(&scan(infected.clone())).is_ok());
+        infected.retain(|(k, _)| *k != "threat");
+        assert!(
+            op_from(&scan(infected.clone())).is_err(),
+            "threat is required (null allowed)"
+        );
+        infected.push(("threat", CanonicalValue::Null));
+        assert!(op_from(&scan(infected)).is_ok());
+        let mut clean = vec![("transition", s("clean")), ("threat", CanonicalValue::Null)];
+        clean.extend(outcome());
+        assert!(
+            op_from(&scan(clean)).is_err(),
+            "a clean verdict names no threat"
+        );
+        assert!(op_from(&scan(vec![("transition", s("rescan"))])).is_err());
 
         // Checkpoints: frozen sets are sorted and duplicate-free.
         let checkpoint = |columns: Vec<&str>| {

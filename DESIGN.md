@@ -370,10 +370,12 @@ pending → resolved | not_found | ambiguous | failed | abandoned
 
 plus, on each terminal transition, a summary of how it was reached
 (attempt count, last error; for `abandon`, a reason: `deadline` ·
-`operator` · `resolver_unavailable` · `superseded` — the last when the
-lookup's input changed while it was pending, so the fresh `request` is
-preceded by an explicit end rather than silently replacing it). There
-is **no deadline on the record** (settled below).
+`operator` · `unavailable` (no implementation here can serve it — the
+same word for a missing resolver and a missing scanner, §2.15) ·
+`superseded` — the last when the lookup's input changed while it was
+pending, so the fresh `request` is preceded by an explicit end rather
+than silently replacing it). There is **no deadline on the record**
+(settled below).
 
 **Settled (2026-08-19): transient failures are not record state;
 outcomes are.** Institutional memory decides this one: the upstream
@@ -587,8 +589,8 @@ versions. What happens next is not import's business:
   upgrade;
 - it has no implementation → they stay pending-and-unresolvable until
   an operator either gains the resolver and re-requests, or abandons
-  with reason `resolver_unavailable` — a recorded decision, never an
-  import side effect.
+  with reason `unavailable` — a recorded decision, never an import
+  side effect.
 
 A checkpoint's expected resolutions are part of the chain and survive
 unchanged, so checkpoint validation continues across the move. The
@@ -1121,12 +1123,28 @@ further metadata lives platform-side, keyed by hash.
   base64 blob lines was considered and rejected — ~33% overhead and
   chunk-assembly machinery for a need DN does not have.
 - **Scan lifecycle is kernel-modeled, mirroring resolutions (§2.8)**:
-  per attachment element, `pending → clean | infected | failed`, driven
-  by a Tier 5 scanner; the kernel provides the pure pending-enumeration.
-  Settled so that surfaces can express "submittable only when scanned"
-  without every platform reimplementing the gate; the corresponding
-  logic atoms (paired, like `pending`/`not_pending`) join §4.1 when
-  the surface work needs them.
+  per attachment element, `pending → clean | infected | failed |
+  abandoned`, driven by a Tier 5 scanner; the kernel provides the pure
+  pending-enumeration. Settled so that surfaces can express
+  "submittable only when scanned" without every platform reimplementing
+  the gate; the corresponding logic atoms (paired, like
+  `pending`/`not_pending`) join §4.1 when the surface work needs them.
+  **Aligned with §2.8's four decisions (2026-08-19), mirror for
+  mirror:** scan transitions are lifecycle ops in the log, keyed by
+  element id (`request {hash}` binds *which bytes*, as a lookup binds
+  its versions; `clean` · `infected {threat}` · `failed` — definitive,
+  the bytes are unscannable — · `abandon {reason}`, each terminal op
+  carrying the `attempts`/`last_error` summary); scanner outages are
+  scheduler state, never entries; there is no deadline on the record;
+  a **rescan** — against new signatures (P.11), or on an instance that
+  imported the record without a scanner — is a fresh, deliberate,
+  bulk-able `request`, the same morning-after mechanism as re-request;
+  and an element removed from its cell while pending is ended
+  explicitly (`abandon`, `superseded`). Engine and signature-database
+  versions are blob-level bookkeeping (`varve-files`, §13.6), not
+  record meaning: the record says what verdict an element has, the
+  blob store says against what. The element id outlives the element —
+  a scan of a since-replaced file stays in the fold as history.
 - **Schema-level restrictions — settled**: `Attachment` carries
   constraints the way numbers carry units: an **accept set of media-type
   patterns** (`application/pdf`, `image/*` — IANA's vocabulary, not any

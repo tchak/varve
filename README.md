@@ -62,7 +62,7 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
 - `crates/varve-impact` — the impact report: change classification,
   resolver questions, broken rule references, record assessment
 - `crates/varve-record` — the append-only record log: entries, fold,
-  provenance, chain verification, snapshots, checkpoints, resolutions
+  provenance, chain verification, snapshots, checkpoints, resolutions, scans
 - `crates/varve-surface` — presentation and admissibility: reachability,
   requiredness, formats, write policy, block defaults
 - `crates/varve-revision` — revision DAG and publication, block and

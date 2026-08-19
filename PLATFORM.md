@@ -311,11 +311,13 @@ pass becomes a tee: *hash-verify ⊕ scan ⊕ encrypt*, one read doing
 all three. And **rescans against new signatures** (why §2.15 made scan
 status a lifecycle, not a boolean) are a `varve-service` sweep that
 stream-decrypts and rescans — a real, bounded cost the sweep
-scheduling must budget for. The verdict is asynchronous by design:
-store pending, flip on verdict, let surface admissibility refuse
-submission of un-scanned attachments (§2.15) — which is what makes
-clamd latency, slow rescans, and scanner swaps all non-events for the
-kernel.
+scheduling must budget for; on the record each rescan is a fresh
+`scan` request op followed by its verdict (DESIGN §2.15, aligned with
+§2.8 on 2026-08-19 — see P.12). The verdict is asynchronous by design:
+request pending, verdict lands as an op, let surface admissibility
+refuse submission of un-scanned attachments (§2.15) — which is what
+makes clamd latency, slow rescans, and scanner swaps all non-events for
+the kernel.
 
 Alongside, regardless of engine: **magic-byte type validation at
 ingest** (claimed MIME vs actual bytes — `infer`/`file-format`-class
@@ -345,8 +347,8 @@ Obligations this places on the platform:
   platform must: every pending resolution is either landed, answered,
   or explicitly abandoned by policy — pending-forever is the leak DESIGN
   forbids. The abandonment policy runs per resolver, with a reason
-  (`deadline` · `operator` · `resolver_unavailable` · `superseded`, the
-  last when the applicant changed the input mid-lookup) written into the
+  (`deadline` · `operator` · `unavailable` · `superseded`, the last
+  when the applicant changed the input mid-lookup) written into the
   `abandon` op, and its summary (`attempts`, `last_error`) taken from
   the scheduler's own attempt history at that moment.
 - **Outage posture is a policy choice, not a code path.** Whether a
@@ -367,5 +369,13 @@ Obligations this places on the platform:
   import are picked up by the same scheduler through the same
   enumeration, with no import-specific path; instances the platform
   cannot serve stay pending until an operator decides (re-request once
-  the resolver exists, or abandon with `resolver_unavailable`).
+  the resolver exists, or abandon with `unavailable`).
+- **Scans follow the same rules** (DESIGN §2.15, aligned 2026-08-19):
+  the scanner sweep is this scheduler's twin — transient clamd failures
+  stay in its own attempt history, the verdict lands as one `scan` op
+  with the summary, the P.11 rescan-against-new-signatures sweep is a
+  bulk re-request, and a pending scan whose element was removed is
+  ended with `superseded`. Blob-level dedup (scan one shared blob
+  once, propagate the verdict to every element naming it — §13.6
+  `BlobScan`) is the sweep's optimisation, invisible to the record.
 

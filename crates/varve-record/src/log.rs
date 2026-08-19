@@ -12,6 +12,7 @@ use crate::resolution::{
     CheckpointAt, LifecycleError, Resolution, ResolutionKey, Transition, checkpoint_op,
     fold_transition,
 };
+use crate::scan::{Scan, ScanTransition, fold_scan_transition};
 
 #[derive(Debug, Clone)]
 pub struct RecordLog {
@@ -98,6 +99,8 @@ pub struct FoldResult {
     /// Resolution instances (§2.8): the fold of the log's lifecycle
     /// ops, keyed by anchor-group instance.
     pub resolutions: BTreeMap<ResolutionKey, Resolution>,
+    /// Attachment scans (§2.15), keyed by element id.
+    pub scans: BTreeMap<String, Scan>,
 }
 
 impl FoldResult {
@@ -118,6 +121,14 @@ impl FoldResult {
         self.pending_resolutions()
             .map(|r| (r.scope.clone(), r.anchor.clone()))
             .collect()
+    }
+
+    /// The pure enumeration a Tier 5 scanner needs (§2.15): every
+    /// element whose scan is pending. Includes elements since removed
+    /// from their cell until the platform ends them (`abandon`,
+    /// `superseded`) — the fold keeps history, not a view.
+    pub fn pending_scans(&self) -> impl Iterator<Item = &Scan> {
+        self.scans.values().filter(|s| s.status.is_pending())
     }
 }
 
@@ -211,6 +222,18 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
             } => {
                 fold_transition(&mut result.resolutions, seq, anchor, scope, transition)
                     .map_err(|error| FoldError::Lifecycle { seq, error })?;
+                continue;
+            }
+            EntryOp::Scan {
+                element,
+                transition,
+            } => {
+                fold_scan_transition(&mut result.scans, seq, element, transition).map_err(
+                    |error| FoldError::Lifecycle {
+                        seq,
+                        error: error.into(),
+                    },
+                )?;
                 continue;
             }
             EntryOp::Checkpoint(checkpoint) => {
@@ -496,9 +519,10 @@ impl RecordLog {
 
     /// §2.15 GC roots: every blob this record's *entire log* references —
     /// attachment cells in every entry (including superseded values),
-    /// resolver-payload snapshots in origins, and the payloads landed by
+    /// resolver-payload snapshots in origins, the payloads landed by
     /// `land` ops (a snapshot that landed while its targets were
-    /// overridden may be referenced from nowhere else, §2.8 rule 2).
+    /// overridden may be referenced from nowhere else, §2.8 rule 2),
+    /// and the bytes named by scan requests.
     /// The kernel enumerates roots; the Tier 5 store sweeps. Erasure
     /// must cover history, so this walks the log, not the fold.
     pub fn referenced_blobs(&self) -> BTreeSet<ContentHash> {
@@ -515,12 +539,20 @@ impl RecordLog {
                 _ => {}
             }
             for op in &entry.content.ops {
-                if let EntryOp::Resolution {
-                    transition: Transition::Land { snapshot, .. },
-                    ..
-                } = op
-                {
-                    blobs.insert(*snapshot);
+                match op {
+                    EntryOp::Resolution {
+                        transition: Transition::Land { snapshot, .. },
+                        ..
+                    } => {
+                        blobs.insert(*snapshot);
+                    }
+                    EntryOp::Scan {
+                        transition: ScanTransition::Request { hash },
+                        ..
+                    } => {
+                        blobs.insert(*hash);
+                    }
+                    _ => {}
                 }
                 if let Some(Op::Set { state, .. }) = op.cell()
                     && let varve_value::CellState::Value(value) = state

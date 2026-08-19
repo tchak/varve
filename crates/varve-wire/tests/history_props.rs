@@ -16,7 +16,7 @@ use varve_core::primitives::Instant;
 use varve_core::{GroupId, ItemId, PathSeg, RecordId, ResolverId, RowPath};
 use varve_record::{
     AbandonReason, Actor, ActorKind, Checkpoint, Derivation, Draft, EntryOp, ExpectedResolution,
-    Origin, Outcome, RecordLog, Transition,
+    Origin, Outcome, RecordLog, ScanTransition, Transition,
 };
 use varve_value::{RecordValues, diff};
 use varve_wire::{
@@ -90,7 +90,31 @@ struct LifecycleStep {
     anchor: GroupId,
     scope: RowPath,
     transition: Transition,
+    /// An attachment scan step (§2.15) riding the same entry, if any.
+    scan: Option<(String, ScanTransition)>,
     checkpoint: bool,
+}
+
+fn scan_transition() -> impl Strategy<Value = ScanTransition> {
+    prop_oneof![
+        "[a-z]{0,6}".prop_map(|bytes| ScanTransition::Request {
+            hash: hash_plain(&CanonicalValue::String(bytes)).unwrap(),
+        }),
+        outcome().prop_map(|outcome| ScanTransition::Clean { outcome }),
+        (proptest::option::of("[A-Za-z.-]{1,12}"), outcome())
+            .prop_map(|(threat, outcome)| ScanTransition::Infected { threat, outcome }),
+        outcome().prop_map(|outcome| ScanTransition::Failed { outcome }),
+        (
+            prop_oneof![
+                Just(AbandonReason::Deadline),
+                Just(AbandonReason::Operator),
+                Just(AbandonReason::Unavailable),
+                Just(AbandonReason::Superseded),
+            ],
+            outcome()
+        )
+            .prop_map(|(reason, outcome)| ScanTransition::Abandon { reason, outcome }),
+    ]
 }
 
 fn outcome() -> impl Strategy<Value = Outcome> {
@@ -118,7 +142,7 @@ fn transition() -> impl Strategy<Value = Transition> {
             prop_oneof![
                 Just(AbandonReason::Deadline),
                 Just(AbandonReason::Operator),
-                Just(AbandonReason::ResolverUnavailable),
+                Just(AbandonReason::Unavailable),
                 Just(AbandonReason::Superseded),
             ],
             outcome()
@@ -138,14 +162,18 @@ fn lifecycle_step() -> impl Strategy<Value = LifecycleStep> {
             })),
         ],
         transition(),
+        proptest::option::of(("[f][1-3]", scan_transition())),
         any::<bool>(),
     )
-        .prop_map(|(anchor, scope, transition, checkpoint)| LifecycleStep {
-            anchor: GroupId::new(anchor),
-            scope,
-            transition,
-            checkpoint,
-        })
+        .prop_map(
+            |(anchor, scope, transition, scan, checkpoint)| LifecycleStep {
+                anchor: GroupId::new(anchor),
+                scope,
+                transition,
+                scan,
+                checkpoint,
+            },
+        )
 }
 
 /// One record's history: successive target states, each with the
@@ -216,6 +244,28 @@ fn build_log(
             })),
         }
         ops.push(lifecycle(step.transition.clone()));
+        // Same discipline for the scan step (§2.15 mirrors §2.8).
+        if let Some((element, transition)) = &step.scan {
+            let pending = state
+                .scans
+                .get(element)
+                .is_some_and(|s| s.status.is_pending());
+            let scan = |t: ScanTransition| EntryOp::Scan {
+                element: element.clone(),
+                transition: t,
+            };
+            match (transition, pending) {
+                (ScanTransition::Request { .. }, true) => ops.push(scan(ScanTransition::Abandon {
+                    reason: AbandonReason::Superseded,
+                    outcome: Outcome::default(),
+                })),
+                (ScanTransition::Request { .. }, false) | (_, true) => {}
+                (_, false) => ops.push(scan(ScanTransition::Request {
+                    hash: hash_plain(&CanonicalValue::String("bytes".into())).unwrap(),
+                })),
+            }
+            ops.push(scan(transition.clone()));
+        }
         if step.checkpoint {
             // What will be pending once these ops fold: re-fold a
             // scratch copy rather than second-guess the table.
@@ -370,7 +420,7 @@ fn generated_histories_cover_every_op_kind() {
     use proptest::test_runner::TestRunner;
     use varve_value::Op;
     let mut runner = TestRunner::deterministic();
-    let mut seen = [false; 12];
+    let mut seen = [false; 17];
     for _ in 0..200 {
         let history = record_history().new_tree(&mut runner).unwrap().current();
         let log = build_log(&RecordId::new("r"), &history);
@@ -391,6 +441,13 @@ fn generated_histories_cover_every_op_kind() {
                         Transition::Abandon { .. } => 10,
                     },
                     EntryOp::Checkpoint(_) => 11,
+                    EntryOp::Scan { transition, .. } => match transition {
+                        ScanTransition::Request { .. } => 12,
+                        ScanTransition::Clean { .. } => 13,
+                        ScanTransition::Infected { .. } => 14,
+                        ScanTransition::Failed { .. } => 15,
+                        ScanTransition::Abandon { .. } => 16,
+                    },
                 }] = true;
             }
         }

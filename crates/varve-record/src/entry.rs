@@ -11,13 +11,15 @@ use varve_value::Op;
 
 use crate::canon;
 use crate::resolution::{Checkpoint, Transition};
+use crate::scan::ScanTransition;
 use crate::{Actor, Origin};
 
 /// One op of an entry (§2.9): a cell op — the §5 wire ops — or a
 /// **lifecycle op** (settled 2026-08-19): a resolution transition
-/// (§2.8) or a checkpoint (§2.9). Lifecycle ops ride the same chained,
-/// salted, committed list as cell ops — one representation for log,
-/// export, migration and diff.
+/// (§2.8), an attachment scan transition (§2.15), or a checkpoint
+/// (§2.9). Lifecycle ops ride the same chained, salted, committed list
+/// as cell ops — one representation for log, export, migration and
+/// diff.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EntryOp {
     Cell(Op),
@@ -27,6 +29,12 @@ pub enum EntryOp {
         anchor: GroupId,
         scope: RowPath,
         transition: Transition,
+    },
+    /// A transition of the scan of one attachment element (§2.15),
+    /// keyed by its element id (§2.4 value-internal identity).
+    Scan {
+        element: String,
+        transition: ScanTransition,
     },
     Checkpoint(Checkpoint),
 }

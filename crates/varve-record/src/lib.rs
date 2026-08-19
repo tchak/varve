@@ -1,6 +1,7 @@
 //! Tier 3 (§7): the record log (§2.9) — entries, fold, snapshots,
 //! concurrency detection — and, as folds of lifecycle ops in that same
-//! log, resolution instances (§2.8) and checkpoints (§2.9).
+//! log, resolution instances (§2.8), attachment scans (§2.15) and
+//! checkpoints (§2.9).
 //!
 //! Still deterministic: no clock, no IO. Timestamps and salts are
 //! inputs, generated at Tier 5 and passed in.
@@ -25,7 +26,7 @@ pub use resolution::{
     LifecycleError, Outcome, Resolution, ResolutionKey, ResolutionStatus, Transition,
     validate_after_checkpoint,
 };
-pub use scan::{Scan, ScanStatus, ScanTransitionError, pending_scans};
+pub use scan::{Scan, ScanLifecycleError, ScanStatus, ScanTransition};
 
 use varve_core::ResolverId;
 use varve_core::canonical::ContentHash;

@@ -629,22 +629,109 @@ fn referenced_blobs_cover_history_and_snapshots() {
 }
 
 #[test]
-fn scan_lifecycle() {
-    use varve_record::{Scan, ScanStatus, pending_scans};
-    let mut scan = Scan {
+fn scan_lifecycle_is_a_fold_of_the_log() {
+    // §2.15, aligned with §2.8: the applicant uploads a file (request in
+    // the same entry), the scanner's verdict lands later as an op; the
+    // blob named by the request is a GC root; a rescan after new
+    // signatures is a deliberate new request.
+    use varve_core::canonical::{CanonicalValue, hash_plain};
+    use varve_record::{ScanStatus, ScanTransition};
+    use varve_value::AttachmentRef;
+    let blob = hash_plain(&CanonicalValue::String("bytes".into())).unwrap();
+    let scan = |transition: ScanTransition| EntryOp::Scan {
         element: "f1".into(),
-        hash: varve_record::genesis_hash(&RecordId::new("r1")),
-        status: ScanStatus::Pending,
-        attempts: 0,
+        transition,
     };
-    assert_eq!(pending_scans(std::slice::from_ref(&scan)).len(), 1);
-    scan.transition(ScanStatus::Failed).unwrap();
-    scan.transition(ScanStatus::Pending).unwrap();
-    assert_eq!(scan.attempts, 1);
-    scan.transition(ScanStatus::Clean).unwrap();
-    // Terminal: no rescanning a clean verdict into anything else.
-    assert!(scan.transition(ScanStatus::Pending).is_err());
-    assert!(scan.transition(ScanStatus::Infected).is_err());
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    log.append(entry_draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![
+            Op::Set {
+                column: ColumnId::new("piece"),
+                path: RowPath::root(),
+                state: CellState::Value(CellValue::Many(vec![Scalar::Attachment(Box::new(
+                    AttachmentRef {
+                        id: "f1".into(),
+                        hash: blob,
+                        filename: "f1.pdf".into(),
+                        content_type: "application/pdf".into(),
+                        byte_size: 10,
+                    },
+                ))])),
+            }
+            .into(),
+            scan(ScanTransition::Request { hash: blob }),
+        ],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    assert_eq!(state.scans["f1"].status, ScanStatus::Pending);
+    assert_eq!(state.pending_scans().count(), 1);
+    assert!(log.referenced_blobs().contains(&blob));
+
+    log.append(entry_draft(
+        Actor {
+            id: "scanner:clamav".into(),
+            kind: ActorKind::System,
+        },
+        1,
+        1,
+        Origin::Entered,
+        vec![scan(ScanTransition::Clean {
+            outcome: Outcome {
+                attempts: 3,
+                last_error: Some("clamd: connection refused".into()),
+            },
+        })],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    assert_eq!(state.scans["f1"].status, ScanStatus::Clean);
+    assert_eq!(state.scans["f1"].closed_at, Some(1));
+    assert_eq!(state.pending_scans().count(), 0);
+    // Terminal: no second verdict.
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            2,
+            2,
+            Origin::Entered,
+            vec![scan(ScanTransition::Infected {
+                threat: None,
+                outcome: Outcome::default()
+            })]
+        )),
+        Err(AppendError::IllegalTransition(LifecycleError::Scan(_)))
+    ));
+    // Rescan against new signatures: a fresh request, then the verdict.
+    log.append(entry_draft(
+        human("a1"),
+        2,
+        2,
+        Origin::Entered,
+        vec![scan(ScanTransition::Request { hash: blob })],
+    ))
+    .unwrap();
+    log.append(entry_draft(
+        human("a1"),
+        3,
+        3,
+        Origin::Entered,
+        vec![scan(ScanTransition::Infected {
+            threat: Some("EICAR-Test-File".into()),
+            outcome: Outcome::default(),
+        })],
+    ))
+    .unwrap();
+    let s = &log.fold().unwrap().scans["f1"];
+    assert_eq!(
+        (s.status, s.requested_at, s.closed_at),
+        (ScanStatus::Infected, 2, Some(3))
+    );
+    assert_eq!(s.threat.as_deref(), Some("EICAR-Test-File"));
 }
 
 #[test]

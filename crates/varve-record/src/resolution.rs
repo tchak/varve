@@ -103,9 +103,9 @@ pub enum AbandonReason {
     Deadline,
     /// An operator decided.
     Operator,
-    /// No implementation can serve this resolver here (typically after
-    /// a history import).
-    ResolverUnavailable,
+    /// No implementation here can serve this — no such resolver, no
+    /// scanner (typically after a history import).
+    Unavailable,
     /// The lookup's input changed while it was pending; a fresh
     /// `request` follows.
     Superseded,
@@ -181,6 +181,10 @@ pub enum LifecycleError {
     /// One checkpoint per entry: a checkpoint pins a log position.
     #[error("an entry carries more than one checkpoint")]
     MultipleCheckpoints,
+    /// An attachment scan op illegal from the element's current state
+    /// (§2.15, same table).
+    #[error(transparent)]
+    Scan(#[from] crate::scan::ScanLifecycleError),
 }
 
 /// Fold one lifecycle transition into `resolutions` (the §2.8 table).
@@ -416,7 +420,7 @@ fn frozen_touched(
                     groups.insert(group.clone());
                 }
             }
-            EntryOp::Resolution { .. } | EntryOp::Checkpoint(_) => {}
+            EntryOp::Resolution { .. } | EntryOp::Scan { .. } | EntryOp::Checkpoint(_) => {}
         }
     }
     (columns, groups)
@@ -431,6 +435,6 @@ fn ops_within(ops: &[EntryOp], scope: &RowPath) -> bool {
             Op::AddItem { parent, .. } | Op::RemoveItem { parent, .. } | Op::Reorder { parent, .. },
         ) => parent.starts_with(scope),
         EntryOp::Resolution { scope: s, .. } => s.starts_with(scope),
-        EntryOp::Checkpoint(_) => true,
+        EntryOp::Scan { .. } | EntryOp::Checkpoint(_) => true,
     })
 }

@@ -11,8 +11,8 @@ use varve_core::primitives::Instant;
 use varve_core::{GroupId, ItemId, PathSeg, RecordId, ResolverId, RevisionId, RowPath};
 use varve_record::{
     AbandonReason, Actor, ActorKind, AppendError, Draft, EntryOp, EntrySalts, LifecycleError,
-    Origin, Outcome, RecordLog, ResolutionStatus, Scan, ScanStatus, ScanTransitionError,
-    Transition, genesis_hash, pending_scans,
+    Origin, Outcome, RecordLog, ResolutionStatus, ScanLifecycleError, ScanStatus, ScanTransition,
+    Transition, genesis_hash,
 };
 
 fn payload() -> ContentHash {
@@ -222,49 +222,137 @@ fn instances_are_per_anchor_group_instance() {
 
 // ---------------------------------------------------------------- scans
 
-const SCAN_STATUSES: [ScanStatus; 4] = [
-    ScanStatus::Pending,
-    ScanStatus::Clean,
-    ScanStatus::Infected,
-    ScanStatus::Failed,
-];
+/// One scan transition of each kind (§2.15).
+fn scan_transitions() -> Vec<ScanTransition> {
+    vec![
+        ScanTransition::Request { hash: payload() },
+        ScanTransition::Clean {
+            outcome: Outcome::default(),
+        },
+        ScanTransition::Infected {
+            threat: Some("EICAR-Test-File".into()),
+            outcome: Outcome::default(),
+        },
+        ScanTransition::Failed {
+            outcome: Outcome {
+                attempts: 1,
+                last_error: Some("encrypted archive".into()),
+            },
+        },
+        ScanTransition::Abandon {
+            reason: AbandonReason::Unavailable,
+            outcome: Outcome::default(),
+        },
+    ]
+}
 
-fn scan(status: ScanStatus) -> Scan {
-    Scan {
+fn scan_op(transition: ScanTransition) -> EntryOp {
+    EntryOp::Scan {
         element: "f1".into(),
-        hash: payload(),
-        status,
-        attempts: 0,
+        transition,
     }
 }
 
+fn log_with_scan_in(state: Option<ScanStatus>) -> RecordLog {
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    let Some(state) = state else { return log };
+    log.append(draft(0, vec![scan_op(scan_transitions()[0].clone())]))
+        .unwrap();
+    if state != ScanStatus::Pending {
+        let to = scan_transitions()
+            .into_iter()
+            .find(|t| t.status() == state)
+            .unwrap();
+        log.append(draft(1, vec![scan_op(to)])).unwrap();
+    }
+    assert_eq!(log.fold().unwrap().scans["f1"].status, state);
+    log
+}
+
+const SCAN_STATES: [Option<ScanStatus>; 6] = [
+    None,
+    Some(ScanStatus::Pending),
+    Some(ScanStatus::Clean),
+    Some(ScanStatus::Infected),
+    Some(ScanStatus::Failed),
+    Some(ScanStatus::Abandoned(AbandonReason::Unavailable)),
+];
+
 #[test]
 fn scan_transition_table_is_exactly_the_documented_one() {
-    use ScanStatus::*;
-    for from in SCAN_STATUSES {
-        for to in SCAN_STATUSES {
-            let mut s = scan(from);
-            let result = s.transition(to);
-            let legal = matches!(
-                (from, to),
-                (Pending, Clean | Infected | Failed) | (Failed, Pending)
-            );
-            let expected = if legal {
-                Ok(())
-            } else {
-                Err(ScanTransitionError { from, to })
-            };
-            assert_eq!(result, expected, "{from:?} → {to:?}");
-            assert_eq!(s.status, if legal { to } else { from }, "{from:?} → {to:?}");
-            assert_eq!(
-                s.attempts,
-                u32::from((from, to) == (Failed, Pending)),
-                "{from:?} → {to:?}"
-            );
+    // pending → clean | infected | failed | abandoned; (absent | any
+    // terminal) → pending by `request` (a rescan); nothing else — the
+    // §2.8 table, per attachment element.
+    for from in SCAN_STATES {
+        for to in scan_transitions() {
+            let mut log = log_with_scan_in(from);
+            let base = log.version();
+            let result = log.append(draft(base, vec![scan_op(to.clone())]));
+            let is_request = matches!(to, ScanTransition::Request { .. });
+            let pending = from == Some(ScanStatus::Pending);
+            match (is_request, pending) {
+                (true, false) | (false, true) => {
+                    assert!(result.is_ok(), "{from:?} --{to:?}--> should be legal");
+                    let s = log.fold().unwrap().scans["f1"].clone();
+                    assert_eq!(s.status, to.status());
+                    if is_request {
+                        assert_eq!((s.requested_at, s.closed_at), (base, None));
+                        assert_eq!((s.hash, &s.threat, &s.outcome), (payload(), &None, &None));
+                    } else {
+                        assert_eq!(s.closed_at, Some(base));
+                        assert!(s.outcome.is_some(), "verdicts carry their summary");
+                        assert_eq!(
+                            s.threat.is_some(),
+                            matches!(to, ScanTransition::Infected { .. }),
+                            "only an infected verdict names a threat"
+                        );
+                    }
+                }
+                (true, true) => assert!(
+                    matches!(
+                        result,
+                        Err(AppendError::IllegalTransition(LifecycleError::Scan(
+                            ScanLifecycleError::AlreadyPending { .. }
+                        )))
+                    ),
+                    "rescan while pending must be refused"
+                ),
+                (false, false) => {
+                    assert!(
+                        matches!(
+                            result,
+                            Err(AppendError::IllegalTransition(LifecycleError::Scan(
+                                ScanLifecycleError::NotPending { status, .. }
+                            ))) if status == from
+                        ),
+                        "{from:?} --{to:?}--> should be refused"
+                    );
+                    assert_eq!(log.version(), base);
+                }
+            }
         }
     }
-    let scans: Vec<Scan> = SCAN_STATUSES.into_iter().map(scan).collect();
-    let pending = pending_scans(&scans);
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].status, ScanStatus::Pending);
+    // Pending enumeration is per element.
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    log.append(draft(
+        0,
+        vec![
+            scan_op(scan_transitions()[0].clone()),
+            EntryOp::Scan {
+                element: "f2".into(),
+                transition: scan_transitions()[0].clone(),
+            },
+        ],
+    ))
+    .unwrap();
+    log.append(draft(1, vec![scan_op(scan_transitions()[1].clone())]))
+        .unwrap();
+    let state = log.fold().unwrap();
+    assert_eq!(
+        state
+            .pending_scans()
+            .map(|s| s.element.as_str())
+            .collect::<Vec<_>>(),
+        vec!["f2"]
+    );
 }
