@@ -563,9 +563,8 @@ New line kinds: `resolver` (declarations, part of the schema — carried
 inside the `revision` line's schema) and `snapshot` (payload
 descriptions, part of the record's meaning — the payload bytes ride the
 sidecar, §2.15). Resolution instances are **not** a line kind: their
-lifecycle travels as ops inside `entry` lines (settled above). Neither
-the `snapshot` line nor the lifecycle ops are emitted yet — §10
-question 14.
+lifecycle travels as ops inside `entry` lines (settled above). Both are
+emitted (§10 Q14, resolved 2026-08-19).
 
 The resolver *implementation* — endpoint, credentials, rate limits — is
 instance-local and does not travel.
@@ -754,7 +753,7 @@ side-table of entry permissions that would fail to travel on migration.
 reachability (§2.4): entry visibility must not flip with record state.
 The function lives in `varve-surface` (which may depend on `varve-record`;
 nothing depends on `varve-surface`, §7) and waits on the redacted-entry
-representation (§2.13 decision 4, open question 14) — specified, not day
+representation (§2.13 decision 4, open question 20) — specified, not day
 one.
 
 Chain interaction: omitting entries from a filtered history export would
@@ -1149,8 +1148,7 @@ further metadata lives platform-side, keyed by hash.
     import (an undescribed blob is a smuggling vector, not a
     convenience); `referenced` means no sidecar; never mixed. The
     manifest field is `blobs` (`referenced` | `bundled`) — payloads
-    travel in it too (today's `attachments` key; renamed with the Q14
-    build).
+    travel in it too.
   - **Integrity needs nothing new**: each entry verifies itself on
     import through `put(stream) → hash` against its name (§13.6's
     trait contract), and completeness is checked against the stream —
@@ -1533,7 +1531,7 @@ in one file in dependency order.
 ```
 {"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, blobs: referenced | bundled — §2.15)
 {"k":"revision", "id":"...", "schema":{...}}   // writer schema travels with the data (Avro property); resolver declarations ride inside it
-{"k":"block", "id":"...", "version":1, "group":{...}, "resolvers":[...]}   // schema-side block (§2.1); travels like a nomenclature. Its surface defaults travel with surfaces (§10 Q14)
+{"k":"block", "id":"...", "version":1, "group":{...}, "resolvers":[...]}   // schema-side block (§2.1); travels like a nomenclature. Its surface defaults travel as block_defaults lines
 {"k":"nomenclature", "id":"...", "version":1, "rows":[...]}   // versioned (id, label, ...fields) table (§2.12); travels like a block
 {"k":"record", "id":"...", "lens":"...", "cells":{...}}   // snapshot mode: ROOT cells; lens = fold revision, not a record property (§2.9)
 {"k":"item", "record":"...", "group":"...", "parent":[...], "id":"...", "ord":0, "cells":{...}}   // one item's cells; follows its record line
@@ -1565,11 +1563,11 @@ Wire-local mirror structs (two shapes of one object, drift) and
 platform-only surface formats (surfaces are Tier 3 kernel objects and
 must migrate) were rejected too.
 
-Not yet on the wire — **open question 14**: the lifecycle ops inside
-`entry` (resolution transitions and checkpoints, §2.8/§2.9 — settled
-2026-08-19 as ops, not line kinds), payload `snapshot` descriptions and
-the bundled blob sidecar. Until then a history export is lossless for
-the *cell* log.
+Everything above is on the wire (§10 Q14, resolved 2026-08-19). The
+bundled blob sidecar is assembled and imported by `varve-bundle`
+(Tier 5, §13.6), which joins `Stream::described_blobs()` with
+`varve-files` streams — blobs first, stream second, so a failed
+adoption leaves only unreferenced blobs for the sweep.
 
 ### Key unifications
 
@@ -1959,7 +1957,9 @@ up.*
 **Tier 5 — IO appears here for the first time** *(expanded 2026-08-18 — §13)*
 - `varve-store` (traits, async), a store implementation (substrate —
   Toasty vs direct SQL — is open question 19), `varve-files`
-  (content-addressed manifest + blob trait), `varve-service` (the
+  (content-addressed manifest + blob trait), `varve-bundle` (the
+  export bundle: stream ⊕ sidecar and surface ⊕ envelope joins —
+  §13.6, built 2026-08-19), `varve-service` (the
   choreography narrow waist: minting, append sequencing, publication
   gating — §13.2), `varve-resolve` (resolver host + retry driver,
   deferred until the first resolver-backed field), `varve-export`
@@ -2185,47 +2185,33 @@ Only then: `surface`, `store`, service.
     conformance, wire reader) so each state has one canonical form.
     Collapsing to two states was considered and rejected — it would
     erase the "left blank by whom" fact that audit and diff rely on.
-14. **Record-side (and surface) wire completeness.** Not yet on the wire
-    (found by audit, 2026-08-17): payload `snapshot` descriptions
-    (hash/size/type, like `attachment`), the bundled blob **sidecar**
-    (§2.15), and **surfaces** — including block defaults, which travel
-    with them — so today a history export is lossless for the log
-    (cells *and* lifecycle: resolution transitions and checkpoints are
-    ops inside `entry` since 2026-08-19, §2.8/§2.9, built the same day),
-    a procedure's surfaces do not migrate, and "an imported record
-    remains fully meaningful on an instance with no access to INSEE"
-    (§2.8) is a goal, not a property — the payload bytes do not yet
-    travel. *Every member designed and the kernel/wire half built
-    (2026-08-19): `snapshot` lines travel like `attachment` (one
-    description per hash, either kind); `surface`/`block_defaults`
-    lines carry opaque canonical bodies — codec in
-    `varve_surface::canon`, round-trip-tested; the wire verifies the
-    defaults line's hash as `hash_plain(body)` and the surface
-    envelope against its body without interpreting either; the
-    manifest field is `blobs: referenced | bundled`, and
-    `Stream::described_blobs()` is the exact set a bundled sidecar
-    must match (§2.15: plain tar keyed by hash, plaintext entries,
-    bundle-level confidentiality as a Tier 5 option). §7 intact — the
-    seam test rides a dev-edge from `varve-surface` to `varve-wire`,
-    never the reverse. **Remaining: the Tier 5 half** — the sidecar
-    assembler/importer joining `described_blobs` with `varve-files`
-    streams, and the exporter/importer that calls the surface codec —
-    then this question resolves.*
-    Deliberately routed here rather than built piecemeal:
-    payload blobs and attachment blobs share one sidecar, and the
-    `snapshot` descriptions should land with it so import restores a
-    record whole. Decide with §12.7
-    (deferred-resolution frequency) in hand. **Held whole, by
-    institutional memory (2026-08-19):** a split was proposed — land the
-    already-specified members (surfaces, `checkpoint`, `snapshot`, the
-    sidecar) now and leave only the `resolution` status vocabulary
-    gated — and refused. DN's institutional APIs are flaky for hours and
-    sometimes days, and DN's deferral machinery was built as a series of
-    afterthoughts, each more complicated than the last; the wire shape
-    of `resolution` is the one place where that history must not repeat.
-    Landing the rest first would recreate the afterthought: a record
-    format that is "complete except for the part that breaks". No
-    shortcuts; the bundle waits for §12.7.
+14. ~~Record-side (and surface) wire completeness.~~ **Resolved
+    (2026-08-19): everything a record's meaning needs is on the wire,
+    and the bundle machinery is built** — resolution lifecycle and
+    checkpoints as ops inside `entry` (§2.8, §2.9); payload `snapshot`
+    descriptions like `attachment` (one description per hash, either
+    kind); surfaces and block defaults as `surface`/`block_defaults`
+    lines with opaque canonical bodies (codec `varve_surface::canon`,
+    §5 — §7 intact); the manifest's `blobs: referenced | bundled`; the
+    sidecar (§2.15: plain hash-keyed tar, deterministic, exact-set
+    complete) assembled and imported by **`varve-bundle`** (Tier 5,
+    §13.6), blobs first, stream second, every entry self-verifying
+    through `put`. The end-to-end test imports a bundle onto a fresh
+    instance and finds every log-referenced blob present — "an imported
+    record remains fully meaningful" (§2.8) is now a tested property.
+    How it was resolved is part of the record: found by audit
+    (2026-08-17); **held whole by institutional memory (2026-08-19)** —
+    a split landing the easy members first was proposed and refused,
+    because DN's upstream APIs fail for hours to days and DN's deferral
+    machinery was built as afterthoughts; the §12.7 gate's real
+    dependency (the `resolution` status vocabulary) was then settled by
+    the four §2.8 design decisions rather than by census data, and the
+    remaining members were designed (§5 opaque bodies, §2.15 sidecar
+    format) and built together, in order, the same day. §12.7 still
+    matters — it sizes P.12's scheduler policy — but no longer gates
+    any wire shape. The redacted-entry representation, which §2.9
+    attached here by reference, is split out as its own question
+    (Q20).
 15. **The §4.3 solver — absurdity detection and statically unreachable
     required columns.** Promised by §7 for the impact report and by
     §4.3 as the algorithm behind it; not built (found by audit,
@@ -2297,6 +2283,20 @@ Only then: `surface`, `store`, service.
     language decision is independent of the emission target. The
     `varve-store` trait is what keeps this reversible either way.
 
+20. **Redacted-entry representation and the surface-filtered history
+    export.** Split out of Q14 at its resolution (2026-08-19) — §2.9
+    attached it there by reference. Fully specified, deliberately not
+    built: a filtered history export transmits every entry's envelope
+    (`seq`, `prev`, content hash) and discloses only the ops visible
+    through the surface, each with its salt, withholding the rest as
+    commitments — verifiable unchanged because entries are vector
+    commitments over ops (§2.13 decision 4); `filter(log, surface) →
+    redacted log` lives in `varve-surface` (§2.9). Required by nothing
+    on day one: applicant-facing exports are folded state, operator
+    migration carries full history (§2.9). Build when a platform needs
+    partial disclosure — likely alongside §2.10's finer-grained
+    erasure, which rides the same mechanism.
+
 ## 11. Prior art to consult
 
 **Directly liftable**
@@ -2362,8 +2362,8 @@ With access to open DN schema statistics:
    sometimes days, not minutes. What the census must add is the
    distribution — typical pending duration, share that never resolves,
    share resolved after the record moved on — which fixes the
-   scheduler's deadlines, backoff and abandonment policy (P.12) and the
-   outcome summary carried by the lifecycle ops (§2.8, Q14).*
+   scheduler's deadlines, backoff and abandonment policy (P.12); the
+   wire shapes it once gated (Q14) are settled and built.*
 8. **Post-submission edit profile** — how many distinct actors touch a record
    after submission, how many entries per record, over what elapsed time, and
    how often do two actors touch the same cell? Validates per-cell LWW +
@@ -2607,11 +2607,13 @@ per record; the manifest's exists so one shared blob is scanned once,
 not once per record — `varve-service` propagates blob verdicts to the
 element scan statuses.
 
-**The Q14 seam, named now.** `varve-wire` owns the manifest and
-`attachment` lines; `varve-files` streams bytes; the bundled **sidecar
-archive** is assembled by a Tier 5 exporter joining the two. Neither
-crate grows the other's half. The sidecar's format is settled (§2.15,
-2026-08-19: plain tar keyed by hash, plaintext entries, exact-set
-completeness); its build stays with Q14. The same seam carries surfaces
-(§5, settled 2026-08-19): `varve-wire` types the envelope,
-`varve-surface` the body, Tier 5 joins.
+**The Q14 seam, built (2026-08-19).** `varve-wire` owns the manifest
+and `attachment`/`snapshot` lines; `varve-files` streams bytes; the
+bundled **sidecar archive** (§2.15: plain tar keyed by hash) is
+assembled and imported by **`varve-bundle`**, the Tier 5 exporter
+joining the two — neither crate grew the other's half. The same crate
+joins surfaces with their wire envelope (§5): `varve-wire` types the
+envelope, `varve-surface` the body, `varve-bundle` converts between
+the typed objects and the lines. Import order is blobs first, stream
+second: a failed adoption leaves only unreferenced blobs for the grace
+window and sweep.

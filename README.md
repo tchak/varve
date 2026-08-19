@@ -67,6 +67,8 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
   requiredness, formats, write policy, block defaults
 - `crates/varve-revision` — revision DAG and publication, block and
   nomenclature registries, three-way schema merge, aggregate revisions
+- `crates/varve-bundle` — the export bundle (Tier 5): blob sidecar
+  assembly/import, surfaces joined with their wire envelope
 - `crates/varve-wire` — tagged JSONL: writer, reader, history and
   snapshot import
 - `tools/m0` — the corpus harness (oracle over the public DN dataset)

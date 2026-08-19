@@ -181,7 +181,7 @@ pub(crate) fn column_entries(surface: &Surface) -> Vec<ColumnEntry<'_>> {
 impl Surface {
     /// The columns this surface presents at all — the *static* column
     /// set the §2.9 entry-visibility filter (`filter(log, surface)`,
-    /// specified, not built — §10 Q14) is defined over: an entry is
+    /// specified, not built — §10 Q20) is defined over: an entry is
     /// visible through S iff it touches a column S presents.
     pub fn columns(&self) -> BTreeSet<ColumnId> {
         fn walk(nodes: &[Node], out: &mut BTreeSet<ColumnId>) {

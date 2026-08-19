@@ -9,6 +9,7 @@ members = [
     "crates/varve-revision",
     "crates/varve-wire",
     "crates/varve-files",
+    "crates/varve-bundle",
     "crates/varve-projection",
     "crates/varve-impact",
     "tools/m0",

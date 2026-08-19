@@ -13,7 +13,8 @@
 //! `surface`/`block_defaults` lines as opaque canonical bodies whose
 //! codec `varve-surface` owns (§5, settled 2026-08-19). The bundled
 //! blob sidecar (§2.15: plain tar keyed by hash, exact-set complete
-//! against `described_blobs`) is assembled Tier 5-side (§13.6).
+//! against `described_blobs`) is assembled and imported by
+//! `varve-bundle` (Tier 5, §13.6).
 //!
 //! The reader takes a whole buffer; a streaming reader over the same
 //! line grammar is Tier 5 work.
