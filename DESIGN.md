@@ -384,6 +384,34 @@ Kernel contributes one pure function — `pending_resolutions(record)` — so a
 Tier 5 scheduler can drive retries without the kernel knowing about queues or
 clocks.
 
+**Settled (2026-08-19): lifecycle transitions are log entries.** A
+resolution instance is not a side structure beside the log — it is the
+fold of **lifecycle ops** carried by ordinary chained entries, next to
+the cell ops: `resolution(anchor, scope, transition)` with transition ∈
+`request {resolver, resolver_version, mapping_version}` · `land
+{snapshot, …}` · `not_found` · `ambiguous` · `failed` · `abandon
+{reason, …}`. The resolver's landing entry already exists (its derived
+`set`s, actor kind `resolver`); `land` rides in that same entry, so "a
+resolution never resolves without its snapshot" holds atomically, by
+construction. Consequences, all free: abandonment *is* a recorded,
+chained event (the requirement above, now literal); the fold yields
+`(cells, resolutions)`; diff between two log points shows lookups that
+landed or were given up; history import replays them (§5); a
+checkpoint's expected resolutions match on the versions bound in the
+`request` op; entry visibility through a surface (§2.9) treats a
+lifecycle op as touching its anchor group's target columns. Rule 2's
+realisation is untouched — the fold still applies "human-authored
+wins" without consulting pending state. Settled by design argument:
+§2.9's thesis is that log, export, migration stream and diff are *one*
+representation; a second per-record chain for resolutions is exactly
+the "two serializers that drift" §5 forbids, and a status-only record
+on the wire cannot honour "abandonment is an explicit recorded event".
+The same argument makes **checkpoints entries too** (§2.9): a named
+hash kept outside the chain can be dropped or forged without detection,
+and the frozen set is the legal story. The `checkpoint` and `resolution`
+wire line kinds therefore dissolve into `entry` (§10 Q14). Code follows
+(`varve-record` holds `Resolution`/`Checkpoint` beside the log today).
+
 ### Three rules (RATIFIED)
 
 1. **Version binding at request time, not completion.** A resolution requested
@@ -466,9 +494,12 @@ surfaces, so the platform fills the frozen set from the surface
 ### Wire format
 
 New line kinds: `resolver` (declarations, part of the schema — carried
-inside the `revision` line's schema), `snapshot` (payloads, part of the
-record's meaning), `resolution` (instances with status). The latter two
-are not yet emitted — §10 question 14.
+inside the `revision` line's schema) and `snapshot` (payload
+descriptions, part of the record's meaning — the payload bytes ride the
+sidecar, §2.15). Resolution instances are **not** a line kind: their
+lifecycle travels as ops inside `entry` lines (settled above). Neither
+the `snapshot` line nor the lifecycle ops are emitted yet — §10
+question 14.
 
 The resolver *implementation* — endpoint, credentials, rate limits — is
 instance-local and does not travel.
@@ -510,7 +541,9 @@ Entry {
   origin,                     // ties to cell provenance (§2.7)
   authored_against_revision,
   timestamp,
-  ops: [ set | unset | add_item | remove_item | reorder ],
+  ops: [ set | unset | add_item | remove_item | reorder      // cell ops
+       | resolution(anchor, scope, transition)             // lifecycle ops (§2.8, settled 2026-08-19)
+       | checkpoint {name, reading_revision, expected, frozen} ],
   note?                       // optional human reason
 }
 ```
@@ -642,12 +675,23 @@ one of `varve-wire`.
 
 ### Checkpoints, now precisely defined
 
-> A checkpoint is a named entry hash in the log — the hash, not the seq, is
-> what pins content — plus a reading revision, plus the set of pending
-> resolutions expected to land after it, plus the **frozen set**: the columns
-> and `many` groups writable on the surface it was taken through (§2.8).
-> A later checkpoint supersedes it; its regime runs from its entry to the
-> superseding one's.
+> A checkpoint is an **entry in the log** — a `checkpoint` op, whose
+> chained position pins the content it freezes (everything before it) —
+> carrying a name, a reading revision, the set of pending resolutions
+> expected to land after it, and the **frozen set**: the columns and
+> `many` groups writable on the surface it was taken through (§2.8).
+> A later checkpoint entry supersedes it; its regime runs from its entry
+> to the superseding one's.
+
+**Settled (2026-08-19): checkpoints are entries, not side records.** An
+earlier wording made a checkpoint "a named entry hash" held beside the
+log; a structure outside the chain can be dropped or forged without
+detection, and the frozen set is precisely the legal story ("this is
+what the applicant declared") that tamper-evidence exists for. As an
+entry, supersession order is log order, `validate_after_checkpoint`
+reads its inputs from the log itself, and a checkpoint needs no wire
+line of its own (§10 Q14). Same argument as resolution lifecycle ops
+(§2.8): one chain, one representation.
 
 ## 2.10 Erasure (GDPR) is a kernel design input
 
@@ -1338,9 +1382,11 @@ in one file in dependency order.
 {"k":"attachment", "hash":"sha256:...", "byte_size":..., "content_type":"..."}   // describes a blob (§2.15); algorithm-tagged (§2.13)
 ```
 
-Not yet on the wire — **open question 14**: `resolution` instances,
-`checkpoint`s, payload `snapshot` descriptions and the bundled blob
-sidecar. Until then a history export is lossless for the *log*.
+Not yet on the wire — **open question 14**: the lifecycle ops inside
+`entry` (resolution transitions and checkpoints, §2.8/§2.9 — settled
+2026-08-19 as ops, not line kinds), payload `snapshot` descriptions and
+the bundled blob sidecar. Until then a history export is lossless for
+the *cell* log.
 
 ### Key unifications
 
@@ -1950,11 +1996,11 @@ Only then: `surface`, `store`, service.
     Collapsing to two states was considered and rejected — it would
     erase the "left blank by whom" fact that audit and diff rely on.
 14. **Record-side (and surface) wire completeness.** Not yet on the wire
-    (found by audit, 2026-08-17): `resolution` instances (§2.8 lifecycle,
-    landed snapshot ref), `checkpoint`s (§2.9: entry hash, reading
-    revision, expected resolutions, frozen set), payload `snapshot`
-    descriptions (hash/size/type, like `attachment`), the bundled blob
-    **sidecar** (§2.15), and **surfaces** — including block defaults,
+    (found by audit, 2026-08-17): resolution lifecycle and checkpoints
+    — since 2026-08-19 **ops inside `entry`**, not line kinds (§2.8,
+    §2.9) — payload `snapshot` descriptions (hash/size/type, like
+    `attachment`), the bundled blob **sidecar** (§2.15), and
+    **surfaces** — including block defaults,
     which travel with them — so today a history export is lossless for
     the log only, a procedure's surfaces do not migrate, and
     "an imported record remains fully meaningful on an instance with no
