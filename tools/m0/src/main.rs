@@ -571,7 +571,7 @@ fn wire_round_trip(schemas: &[Schema]) {
             intent: Intent::CreateOnly,
             revisions: ids.clone(),
             record_count: 0,
-            attachments_bundled: false,
+            blobs_bundled: false,
         }),
     );
 

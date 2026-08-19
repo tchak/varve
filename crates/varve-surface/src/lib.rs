@@ -1,6 +1,7 @@
 //! Tier 3 (§7): the surface — presentation + admissibility tree over a
 //! revision (§2.1). **Nothing depends on this crate**: that is the
-//! proof that "form isn't core".
+//! proof that "form isn't core" — which is why surfaces reach the wire
+//! as opaque bodies whose codec lives here (`canon`, §5).
 //!
 //! The schema defines what is *representable*; a surface defines what
 //! is *admissible* (§2.6): visibility, requiredness, format
@@ -11,13 +12,16 @@
 
 mod admissibility;
 mod block;
+pub mod canon;
 mod format;
 mod reach;
 mod validate;
 
 pub use admissibility::{AdmissibilityReport, Finding, admissibility};
-pub use block::{
-    BlockDefaults, BlockDefaultsError, IncludeError, format_canonical, node_canonical,
+pub use block::{BlockDefaults, BlockDefaultsError, IncludeError};
+pub use canon::{
+    SurfaceDecodeError, block_defaults_canonical, block_defaults_from, format_canonical,
+    format_from, node_canonical, node_from, surface_canonical, surface_from,
 };
 pub use format::{CompiledFormat, Format};
 pub use reach::{Reachability, reachability};

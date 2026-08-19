@@ -6,9 +6,10 @@
 
 use std::collections::BTreeMap;
 
-use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
+use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER, hash_plain};
 use varve_core::{
-    ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+    BlockId, ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+    SurfaceId,
 };
 use varve_record::canon as record_canon;
 use varve_schema::{
@@ -55,6 +56,35 @@ pub struct Stream {
     pub lines: Vec<Line>,
 }
 
+impl Stream {
+    /// The blobs this stream *describes* — its `attachment` and
+    /// `snapshot` lines, in hash order. §2.15: a bundled sidecar must
+    /// contain exactly these hashes; the Tier 5 exporter assembles from
+    /// this set and the importer rejects a sidecar that differs from
+    /// it. Uniqueness per hash was enforced on read.
+    pub fn described_blobs(&self) -> Vec<(ContentHash, u64, &str)> {
+        let mut out: Vec<(ContentHash, u64, &str)> = self
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                Line::Attachment {
+                    hash,
+                    byte_size,
+                    content_type,
+                }
+                | Line::Snapshot {
+                    hash,
+                    byte_size,
+                    content_type,
+                } => Some((*hash, *byte_size, content_type.as_str())),
+                _ => None,
+            })
+            .collect();
+        out.sort_by_key(|(hash, ..)| *hash);
+        out
+    }
+}
+
 pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| ReadError::Malformed {
         line: 1,
@@ -71,6 +101,12 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     // Every revision a record or entry names must be declared on line 1
     // and travel in-stream (§5: the writer schema travels with the data).
     let mut revisions_named: std::collections::BTreeSet<RevisionId> = Default::default();
+    // One description per blob, one surface per (id, revision), one
+    // defaults per (block, version): a second is malformed, never a
+    // second version (§5's duplicate-record rule, same reasoning).
+    let mut blobs_described: std::collections::BTreeSet<ContentHash> = Default::default();
+    let mut surfaces_seen: std::collections::BTreeSet<(SurfaceId, RevisionId)> = Default::default();
+    let mut defaults_seen: std::collections::BTreeSet<(BlockId, u32)> = Default::default();
 
     for (index, raw) in text.lines().enumerate() {
         let line_no = index + 1;
@@ -125,7 +161,9 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             "revision" => &["k", "id", "schema"],
             "nomenclature" => &["k", "id", "version", "rows"],
             "block" => &["k", "id", "version", "group", "resolvers"],
-            "attachment" => &["k", "hash", "byte_size", "content_type"],
+            "attachment" | "snapshot" => &["k", "hash", "byte_size", "content_type"],
+            "surface" => &["k", "id", "revision", "surface"],
+            "block_defaults" => &["k", "block", "version", "hash", "defaults"],
             "record" => &["k", "id", "lens", "cells"],
             "item" => &["k", "record", "group", "parent", "id", "ord", "cells"],
             _ => &[], // entry: checked by its decoder; unknown kinds: below
@@ -165,14 +203,91 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             "block" => {
                 Line::Block(block_from_canonical(&value).map_err(|e| malformed(e.to_string()))?)
             }
-            "attachment" => Line::Attachment {
-                hash: get_str(map, "hash")
+            "attachment" | "snapshot" => {
+                let hash = get_str(map, "hash")
                     .map_err(malformed)?
                     .parse::<ContentHash>()
-                    .map_err(|_| malformed("bad hash".into()))?,
-                byte_size: get_u64(map, "byte_size").map_err(malformed)?,
-                content_type: get_str(map, "content_type").map_err(malformed)?,
-            },
+                    .map_err(|_| malformed("bad hash".into()))?;
+                if !blobs_described.insert(hash) {
+                    return Err(malformed(format!("duplicate blob description '{hash}'")));
+                }
+                let byte_size = get_u64(map, "byte_size").map_err(malformed)?;
+                let content_type = get_str(map, "content_type").map_err(malformed)?;
+                if kind == "attachment" {
+                    Line::Attachment {
+                        hash,
+                        byte_size,
+                        content_type,
+                    }
+                } else {
+                    Line::Snapshot {
+                        hash,
+                        byte_size,
+                        content_type,
+                    }
+                }
+            }
+            "surface" => {
+                // The body is opaque here (§5): its codec is
+                // varve-surface's; the reader keeps it canonical and
+                // checks only that the envelope's id/revision match the
+                // body's own — the two travel together and must agree.
+                let id = get_str(map, "id").map_err(malformed)?;
+                let revision = get_str(map, "revision").map_err(malformed)?;
+                let body = get(map, "surface").map_err(malformed)?.clone();
+                let inner = match &body {
+                    CanonicalValue::Object(b) => b,
+                    _ => return Err(malformed("surface body must be an object".into())),
+                };
+                match (inner.get("id"), inner.get("revision")) {
+                    (Some(CanonicalValue::String(bid)), Some(CanonicalValue::String(brev)))
+                        if *bid == id && *brev == revision => {}
+                    _ => {
+                        return Err(malformed(
+                            "surface body's id/revision must match the envelope".into(),
+                        ));
+                    }
+                }
+                let id = SurfaceId::new(id);
+                let revision = RevisionId::new(revision);
+                if !surfaces_seen.insert((id.clone(), revision.clone())) {
+                    return Err(malformed(format!(
+                        "duplicate surface '{id}' for revision '{revision}'"
+                    )));
+                }
+                revisions_named.insert(revision.clone());
+                Line::Surface { id, revision, body }
+            }
+            "block_defaults" => {
+                // §5: the line's hash is the body's plain hash — the
+                // wire verifies content identity without interpreting
+                // the body.
+                let hash = get_str(map, "hash")
+                    .map_err(malformed)?
+                    .parse::<ContentHash>()
+                    .map_err(|_| malformed("bad hash".into()))?;
+                let body = get(map, "defaults").map_err(malformed)?.clone();
+                let actual = hash_plain(&body)
+                    .map_err(|_| malformed("defaults body is not hashable".into()))?;
+                if actual != hash {
+                    return Err(malformed(
+                        "block_defaults hash does not match its body".into(),
+                    ));
+                }
+                let block = BlockId::new(get_str(map, "block").map_err(malformed)?);
+                let version = get_u32(map, "version").map_err(malformed)?;
+                if !defaults_seen.insert((block.clone(), version)) {
+                    return Err(malformed(format!(
+                        "duplicate block_defaults '{block}' v{version}"
+                    )));
+                }
+                Line::BlockDefaults {
+                    block,
+                    version,
+                    hash,
+                    body,
+                }
+            }
             "record" => {
                 if mode != Mode::Snapshot {
                     return Err(ReadError::ModeMismatch {
@@ -421,10 +536,10 @@ fn manifest_from(m: &Obj) -> Result<Manifest, String> {
             })
             .collect::<Result<_, _>>()?,
         record_count: get_u64(m, "record_count")?,
-        attachments_bundled: match get_str(m, "attachments")?.as_str() {
+        blobs_bundled: match get_str(m, "blobs")?.as_str() {
             "bundled" => true,
             "referenced" => false,
-            other => return Err(format!("unknown attachments mode '{other}'")),
+            other => return Err(format!("unknown blobs mode '{other}'")),
         },
     })
 }

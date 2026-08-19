@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash};
 use varve_core::{
-    ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+    BlockId, ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+    SurfaceId,
 };
 use varve_record::Entry;
 use varve_schema::{Block, OptionRow, Schema};
@@ -38,8 +39,11 @@ pub struct Manifest {
     pub revisions: Vec<RevisionId>,
     pub record_count: u64,
     /// `referenced` (blobs by hash, not included) or `bundled` (a
-    /// sidecar archive keyed by hash accompanies the stream — §2.15).
-    pub attachments_bundled: bool,
+    /// sidecar archive keyed by hash accompanies the stream — §2.15:
+    /// plain tar, entries `sha256/<hex>` in hash order, plaintext,
+    /// exact-set complete against the stream's `attachment` and
+    /// `snapshot` lines). Attachment and payload blobs alike.
+    pub blobs_bundled: bool,
 }
 
 /// A snapshot-mode `record` line (§5): the record's **root** cells,
@@ -140,8 +144,8 @@ pub enum Line {
         rows: Vec<OptionRow>,
     },
     /// A published block's schema-side half (§2.1): travels like a
-    /// nomenclature. Its surface-side defaults travel with surfaces
-    /// (§10 Q14).
+    /// nomenclature. Its surface-side defaults travel as
+    /// `block_defaults` lines.
     Block(Block),
     Record(RecordLine),
     Item(ItemLine),
@@ -149,12 +153,38 @@ pub enum Line {
         record: RecordId,
         entry: Entry,
     },
-    /// Describes a blob (§2.15): hash, size, type. Filenames stay in
-    /// cells.
+    /// Describes an attachment blob (§2.15): hash, size, type.
+    /// Filenames stay in cells.
     Attachment {
         hash: ContentHash,
         byte_size: u64,
         content_type: String,
+    },
+    /// Describes a resolver-payload blob (§2.8, §2.15): shaped like
+    /// `attachment`, distinct kind — the two say different things about
+    /// why the blob exists.
+    Snapshot {
+        hash: ContentHash,
+        byte_size: u64,
+        content_type: String,
+    },
+    /// A surface (§2.1/§2.6): the envelope is typed here; the body is
+    /// canonical JSON this crate does not interpret — its codec is
+    /// `varve_surface::canon` (§5, settled 2026-08-19), joined by a
+    /// Tier 5 exporter/importer.
+    Surface {
+        id: SurfaceId,
+        revision: RevisionId,
+        body: CanonicalValue,
+    },
+    /// The surface-side half of a block (§2.1, Q13): same treatment as
+    /// `surface`. `hash` is `hash_plain(body)` — the defaults' content
+    /// address — verified on read without interpreting the body.
+    BlockDefaults {
+        block: BlockId,
+        version: u32,
+        hash: ContentHash,
+        body: CanonicalValue,
     },
 }
 

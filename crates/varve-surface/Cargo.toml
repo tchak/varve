@@ -12,3 +12,7 @@ varve-logic = { path = "../varve-logic" }
 varve-value = { path = "../varve-value" }
 thiserror.workspace = true
 regex.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+varve-wire = { path = "../varve-wire" }

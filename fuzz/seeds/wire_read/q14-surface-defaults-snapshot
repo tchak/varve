@@ -1,0 +1,5 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d"],"source_instance":"seed"}
+{"id":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d","k":"revision","schema":{"elements":[],"resolvers":[]}}
+{"id":"form","k":"surface","revision":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d","surface":{"id":"form","ineligibility":null,"nodes":[],"revision":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d"}}
+{"block":"rib","defaults":{"block":"rib","node":null,"version":1},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}
+{"byte_size":3,"content_type":"application/json","hash":"sha256:1fb680aa1ed965bc09f024abd808fad41e7fa0bb2e1ec39e8f237d653d56b456","k":"snapshot"}

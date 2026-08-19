@@ -2980,12 +2980,14 @@ dependencies = [
 name = "varve-surface"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "regex",
  "thiserror 2.0.20",
  "varve-core",
  "varve-logic",
  "varve-schema",
  "varve-value",
+ "varve-wire",
 ]
 
 [[package]]

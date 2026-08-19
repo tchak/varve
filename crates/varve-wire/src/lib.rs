@@ -8,9 +8,12 @@
 //! **snapshot** (`record`/`item` cell lines through a reading lens).
 //! They never mix in one stream. Import modes are stream kinds, never
 //! flags (§5). Resolution lifecycle transitions and checkpoints ride
-//! `entry` lines as ops (§2.8/§2.9, settled 2026-08-19). Not yet on
-//! the wire (§10 Q14): payload `snapshot` descriptions, the bundled
-//! blob sidecar, and surfaces.
+//! `entry` lines as ops (§2.8/§2.9); payload `snapshot` descriptions
+//! travel like `attachment`; surfaces and block defaults ride
+//! `surface`/`block_defaults` lines as opaque canonical bodies whose
+//! codec `varve-surface` owns (§5, settled 2026-08-19). The bundled
+//! blob sidecar (§2.15: plain tar keyed by hash, exact-set complete
+//! against `described_blobs`) is assembled Tier 5-side (§13.6).
 //!
 //! The reader takes a whole buffer; a streaming reader over the same
 //! line grammar is Tier 5 work.

@@ -44,8 +44,8 @@ pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
         ),
         ("record_count", CanonicalValue::Int(m.record_count as i64)),
         (
-            "attachments",
-            string(if m.attachments_bundled {
+            "blobs",
+            string(if m.blobs_bundled {
                 "bundled"
             } else {
                 "referenced"
@@ -129,6 +129,34 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
             ("hash", string(hash)),
             ("byte_size", CanonicalValue::Int(*byte_size as i64)),
             ("content_type", string(content_type)),
+        ]),
+        Line::Snapshot {
+            hash,
+            byte_size,
+            content_type,
+        } => obj(vec![
+            ("k", string("snapshot")),
+            ("hash", string(hash)),
+            ("byte_size", CanonicalValue::Int(*byte_size as i64)),
+            ("content_type", string(content_type)),
+        ]),
+        Line::Surface { id, revision, body } => obj(vec![
+            ("k", string("surface")),
+            ("id", string(id)),
+            ("revision", string(revision)),
+            ("surface", body.clone()),
+        ]),
+        Line::BlockDefaults {
+            block,
+            version,
+            hash,
+            body,
+        } => obj(vec![
+            ("k", string("block_defaults")),
+            ("block", string(block)),
+            ("version", CanonicalValue::Int(i64::from(*version))),
+            ("hash", string(hash)),
+            ("defaults", body.clone()),
         ]),
     }
 }

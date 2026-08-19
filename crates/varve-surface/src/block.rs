@@ -10,17 +10,14 @@
 //! including surface, so admissibility and reachability never learn
 //! about blocks — the same principle as the schema-side paste
 //! (`Block::include_into`, which records provenance on the group).
-//! Defaults travel with surfaces, which are not on the wire yet (§10
-//! Q14).
+//! Defaults travel as `block_defaults` wire lines whose body this crate
+//! encodes (`canon`, §5).
 
-use std::collections::BTreeMap;
-
-use varve_core::canonical::{CanonicalValue, ContentHash, hash_plain};
 use varve_core::{ColumnId, GroupId};
-use varve_logic::{sources, to_canonical};
+use varve_logic::sources;
 use varve_schema::{Block, BlockRef, Element, NomenclatureTable, Schema};
 
-use crate::{ColumnNode, Format, GroupNode, Node, Surface, SurfaceError, validate};
+use crate::{ColumnNode, GroupNode, Node, Surface, SurfaceError, validate};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockDefaults {
@@ -58,28 +55,6 @@ pub enum IncludeError {
 }
 
 impl BlockDefaults {
-    /// Content address of the defaults (plain regime — a surface
-    /// fragment, like a surface). A changed rule or prompt is a new
-    /// version of the defaults.
-    pub fn content_hash(&self) -> ContentHash {
-        let value = CanonicalValue::Object(
-            [
-                ("block".to_string(), string(&self.block.id)),
-                (
-                    "version".to_string(),
-                    CanonicalValue::Int(i64::from(self.block.version)),
-                ),
-                (
-                    "node".to_string(),
-                    node_canonical(&Node::Group(self.node.clone())),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        );
-        hash_plain(&value).expect("surface fragments carry no floats")
-    }
-
     /// Self-containment against the block they belong to: same block and
     /// version, same group id, only block columns referenced, rules read
     /// only block columns, and the pair typechecks as a surface over the
@@ -167,10 +142,6 @@ impl BlockDefaults {
     }
 }
 
-fn string(s: impl ToString) -> CanonicalValue {
-    CanonicalValue::String(s.to_string())
-}
-
 fn has_group_node(nodes: &[Node], group: &GroupId) -> bool {
     nodes.iter().any(|n| match n {
         Node::Group(g) => g.group == *group || has_group_node(&g.children, group),
@@ -216,83 +187,4 @@ fn column_nodes(group: &GroupNode) -> Vec<&ColumnNode> {
     let mut out = Vec::new();
     walk(&group.children, &mut out);
     out
-}
-
-/// Canonical form of a format constraint (§2.13 decision 7: shapes live
-/// in code, never `Debug`).
-pub fn format_canonical(format: &Format) -> CanonicalValue {
-    match format {
-        Format::Email => string("email"),
-        Format::Phone => string("phone"),
-        Format::Iban => string("iban"),
-        Format::Regex(pattern) => CanonicalValue::Object(
-            [("regex".to_string(), string(pattern))]
-                .into_iter()
-                .collect(),
-        ),
-    }
-}
-
-/// Canonical form of a surface node — identity-bearing content of a
-/// surface fragment (a changed rule or prompt is a new version).
-pub fn node_canonical(n: &Node) -> CanonicalValue {
-    let obj = |pairs: Vec<(&str, CanonicalValue)>| {
-        CanonicalValue::Object(
-            pairs
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect::<BTreeMap<_, _>>(),
-        )
-    };
-    let opt = |v: &Option<String>| match v {
-        None => CanonicalValue::Null,
-        Some(t) => string(t),
-    };
-    let rule = |r: &Option<varve_logic::Expr>| match r {
-        None => CanonicalValue::Null,
-        Some(e) => to_canonical(e),
-    };
-    match n {
-        Node::Column(c) => obj(vec![
-            ("column", string(&c.column)),
-            ("prompt", opt(&c.prompt)),
-            ("help", opt(&c.help)),
-            ("visibility", rule(&c.visibility)),
-            ("required", rule(&c.required)),
-            ("writable", CanonicalValue::Bool(c.write.writable)),
-            (
-                "override_derived",
-                CanonicalValue::Bool(c.write.override_derived),
-            ),
-            (
-                "format",
-                match &c.format {
-                    None => CanonicalValue::Null,
-                    Some(f) => format_canonical(f),
-                },
-            ),
-        ]),
-        Node::Group(g) => obj(vec![
-            ("group", string(&g.group)),
-            ("prompt", opt(&g.prompt)),
-            ("visibility", rule(&g.visibility)),
-            (
-                "children",
-                CanonicalValue::Array(g.children.iter().map(node_canonical).collect()),
-            ),
-        ]),
-        Node::Section(sec) => obj(vec![
-            ("section", string(&sec.title)),
-            ("help", opt(&sec.help)),
-            ("visibility", rule(&sec.visibility)),
-            (
-                "children",
-                CanonicalValue::Array(sec.children.iter().map(node_canonical).collect()),
-            ),
-        ]),
-        Node::Note(note) => obj(vec![
-            ("note", string(&note.body)),
-            ("title", opt(&note.title)),
-        ]),
-    }
 }

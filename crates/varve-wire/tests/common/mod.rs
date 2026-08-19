@@ -341,6 +341,6 @@ pub fn manifest(mode: Mode, intent: Intent, record_count: u64) -> Manifest {
         intent,
         revisions: vec![lens()],
         record_count,
-        attachments_bundled: false,
+        blobs_bundled: false,
     }
 }

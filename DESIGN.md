@@ -2195,12 +2195,22 @@ Only then: `surface`, `store`, service.
     a procedure's surfaces do not migrate, and "an imported record
     remains fully meaningful on an instance with no access to INSEE"
     (§2.8) is a goal, not a property — the payload bytes do not yet
-    travel. *Surfaces' wire shape settled 2026-08-19 (§5): opaque bodies
-    typed by `varve-surface`, §7 intact; the sidecar format settled the
-    same day (§2.15: plain tar keyed by hash, plaintext entries,
-    exact-set completeness, bundle-level confidentiality as a Tier 5
-    option); the `snapshot` line is specified like `attachment`. Every
-    member is now designed; what remains here is the build, together.*
+    travel. *Every member designed and the kernel/wire half built
+    (2026-08-19): `snapshot` lines travel like `attachment` (one
+    description per hash, either kind); `surface`/`block_defaults`
+    lines carry opaque canonical bodies — codec in
+    `varve_surface::canon`, round-trip-tested; the wire verifies the
+    defaults line's hash as `hash_plain(body)` and the surface
+    envelope against its body without interpreting either; the
+    manifest field is `blobs: referenced | bundled`, and
+    `Stream::described_blobs()` is the exact set a bundled sidecar
+    must match (§2.15: plain tar keyed by hash, plaintext entries,
+    bundle-level confidentiality as a Tier 5 option). §7 intact — the
+    seam test rides a dev-edge from `varve-surface` to `varve-wire`,
+    never the reverse. **Remaining: the Tier 5 half** — the sidecar
+    assembler/importer joining `described_blobs` with `varve-files`
+    streams, and the exporter/importer that calls the surface codec —
+    then this question resolves.*
     Deliberately routed here rather than built piecemeal:
     payload blobs and attachment blobs share one sidecar, and the
     `snapshot` descriptions should land with it so import restores a

@@ -74,7 +74,7 @@ fn manifest(mode: Mode, intent: Intent, records: u64) -> Manifest {
         intent,
         revisions: vec![revision_id(&schema())],
         record_count: records,
-        attachments_bundled: false,
+        blobs_bundled: false,
     }
 }
 
@@ -884,4 +884,174 @@ fn schema_and_nomenclature_lines_round_trip() {
     lines.push(rec.clone());
     let bytes = write_lines(&lines).unwrap();
     assert_eq!(read_stream(&bytes).unwrap().lines[2], rec);
+}
+
+// ------------------------------------------------- Q14 lines (§5, §2.15)
+
+/// A minimal, valid surface body as raw canonical JSON — built without
+/// `varve-surface`, which is the point: the wire carries the body
+/// opaquely (§5, settled 2026-08-19). The joint test with the real
+/// codec lives in `varve-surface/tests/wire_seam.rs`.
+fn surface_body(id: &str, revision: &RevisionId) -> varve_core::canonical::CanonicalValue {
+    use varve_core::canonical::CanonicalValue as V;
+    V::Object(
+        [
+            ("id".to_string(), V::String(id.into())),
+            ("revision".to_string(), V::String(revision.to_string())),
+            ("nodes".to_string(), V::Array(vec![])),
+            ("ineligibility".to_string(), V::Null),
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
+#[test]
+fn q14_lines_round_trip_byte_stably() {
+    use varve_core::canonical::{CanonicalValue as V, hash_plain};
+    let lens = revision_id(&schema());
+    let blob = |s: &str| hash_plain(&V::String(s.into())).unwrap();
+    let defaults_body = V::Object(
+        [
+            ("block".to_string(), V::String("rib".into())),
+            ("version".to_string(), V::Int(2)),
+            ("node".to_string(), V::String("opaque-to-the-wire".into())),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    m.blobs_bundled = true;
+    let lines = vec![
+        Line::Header(m),
+        Line::Revision {
+            id: lens.clone(),
+            schema: schema(),
+        },
+        Line::Surface {
+            id: varve_core::SurfaceId::new("form"),
+            revision: lens.clone(),
+            body: surface_body("form", &lens),
+        },
+        Line::BlockDefaults {
+            block: varve_core::BlockId::new("rib"),
+            version: 2,
+            hash: hash_plain(&defaults_body).unwrap(),
+            body: defaults_body,
+        },
+        Line::Attachment {
+            hash: blob("file"),
+            byte_size: 10,
+            content_type: "application/pdf".into(),
+        },
+        Line::Snapshot {
+            hash: blob("payload"),
+            byte_size: 20,
+            content_type: "application/json".into(),
+        },
+    ];
+    let bytes = write_lines(&lines).unwrap();
+    let stream = read_stream(&bytes).unwrap();
+    assert_eq!(stream.lines, lines);
+    assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
+    assert!(stream.manifest.blobs_bundled);
+    // The described set, in hash order: what a bundled sidecar must
+    // contain exactly (§2.15).
+    let described = stream.described_blobs();
+    let mut expected = vec![
+        (blob("file"), 10, "application/pdf"),
+        (blob("payload"), 20, "application/json"),
+    ];
+    expected.sort_by_key(|(h, ..)| *h);
+    assert_eq!(described, expected);
+}
+
+#[test]
+fn q14_lines_are_strictly_validated() {
+    use varve_core::canonical::{CanonicalValue as V, hash_plain};
+    let lens = revision_id(&schema());
+    let write_one = |line: Line| {
+        write_lines(&[
+            Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
+            Line::Revision {
+                id: lens.clone(),
+                schema: schema(),
+            },
+            line,
+        ])
+        .unwrap()
+    };
+    let malformed = |bytes: Vec<u8>| {
+        assert!(
+            matches!(read_stream(&bytes), Err(ReadError::Malformed { .. })),
+            "expected malformed"
+        );
+    };
+
+    // A surface body whose id/revision disagree with the envelope.
+    malformed(write_one(Line::Surface {
+        id: varve_core::SurfaceId::new("form"),
+        revision: lens.clone(),
+        body: surface_body("other", &lens),
+    }));
+    // A surface naming a revision the stream does not carry.
+    let elsewhere = RevisionId::new("rev-elsewhere");
+    let bytes = write_one(Line::Surface {
+        id: varve_core::SurfaceId::new("form"),
+        revision: elsewhere.clone(),
+        body: surface_body("form", &elsewhere),
+    });
+    assert_eq!(
+        read_stream(&bytes),
+        Err(ReadError::RevisionNotCarried(elsewhere))
+    );
+    // Duplicate surface for one (id, revision).
+    let surface = Line::Surface {
+        id: varve_core::SurfaceId::new("form"),
+        revision: lens.clone(),
+        body: surface_body("form", &lens),
+    };
+    malformed(
+        write_lines(&[
+            Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
+            Line::Revision {
+                id: lens.clone(),
+                schema: schema(),
+            },
+            surface.clone(),
+            surface,
+        ])
+        .unwrap(),
+    );
+    // A block_defaults line whose hash is not its body's.
+    let body = V::String("body".into());
+    malformed(write_one(Line::BlockDefaults {
+        block: varve_core::BlockId::new("rib"),
+        version: 1,
+        hash: hash_plain(&V::String("other".into())).unwrap(),
+        body,
+    }));
+    // Duplicate blob description — attachment and snapshot share the
+    // one-description-per-hash rule.
+    let hash = hash_plain(&V::String("blob".into())).unwrap();
+    malformed(
+        write_lines(&[
+            Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
+            Line::Revision {
+                id: lens.clone(),
+                schema: schema(),
+            },
+            Line::Attachment {
+                hash,
+                byte_size: 1,
+                content_type: "a/b".into(),
+            },
+            Line::Snapshot {
+                hash,
+                byte_size: 1,
+                content_type: "a/b".into(),
+            },
+        ])
+        .unwrap(),
+    );
 }
