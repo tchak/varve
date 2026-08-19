@@ -121,7 +121,10 @@ fn scope_prefix(scope: &[GroupId], path: &RowPath) -> Option<RowPath> {
 }
 
 fn value_at(values: &RecordValues, column: &ColumnId, path: RowPath) -> TableValue {
-    match values.cells.get(&CellAddr { column: column.clone(), path }) {
+    match values.cells.get(&CellAddr {
+        column: column.clone(),
+        path,
+    }) {
         None | Some(CellState::Empty) => TableValue::Blank,
         Some(CellState::Value(CellValue::One(s))) => TableValue::One(s.clone()),
         Some(CellState::Value(CellValue::Many(s))) => TableValue::Many(s.clone()),
@@ -202,7 +205,10 @@ pub struct TextStyle {
 
 impl Default for TextStyle {
     fn default() -> Self {
-        Self { list_separator: " | ".into(), enum_ids: false }
+        Self {
+            list_separator: " | ".into(),
+            enum_ids: false,
+        }
     }
 }
 
@@ -278,15 +284,24 @@ mod tests {
             columns: vec![
                 col("name", "Nom", ScalarType::Text, &[]),
                 col("tags", "Tags", ScalarType::Text, &[]),
-                col("child_name", "Prénom enfant", ScalarType::Text, &["children"]),
+                col(
+                    "child_name",
+                    "Prénom enfant",
+                    ScalarType::Text,
+                    &["children"],
+                ),
             ],
         }
     }
 
     fn set(values: &mut RecordValues, column: &str, path: RowPath, v: CellValue) {
-        values
-            .cells
-            .insert(CellAddr { column: ColumnId::new(column), path }, CellState::Value(v));
+        values.cells.insert(
+            CellAddr {
+                column: ColumnId::new(column),
+                path,
+            },
+            CellState::Value(v),
+        );
     }
 
     fn one(s: &str) -> CellValue {
@@ -304,7 +319,10 @@ mod tests {
         );
         let group = GroupId::new("children");
         v.items.insert(
-            ItemsAddr { group: group.clone(), parent: RowPath::root() },
+            ItemsAddr {
+                group: group.clone(),
+                parent: RowPath::root(),
+            },
             vec![ItemId::new("i1"), ItemId::new("i2")],
         );
         for (item, name) in [("i1", "Alice"), ("i2", "Bob")] {
@@ -334,16 +352,25 @@ mod tests {
         assert_eq!(first.ordinal, Some(1));
         // Parent value repeated on the item row (§5).
         assert_eq!(first.values[0], TableValue::One(Scalar::Text("Ada".into())));
-        assert_eq!(first.values[2], TableValue::One(Scalar::Text("Alice".into())));
+        assert_eq!(
+            first.values[2],
+            TableValue::One(Scalar::Text("Alice".into()))
+        );
         assert_eq!(rows[2].ordinal, Some(2));
-        assert_eq!(rows[2].values[2], TableValue::One(Scalar::Text("Bob".into())));
+        assert_eq!(
+            rows[2].values[2],
+            TableValue::One(Scalar::Text("Bob".into()))
+        );
     }
 
     #[test]
     fn empty_and_absent_both_render_blank() {
         let mut v = RecordValues::new();
         v.cells.insert(
-            CellAddr { column: ColumnId::new("name"), path: RowPath::root() },
+            CellAddr {
+                column: ColumnId::new("name"),
+                path: RowPath::root(),
+            },
             CellState::Empty,
         );
         let rows = tabulate(&RecordId::new("r1"), &v, &schema());
@@ -352,7 +379,10 @@ mod tests {
         assert_eq!(rows[0].values[1], TableValue::Blank); // absent
         let style = TextStyle::default();
         let labels = EnumLabels::new();
-        assert_eq!(render_value(&ColumnId::new("name"), &rows[0].values[0], &labels, &style), "");
+        assert_eq!(
+            render_value(&ColumnId::new("name"), &rows[0].values[0], &labels, &style),
+            ""
+        );
     }
 
     #[test]
@@ -397,7 +427,10 @@ mod tests {
         let unknown = TableValue::One(Scalar::Enum(OptionId::new("gone")));
         assert_eq!(render_value(&column, &known, &labels, &style), "Madame");
         assert_eq!(render_value(&column, &unknown, &labels, &style), "gone");
-        let ids = TextStyle { enum_ids: true, ..TextStyle::default() };
+        let ids = TextStyle {
+            enum_ids: true,
+            ..TextStyle::default()
+        };
         assert_eq!(render_value(&column, &known, &labels, &ids), "mme");
     }
 
@@ -424,7 +457,11 @@ mod tests {
             }
         }
         let s = schema();
-        let mut sink = Collect { begun: false, rows: Vec::new(), finished: false };
+        let mut sink = Collect {
+            begun: false,
+            rows: Vec::new(),
+            finished: false,
+        };
         sink.begin(&s).unwrap();
         for row in tabulate(&RecordId::new("r1"), &record(), &s) {
             sink.row(&row).unwrap();

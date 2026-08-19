@@ -6,8 +6,8 @@ use varve_core::RecordId;
 use varve_core::canonical::ContentHash;
 use varve_value::{ApplyError, CellAddr, Op, RecordValues, apply, diff};
 
-use crate::entry::{Draft, Entry, Envelope, SaltCountMismatch, genesis_hash};
 use crate::Origin;
+use crate::entry::{Draft, Entry, Envelope, SaltCountMismatch, genesis_hash};
 
 #[derive(Debug, Clone)]
 pub struct RecordLog {
@@ -49,7 +49,10 @@ pub enum ChainError {
     /// An op without a salt (or vice versa) can never have been
     /// committed: the entry is malformed, whatever its hash says.
     #[error("entry {at}: {mismatch}")]
-    SaltCount { at: usize, mismatch: SaltCountMismatch },
+    SaltCount {
+        at: usize,
+        mismatch: SaltCountMismatch,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -136,13 +139,17 @@ fn derive_provenance(origin: &Origin, current: Option<&Origin>) -> Origin {
     };
     match origin {
         Origin::Entered => match replaced {
-            Some(d) => Origin::Overridden { superseded: Some(d) },
+            Some(d) => Origin::Overridden {
+                superseded: Some(d),
+            },
             None if matches!(current, Some(Origin::Overridden { .. })) => {
                 Origin::Overridden { superseded: None }
             }
             None => Origin::Entered,
         },
-        Origin::Overridden { superseded: None } => Origin::Overridden { superseded: replaced },
+        Origin::Overridden { superseded: None } => Origin::Overridden {
+            superseded: replaced,
+        },
         other => other.clone(),
     }
 }
@@ -164,7 +171,10 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
         if let Op::Set { column, path, .. } | Op::Unset { column, path } = op
             && late_machine_write
         {
-            let addr = CellAddr { column: column.clone(), path: path.clone() };
+            let addr = CellAddr {
+                column: column.clone(),
+                path: path.clone(),
+            };
             if let Some(current) = result.provenance.get(&addr)
                 && matches!(current, Origin::Entered | Origin::Overridden { .. })
             {
@@ -173,10 +183,14 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
                     _ => None,
                 };
                 let superseded = match current {
-                    Origin::Overridden { superseded: Some(d) } => Some(d.clone()),
+                    Origin::Overridden {
+                        superseded: Some(d),
+                    } => Some(d.clone()),
                     _ => landed,
                 };
-                result.provenance.insert(addr.clone(), Origin::Overridden { superseded });
+                result
+                    .provenance
+                    .insert(addr.clone(), Origin::Overridden { superseded });
                 result.suppressed.push(Suppressed { seq, addr });
                 continue;
             }
@@ -184,17 +198,31 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
         apply(&mut result.values, op).map_err(|error| FoldError::Apply { seq, error })?;
         match op {
             Op::Set { column, path, .. } => {
-                let addr = CellAddr { column: column.clone(), path: path.clone() };
+                let addr = CellAddr {
+                    column: column.clone(),
+                    path: path.clone(),
+                };
                 let derived = derive_provenance(origin, result.provenance.get(&addr));
                 result.provenance.insert(addr, derived);
             }
             Op::Unset { column, path } => {
-                result.provenance.remove(&CellAddr { column: column.clone(), path: path.clone() });
+                result.provenance.remove(&CellAddr {
+                    column: column.clone(),
+                    path: path.clone(),
+                });
             }
-            Op::RemoveItem { group, parent, item } => {
-                let prefix =
-                    parent.child(varve_core::PathSeg { group: group.clone(), item: item.clone() });
-                result.provenance.retain(|addr, _| !addr.path.starts_with(&prefix));
+            Op::RemoveItem {
+                group,
+                parent,
+                item,
+            } => {
+                let prefix = parent.child(varve_core::PathSeg {
+                    group: group.clone(),
+                    item: item.clone(),
+                });
+                result
+                    .provenance
+                    .retain(|addr, _| !addr.path.starts_with(&prefix));
             }
             Op::AddItem { .. } | Op::Reorder { .. } => {}
         }
@@ -205,7 +233,10 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
 impl RecordLog {
     /// An empty log for `record`.
     pub fn new(record: RecordId) -> Self {
-        Self { record, entries: Vec::new() }
+        Self {
+            record,
+            entries: Vec::new(),
+        }
     }
 
     /// Rehydrate `record`'s log from stored or transmitted entries —
@@ -297,7 +328,10 @@ impl RecordLog {
     /// Fold the first `upto` entries into state + provenance.
     pub fn fold_at(&self, upto: u64) -> Result<FoldResult, FoldError> {
         if upto > self.version() {
-            return Err(FoldError::OutOfRange { upto, version: self.version() });
+            return Err(FoldError::OutOfRange {
+                upto,
+                version: self.version(),
+            });
         }
         let mut result = FoldResult::default();
         for entry in self.entries.iter().take(upto as usize) {
@@ -332,8 +366,13 @@ impl RecordLog {
             let base = later.envelope.base_version;
             let mut touched: Vec<CellAddr> = Vec::new();
             for op in &later.content.ops {
-                let (Op::Set { column, path, .. } | Op::Unset { column, path }) = op else { continue };
-                let addr = CellAddr { column: column.clone(), path: path.clone() };
+                let (Op::Set { column, path, .. } | Op::Unset { column, path }) = op else {
+                    continue;
+                };
+                let addr = CellAddr {
+                    column: column.clone(),
+                    path: path.clone(),
+                };
                 if let Some(history) = writes.get(&addr) {
                     // Writes `later` did not see: seq >= base. History is
                     // in seq order, so walk back from the end.
@@ -380,7 +419,9 @@ impl RecordLog {
         for entry in &self.entries {
             match &entry.content.origin {
                 crate::Origin::Derived(d)
-                | crate::Origin::Overridden { superseded: Some(d) } => {
+                | crate::Origin::Overridden {
+                    superseded: Some(d),
+                } => {
                     blobs.insert(d.snapshot_ref);
                 }
                 _ => {}
@@ -425,7 +466,9 @@ impl RecordLog {
         if self.entries[snapshot.at as usize - 1].hash() != snapshot.entry_hash {
             return Err(SnapshotError::HashMismatch);
         }
-        let refolded = self.fold_at(snapshot.at).map_err(SnapshotError::Unfoldable)?;
+        let refolded = self
+            .fold_at(snapshot.at)
+            .map_err(SnapshotError::Unfoldable)?;
         if refolded != snapshot.state {
             return Err(SnapshotError::StateMismatch);
         }

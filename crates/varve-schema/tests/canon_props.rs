@@ -47,7 +47,11 @@ fn option_row() -> impl Strategy<Value = OptionRow> {
         label(),
         proptest::collection::vec((ident(), label()), 0..3),
     )
-        .prop_map(|(id, label, fields)| OptionRow { id: OptionId::new(id), label, fields })
+        .prop_map(|(id, label, fields)| OptionRow {
+            id: OptionId::new(id),
+            label,
+            fields,
+        })
 }
 
 fn nomenclature_ref() -> impl Strategy<Value = NomenclatureRef> {
@@ -67,7 +71,13 @@ fn nomenclature_ref() -> impl Strategy<Value = NomenclatureRef> {
 fn normalized_constraints() -> impl Strategy<Value = AttachmentConstraints> {
     (
         proptest::sample::subsequence(
-            vec!["application/pdf", "image/*", "image/jpeg", "image/png", "text/csv"],
+            vec![
+                "application/pdf",
+                "image/*",
+                "image/jpeg",
+                "image/png",
+                "text/csv",
+            ],
             0..=5,
         ),
         proptest::option::of(0u64..(1 << 53)),
@@ -98,12 +108,20 @@ fn arity() -> impl Strategy<Value = Arity> {
 
 fn column() -> impl Strategy<Value = Element> {
     (ident(), label(), scalar_type(), arity()).prop_map(|(id, label, ty, arity)| {
-        Element::Column(Column { id: ColumnId::new(id), label, ty, arity })
+        Element::Column(Column {
+            id: ColumnId::new(id),
+            label,
+            ty,
+            arity,
+        })
     })
 }
 
 fn block_ref() -> impl Strategy<Value = BlockRef> {
-    (ident(), 0u32..100).prop_map(|(id, version)| BlockRef { id: BlockId::new(id), version })
+    (ident(), 0u32..100).prop_map(|(id, version)| BlockRef {
+        id: BlockId::new(id),
+        version,
+    })
 }
 
 fn group(children: impl Strategy<Value = Vec<Element>>) -> impl Strategy<Value = Group> {
@@ -145,20 +163,28 @@ fn resolver() -> impl Strategy<Value = ResolverDeclaration> {
         proptest::collection::vec((ident(), scalar_type()), 0..3),
         proptest::collection::vec((ident(), ident()), 0..3),
     )
-        .prop_map(|(id, version, anchor, input, result, mapping)| ResolverDeclaration {
-            id: ResolverId::new(id),
-            version,
-            anchor: GroupId::new(anchor),
-            input: input.into_iter().map(|(c, ty)| (ColumnId::new(c), ty)).collect(),
-            result_type: result
-                .into_iter()
-                .map(|(name, ty)| ResultField { name, ty })
-                .collect(),
-            mapping: mapping
-                .into_iter()
-                .map(|(field, target)| Mapping { result_field: field, target: ColumnId::new(target) })
-                .collect(),
-        })
+        .prop_map(
+            |(id, version, anchor, input, result, mapping)| ResolverDeclaration {
+                id: ResolverId::new(id),
+                version,
+                anchor: GroupId::new(anchor),
+                input: input
+                    .into_iter()
+                    .map(|(c, ty)| (ColumnId::new(c), ty))
+                    .collect(),
+                result_type: result
+                    .into_iter()
+                    .map(|(name, ty)| ResultField { name, ty })
+                    .collect(),
+                mapping: mapping
+                    .into_iter()
+                    .map(|(field, target)| Mapping {
+                        result_field: field,
+                        target: ColumnId::new(target),
+                    })
+                    .collect(),
+            },
+        )
 }
 
 fn schema() -> impl Strategy<Value = Schema> {
@@ -297,14 +323,24 @@ proptest! {
 #[test]
 fn malformed_schemas_error_cleanly() {
     let obj = |pairs: &[(&str, CanonicalValue)]| {
-        CanonicalValue::Object(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect())
+        CanonicalValue::Object(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        )
     };
     let s = |t: &str| CanonicalValue::String(t.into());
     let arr = |items: Vec<CanonicalValue>| CanonicalValue::Array(items);
     let column = |ty: CanonicalValue, arity: &str| {
         obj(&[(
             "column",
-            obj(&[("id", s("c")), ("label", s("c")), ("type", ty), ("arity", s(arity))]),
+            obj(&[
+                ("id", s("c")),
+                ("label", s("c")),
+                ("type", ty),
+                ("arity", s(arity)),
+            ]),
         )])
     };
     let schema_of = |elements: Vec<CanonicalValue>| {
@@ -322,70 +358,370 @@ fn malformed_schemas_error_cleanly() {
         arr(vec![]),
         obj(&[("elements", arr(vec![]))]),
         obj(&[("resolvers", arr(vec![]))]),
-        obj(&[("elements", CanonicalValue::Null), ("resolvers", arr(vec![]))]),
+        obj(&[
+            ("elements", CanonicalValue::Null),
+            ("resolvers", arr(vec![])),
+        ]),
         // An element is a column or a group, nothing else.
         schema_of(vec![obj(&[])]),
         schema_of(vec![obj(&[("section", obj(&[]))])]),
         schema_of(vec![s("column")]),
         // Column: missing / mistyped fields, bad arity.
-        schema_of(vec![obj(&[("column", obj(&[("id", s("c")), ("label", s("c")), ("type", kind("text"))]))])]),
-        schema_of(vec![obj(&[("column", obj(&[("id", s("c")), ("type", kind("text")), ("arity", s("one"))]))])]),
-        schema_of(vec![obj(&[("column", obj(&[("id", CanonicalValue::Int(1)), ("label", s("c")), ("type", kind("text")), ("arity", s("one"))]))])]),
+        schema_of(vec![obj(&[(
+            "column",
+            obj(&[("id", s("c")), ("label", s("c")), ("type", kind("text"))]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "column",
+            obj(&[("id", s("c")), ("type", kind("text")), ("arity", s("one"))]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "column",
+            obj(&[
+                ("id", CanonicalValue::Int(1)),
+                ("label", s("c")),
+                ("type", kind("text")),
+                ("arity", s("one")),
+            ]),
+        )])]),
         schema_of(vec![column(kind("text"), "two")]),
         schema_of(vec![column(kind("text"), "One")]),
         // Scalar kinds: unknown, missing, non-string.
         schema_of(vec![column(kind("string"), "one")]),
         schema_of(vec![column(obj(&[]), "one")]),
-        schema_of(vec![column(obj(&[("kind", CanonicalValue::Int(1))]), "one")]),
+        schema_of(vec![column(
+            obj(&[("kind", CanonicalValue::Int(1))]),
+            "one",
+        )]),
         schema_of(vec![column(s("text"), "one")]),
         // Units: unknown name, non-string.
-        schema_of(vec![column(obj(&[("kind", s("integer")), ("unit", s("furlong"))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("decimal")), ("unit", s("KM"))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("integer")), ("unit", CanonicalValue::Int(1))]), "one")]),
+        schema_of(vec![column(
+            obj(&[("kind", s("integer")), ("unit", s("furlong"))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[("kind", s("decimal")), ("unit", s("KM"))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[("kind", s("integer")), ("unit", CanonicalValue::Int(1))]),
+            "one",
+        )]),
         // Attachments: accept must be strings, max_bytes a non-negative int.
-        schema_of(vec![column(obj(&[("kind", s("attachment")), ("accept", s("image/*"))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("attachment")), ("accept", arr(vec![CanonicalValue::Int(1)]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("attachment")), ("max_bytes", CanonicalValue::Int(-1))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("attachment")), ("max_bytes", s("10"))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("attachment")), ("max_bytes", CanonicalValue::Float(1.5))]), "one")]),
+        schema_of(vec![column(
+            obj(&[("kind", s("attachment")), ("accept", s("image/*"))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("attachment")),
+                ("accept", arr(vec![CanonicalValue::Int(1)])),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("attachment")),
+                ("max_bytes", CanonicalValue::Int(-1)),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[("kind", s("attachment")), ("max_bytes", s("10"))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("attachment")),
+                ("max_bytes", CanonicalValue::Float(1.5)),
+            ]),
+            "one",
+        )]),
         // Enums: nomenclature missing, neither inline nor published,
         // malformed rows / published refs.
         schema_of(vec![column(kind("enum"), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", s("cog"))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("inline", obj(&[]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("inline", arr(vec![obj(&[("id", s("o1")), ("label", s("x"))])]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("inline", arr(vec![obj(&[("id", s("o1")), ("label", s("x")), ("fields", arr(vec![s("k")]))])]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("inline", arr(vec![obj(&[("id", s("o1")), ("label", s("x")), ("fields", arr(vec![arr(vec![s("k")])]))])]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("published", obj(&[("id", s("cog"))]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("published", obj(&[("id", s("cog")), ("version", CanonicalValue::Int(-1))]))]))]), "one")]),
-        schema_of(vec![column(obj(&[("kind", s("enum")), ("nomenclature", obj(&[("published", obj(&[("id", s("cog")), ("version", s("1"))]))]))]), "one")]),
+        schema_of(vec![column(
+            obj(&[("kind", s("enum")), ("nomenclature", obj(&[]))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[("kind", s("enum")), ("nomenclature", s("cog"))]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                ("nomenclature", obj(&[("inline", obj(&[]))])),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[(
+                        "inline",
+                        arr(vec![obj(&[("id", s("o1")), ("label", s("x"))])]),
+                    )]),
+                ),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[(
+                        "inline",
+                        arr(vec![obj(&[
+                            ("id", s("o1")),
+                            ("label", s("x")),
+                            ("fields", arr(vec![s("k")])),
+                        ])]),
+                    )]),
+                ),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[(
+                        "inline",
+                        arr(vec![obj(&[
+                            ("id", s("o1")),
+                            ("label", s("x")),
+                            ("fields", arr(vec![arr(vec![s("k")])])),
+                        ])]),
+                    )]),
+                ),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[("published", obj(&[("id", s("cog"))]))]),
+                ),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[(
+                        "published",
+                        obj(&[("id", s("cog")), ("version", CanonicalValue::Int(-1))]),
+                    )]),
+                ),
+            ]),
+            "one",
+        )]),
+        schema_of(vec![column(
+            obj(&[
+                ("kind", s("enum")),
+                (
+                    "nomenclature",
+                    obj(&[("published", obj(&[("id", s("cog")), ("version", s("1"))]))]),
+                ),
+            ]),
+            "one",
+        )]),
         // Groups: bad cardinality, missing children, malformed provenance.
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("some")), ("children", arr(vec![]))]))])]),
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one"))]))])]),
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one")), ("children", arr(vec![])), ("included_from", s("rib"))]))])]),
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one")), ("children", arr(vec![])), ("included_from", obj(&[("id", s("rib"))]))]))])]),
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one")), ("children", arr(vec![])), ("included_from", obj(&[("id", s("rib")), ("version", CanonicalValue::Int(-3))]))]))])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[
+                ("id", s("g")),
+                ("label", s("g")),
+                ("cardinality", s("some")),
+                ("children", arr(vec![])),
+            ]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one"))]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[
+                ("id", s("g")),
+                ("label", s("g")),
+                ("cardinality", s("one")),
+                ("children", arr(vec![])),
+                ("included_from", s("rib")),
+            ]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[
+                ("id", s("g")),
+                ("label", s("g")),
+                ("cardinality", s("one")),
+                ("children", arr(vec![])),
+                ("included_from", obj(&[("id", s("rib"))])),
+            ]),
+        )])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[
+                ("id", s("g")),
+                ("label", s("g")),
+                ("cardinality", s("one")),
+                ("children", arr(vec![])),
+                (
+                    "included_from",
+                    obj(&[("id", s("rib")), ("version", CanonicalValue::Int(-3))]),
+                ),
+            ]),
+        )])]),
         // A malformed child deep inside a group is still a refusal.
-        schema_of(vec![obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("many")), ("children", arr(vec![column(kind("nope"), "one")]))]))])]),
+        schema_of(vec![obj(&[(
+            "group",
+            obj(&[
+                ("id", s("g")),
+                ("label", s("g")),
+                ("cardinality", s("many")),
+                ("children", arr(vec![column(kind("nope"), "one")])),
+            ]),
+        )])]),
         // Resolvers: missing arrays, bad input pairs, bad version.
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(1))])]))]),
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(1)), ("input", arr(vec![s("c")])), ("result", arr(vec![])), ("mapping", arr(vec![]))])]))]),
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(1)), ("input", arr(vec![arr(vec![s("c"), kind("nope")])])), ("result", arr(vec![])), ("mapping", arr(vec![]))])]))]),
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(-1)), ("input", arr(vec![])), ("result", arr(vec![])), ("mapping", arr(vec![]))])]))]),
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(1)), ("input", arr(vec![])), ("result", arr(vec![obj(&[("name", s("x"))])])), ("mapping", arr(vec![]))])]))]),
-        obj(&[("elements", arr(vec![])), ("resolvers", arr(vec![obj(&[("id", s("r")), ("version", CanonicalValue::Int(1)), ("input", arr(vec![])), ("result", arr(vec![])), ("mapping", arr(vec![obj(&[("field", s("x"))])]))])]))]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(1)),
+                ])]),
+            ),
+        ]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(1)),
+                    ("input", arr(vec![s("c")])),
+                    ("result", arr(vec![])),
+                    ("mapping", arr(vec![])),
+                ])]),
+            ),
+        ]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(1)),
+                    ("input", arr(vec![arr(vec![s("c"), kind("nope")])])),
+                    ("result", arr(vec![])),
+                    ("mapping", arr(vec![])),
+                ])]),
+            ),
+        ]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(-1)),
+                    ("input", arr(vec![])),
+                    ("result", arr(vec![])),
+                    ("mapping", arr(vec![])),
+                ])]),
+            ),
+        ]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(1)),
+                    ("input", arr(vec![])),
+                    ("result", arr(vec![obj(&[("name", s("x"))])])),
+                    ("mapping", arr(vec![])),
+                ])]),
+            ),
+        ]),
+        obj(&[
+            ("elements", arr(vec![])),
+            (
+                "resolvers",
+                arr(vec![obj(&[
+                    ("id", s("r")),
+                    ("version", CanonicalValue::Int(1)),
+                    ("input", arr(vec![])),
+                    ("result", arr(vec![])),
+                    ("mapping", arr(vec![obj(&[("field", s("x"))])])),
+                ])]),
+            ),
+        ]),
     ];
     for value in &bad {
-        assert!(schema_from_canonical(value).is_err(), "{value:?} should be refused");
+        assert!(
+            schema_from_canonical(value).is_err(),
+            "{value:?} should be refused"
+        );
     }
 
     // The standalone decoders refuse the same way.
     assert!(scalar_type_from_canonical(&kind("string")).is_err());
     assert!(scalar_type_from_canonical(&CanonicalValue::Null).is_err());
     assert!(option_row_from_canonical(&obj(&[("id", s("o1"))])).is_err());
-    assert!(option_row_from_canonical(&obj(&[("id", s("o1")), ("label", s("x")), ("fields", s("k=v"))])).is_err());
-    assert!(block_from_canonical(&obj(&[("id", s("b")), ("version", CanonicalValue::Int(1)), ("group", column(kind("text"), "one")), ("resolvers", arr(vec![]))])).is_err());
-    assert!(block_from_canonical(&obj(&[("id", s("b")), ("version", CanonicalValue::Int(1)), ("resolvers", arr(vec![]))])).is_err());
-    assert!(block_from_canonical(&obj(&[("id", s("b")), ("group", obj(&[("group", obj(&[("id", s("g")), ("label", s("g")), ("cardinality", s("one")), ("children", arr(vec![]))]))])), ("resolvers", arr(vec![]))])).is_err());
+    assert!(
+        option_row_from_canonical(&obj(&[
+            ("id", s("o1")),
+            ("label", s("x")),
+            ("fields", s("k=v"))
+        ]))
+        .is_err()
+    );
+    assert!(
+        block_from_canonical(&obj(&[
+            ("id", s("b")),
+            ("version", CanonicalValue::Int(1)),
+            ("group", column(kind("text"), "one")),
+            ("resolvers", arr(vec![]))
+        ]))
+        .is_err()
+    );
+    assert!(
+        block_from_canonical(&obj(&[
+            ("id", s("b")),
+            ("version", CanonicalValue::Int(1)),
+            ("resolvers", arr(vec![]))
+        ]))
+        .is_err()
+    );
+    assert!(
+        block_from_canonical(&obj(&[
+            ("id", s("b")),
+            (
+                "group",
+                obj(&[(
+                    "group",
+                    obj(&[
+                        ("id", s("g")),
+                        ("label", s("g")),
+                        ("cardinality", s("one")),
+                        ("children", arr(vec![]))
+                    ])
+                )])
+            ),
+            ("resolvers", arr(vec![]))
+        ]))
+        .is_err()
+    );
 }

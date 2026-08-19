@@ -3,12 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_logic::{
-    Atom, ColumnRef, Const, EvalContext, Expr, Operand, TypeError, check_acyclic,
-    eval, sources, typecheck,
+    Atom, ColumnRef, Const, EvalContext, Expr, Operand, TypeError, check_acyclic, eval, sources,
+    typecheck,
 };
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
-    ScalarType, Schema, SchemaIndex, Unit,
+    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
+    SchemaIndex, Unit,
 };
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
 
@@ -38,8 +38,16 @@ fn communes() -> NomenclatureRef {
 
 fn yes_no() -> NomenclatureRef {
     NomenclatureRef::Inline(vec![
-        OptionRow { id: OptionId::new("oui"), label: "Oui".into(), fields: vec![] },
-        OptionRow { id: OptionId::new("non"), label: "Non".into(), fields: vec![] },
+        OptionRow {
+            id: OptionId::new("oui"),
+            label: "Oui".into(),
+            fields: vec![],
+        },
+        OptionRow {
+            id: OptionId::new("non"),
+            label: "Non".into(),
+            fields: vec![],
+        },
     ])
 }
 
@@ -50,11 +58,7 @@ fn schema() -> Schema {
     Schema {
         root: vec![
             column("situation", ScalarType::Enum(yes_no()), Arity::One),
-            column(
-                "duree",
-                ScalarType::Integer(Some(Unit::Month)),
-                Arity::One,
-            ),
+            column("duree", ScalarType::Integer(Some(Unit::Month)), Arity::One),
             column("commune", ScalarType::Enum(communes()), Arity::One),
             column("tags", ScalarType::Enum(yes_no()), Arity::Many),
             column("note", ScalarType::Text, Arity::One),
@@ -71,19 +75,31 @@ fn schema() -> Schema {
 }
 
 fn source(id: &str) -> ColumnRef {
-    ColumnRef { column: ColumnId::new(id), field: None }
+    ColumnRef {
+        column: ColumnId::new(id),
+        field: None,
+    }
 }
 
 fn eq(id: &str, c: Const) -> Expr {
-    Expr::Atom(Atom::Eq { source: source(id), right: Operand::Const(c) })
+    Expr::Atom(Atom::Eq {
+        source: source(id),
+        right: Operand::Const(c),
+    })
 }
 
 fn months(n: &str) -> Const {
-    Const::Number { value: Decimal::parse(n).unwrap(), unit: Some(Unit::Month) }
+    Const::Number {
+        value: Decimal::parse(n).unwrap(),
+        unit: Some(Unit::Month),
+    }
 }
 
 fn years(n: &str) -> Const {
-    Const::Number { value: Decimal::parse(n).unwrap(), unit: Some(Unit::Year) }
+    Const::Number {
+        value: Decimal::parse(n).unwrap(),
+        unit: Some(Unit::Year),
+    }
 }
 
 struct Fixture {
@@ -103,7 +119,10 @@ impl Fixture {
 
     fn set(&mut self, id: &str, scalar: Scalar) -> &mut Self {
         self.values.cells.insert(
-            CellAddr { column: ColumnId::new(id), path: RowPath::root() },
+            CellAddr {
+                column: ColumnId::new(id),
+                path: RowPath::root(),
+            },
             CellState::Value(CellValue::One(scalar)),
         );
         self
@@ -126,7 +145,10 @@ fn absence_always_loses_even_for_negatives() {
     let f = Fixture::new();
     let ctx = f.ctx();
     // Unanswered: both Eq and NotEq are false — NotEq is not Not(Eq).
-    assert!(!eval(&eq("situation", Const::Option(OptionId::new("oui"))), &ctx));
+    assert!(!eval(
+        &eq("situation", Const::Option(OptionId::new("oui"))),
+        &ctx
+    ));
     assert!(!eval(
         &Expr::Atom(Atom::NotEq {
             source: source("situation"),
@@ -135,10 +157,17 @@ fn absence_always_loses_even_for_negatives() {
         &ctx
     ));
     // is_empty is the one atom absence satisfies.
-    assert!(eval(&Expr::Atom(Atom::IsEmpty { source: source("situation") }), &ctx));
+    assert!(eval(
+        &Expr::Atom(Atom::IsEmpty {
+            source: source("situation")
+        }),
+        &ctx
+    ));
     // The "visible unless explicitly no" idiom from §4.1.
     let unless_no = Expr::Or(vec![
-        Expr::Atom(Atom::IsEmpty { source: source("situation") }),
+        Expr::Atom(Atom::IsEmpty {
+            source: source("situation"),
+        }),
         Expr::Atom(Atom::NotEq {
             source: source("situation"),
             right: Operand::Const(Const::Option(OptionId::new("non"))),
@@ -202,7 +231,10 @@ fn item_scope_reads_own_item_and_record() {
         item: ItemId::new("i1"),
     });
     f.values.cells.insert(
-        CellAddr { column: ColumnId::new("role"), path: item.clone() },
+        CellAddr {
+            column: ColumnId::new("role"),
+            path: item.clone(),
+        },
         CellState::Value(CellValue::One(Scalar::Enum(OptionId::new("non")))),
     );
     let both = Expr::And(vec![
@@ -213,7 +245,10 @@ fn item_scope_reads_own_item_and_record() {
     ctx.item = item;
     assert!(eval(&both, &ctx));
     // From the record scope, the item column reads absent.
-    assert!(!eval(&eq("role", Const::Option(OptionId::new("non"))), &f.ctx()));
+    assert!(!eval(
+        &eq("role", Const::Option(OptionId::new("non"))),
+        &f.ctx()
+    ));
 }
 
 #[test]
@@ -230,7 +265,9 @@ fn typechecker_enforces_the_matrix_and_scopes() {
         [TypeError::AtomNotAllowed(_)]
     ));
     // Text presence: allowed.
-    let present = Expr::Atom(Atom::IsFilled { source: source("note") });
+    let present = Expr::Atom(Atom::IsFilled {
+        source: source("note"),
+    });
     assert_eq!(typecheck(&present, &s, &noms, record), vec![]);
 
     // Record rule reading an item column: scope violation.
@@ -255,7 +292,10 @@ fn typechecker_enforces_the_matrix_and_scopes() {
     // Unit dimension mismatch: months column vs metre constant.
     let bad_unit = eq(
         "duree",
-        Const::Number { value: Decimal::parse("1").unwrap(), unit: Some(Unit::Metre) },
+        Const::Number {
+            value: Decimal::parse("1").unwrap(),
+            unit: Some(Unit::Metre),
+        },
     );
     assert!(matches!(
         typecheck(&bad_unit, &s, &noms, record).as_slice(),
@@ -268,12 +308,13 @@ fn typechecker_enforces_the_matrix_and_scopes() {
         right: Operand::Column(source("duree")),
     });
     assert!(
-        typecheck(&col_col, &s, &noms, record)
-            .contains(&TypeError::ColumnComparisonNotEnabled)
+        typecheck(&col_col, &s, &noms, record).contains(&TypeError::ColumnComparisonNotEnabled)
     );
 
     // pending() names a group with no anchored resolver.
-    let pending = Expr::Atom(Atom::Pending { group: GroupId::new("entreprise") });
+    let pending = Expr::Atom(Atom::Pending {
+        group: GroupId::new("entreprise"),
+    });
     assert!(matches!(
         typecheck(&pending, &s, &noms, record).as_slice(),
         [TypeError::NoResolverAnchored(_)]
@@ -286,13 +327,19 @@ fn typechecker_enforces_the_matrix_and_scopes() {
         typecheck(&many_eq, &s, &noms, record).as_slice(),
         [TypeError::AtomNotAllowed(c)] if c == &ColumnId::new("tags")
     ));
-    let contains = Expr::Atom(Atom::Contains { source: source("tags"), option: OptionId::new("oui") });
+    let contains = Expr::Atom(Atom::Contains {
+        source: source("tags"),
+        option: OptionId::new("oui"),
+    });
     assert_eq!(typecheck(&contains, &s, &noms, record), vec![]);
 
     // A field projection on a presence atom would be silently ignored:
     // refused instead.
     let field_on_presence = Expr::Atom(Atom::IsEmpty {
-        source: ColumnRef { column: ColumnId::new("commune"), field: Some("departement".into()) },
+        source: ColumnRef {
+            column: ColumnId::new("commune"),
+            field: Some("departement".into()),
+        },
     });
     assert!(matches!(
         typecheck(&field_on_presence, &s, &noms, record).as_slice(),
@@ -317,11 +364,17 @@ fn typechecker_enforces_the_matrix_and_scopes() {
 fn contains_and_pending() {
     let mut f = Fixture::new();
     f.values.cells.insert(
-        CellAddr { column: ColumnId::new("tags"), path: RowPath::root() },
+        CellAddr {
+            column: ColumnId::new("tags"),
+            path: RowPath::root(),
+        },
         CellState::Value(CellValue::Many(vec![Scalar::Enum(OptionId::new("oui"))])),
     );
     let contains = |o: &str| {
-        Expr::Atom(Atom::Contains { source: source("tags"), option: OptionId::new(o) })
+        Expr::Atom(Atom::Contains {
+            source: source("tags"),
+            option: OptionId::new(o),
+        })
     };
     assert!(eval(&contains("oui"), &f.ctx()));
     assert!(!eval(&contains("non"), &f.ctx()));
@@ -337,10 +390,17 @@ fn contains_and_pending() {
     // `pending(g)` names the *anchor group* (§10 Q17): the SIRET
     // block's group, not the resolver.
     let entreprise = GroupId::new("entreprise");
-    let pending = Expr::Atom(Atom::Pending { group: entreprise.clone() });
-    let not_pending = Expr::Atom(Atom::NotPending { group: entreprise.clone() });
+    let pending = Expr::Atom(Atom::Pending {
+        group: entreprise.clone(),
+    });
+    let not_pending = Expr::Atom(Atom::NotPending {
+        group: entreprise.clone(),
+    });
     let item = |i: &str| {
-        RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new(i) })
+        RowPath::root().child(PathSeg {
+            group: GroupId::new("contacts"),
+            item: ItemId::new(i),
+        })
     };
     let mut ctx = f.ctx();
     ctx.pending.insert((RowPath::root(), entreprise.clone()));
@@ -377,8 +437,5 @@ fn acyclicity_check_orders_and_detects() {
     assert!(cycle.cycle.len() >= 3);
 
     // sources() feeds the graph.
-    assert_eq!(
-        sources(&rule("a")),
-        BTreeSet::from([ColumnId::new("a")])
-    );
+    assert_eq!(sources(&rule("a")), BTreeSet::from([ColumnId::new("a")]));
 }

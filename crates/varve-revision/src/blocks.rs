@@ -18,11 +18,18 @@ pub struct BlockRegistry {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PublishBlockError {
     #[error("block '{id}': {errors:?}")]
-    Invalid { id: BlockId, errors: Vec<BlockError> },
+    Invalid {
+        id: BlockId,
+        errors: Vec<BlockError>,
+    },
     /// The registry numbers versions; a block declares the version it
     /// expects so a stale author fails loudly.
     #[error("block '{id}': expected version {expected}, next is {next}")]
-    VersionMismatch { id: BlockId, expected: u32, next: u32 },
+    VersionMismatch {
+        id: BlockId,
+        expected: u32,
+        next: u32,
+    },
     /// Every version of a block keeps the shell's group id: that id is
     /// what every inclusion uses.
     #[error("block '{id}': shell group id changed between versions")]
@@ -39,7 +46,10 @@ impl BlockRegistry {
     pub fn publish(&mut self, block: Block, policy: DepthPolicy) -> Result<u32, PublishBlockError> {
         let errors = block.validate(policy);
         if !errors.is_empty() {
-            return Err(PublishBlockError::Invalid { id: block.id.clone(), errors });
+            return Err(PublishBlockError::Invalid {
+                id: block.id.clone(),
+                errors,
+            });
         }
         let versions = self.versions.entry(block.id.clone()).or_default();
         let next = versions.len() as u32 + 1;
@@ -53,7 +63,9 @@ impl BlockRegistry {
         if let Some(previous) = versions.last()
             && previous.group.id != block.group.id
         {
-            return Err(PublishBlockError::ShellIdChanged { id: block.id.clone() });
+            return Err(PublishBlockError::ShellIdChanged {
+                id: block.id.clone(),
+            });
         }
         versions.push(block);
         Ok(next)

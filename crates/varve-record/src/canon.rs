@@ -32,9 +32,7 @@ fn path(p: &RowPath) -> CanonicalValue {
     CanonicalValue::Array(
         p.segments()
             .iter()
-            .map(|seg| {
-                CanonicalValue::Array(vec![string(&seg.group), string(&seg.item)])
-            })
+            .map(|seg| CanonicalValue::Array(vec![string(&seg.group), string(&seg.item)]))
             .collect(),
     )
 }
@@ -134,8 +132,14 @@ pub fn op(op: &Op) -> CanonicalValue {
 fn derivation(d: &Derivation) -> CanonicalValue {
     obj(vec![
         ("source", string(&d.source)),
-        ("source_version", CanonicalValue::Int(d.source_version as i64)),
-        ("mapping_version", CanonicalValue::Int(d.mapping_version as i64)),
+        (
+            "source_version",
+            CanonicalValue::Int(d.source_version as i64),
+        ),
+        (
+            "mapping_version",
+            CanonicalValue::Int(d.mapping_version as i64),
+        ),
         ("snapshot_ref", string(d.snapshot_ref)),
     ])
 }
@@ -210,7 +214,10 @@ fn only_keys(m: &Obj, allowed: &[&str]) -> Result<(), RecordDecodeError> {
 }
 
 /// A tagged union: exactly one key.
-fn single_key<'a>(m: &'a Obj, what: &str) -> Result<(&'a String, &'a CanonicalValue), RecordDecodeError> {
+fn single_key<'a>(
+    m: &'a Obj,
+    what: &str,
+) -> Result<(&'a String, &'a CanonicalValue), RecordDecodeError> {
     let mut it = m.iter();
     match (it.next(), it.next()) {
         (Some(entry), None) => Ok(entry),
@@ -306,9 +313,9 @@ pub fn scalar_from(v: &CanonicalValue) -> Result<Scalar, RecordDecodeError> {
             |t| Decimal::parse(t).map_err(|e| RecordDecodeError(e.to_string())),
             "decimal",
         )?),
-        "date" => Scalar::Date(
-            Date::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?,
-        ),
+        "date" => {
+            Scalar::Date(Date::parse(&text(inner)?).map_err(|e| RecordDecodeError(e.to_string()))?)
+        }
         "datetime" => Scalar::Datetime(normalized(
             &text(inner)?,
             |t| Instant::parse(t).map_err(|e| RecordDecodeError(e.to_string())),
@@ -378,7 +385,10 @@ pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
             path: path_from(get(m, "path")?)?,
             state: state_from(get(m, "state")?)?,
         },
-        "unset" => Op::Unset { column: column()?, path: path_from(get(m, "path")?)? },
+        "unset" => Op::Unset {
+            column: column()?,
+            path: path_from(get(m, "path")?)?,
+        },
         "add_item" => Op::AddItem {
             group: group()?,
             parent: path_from(get(m, "parent")?)?,
@@ -408,7 +418,15 @@ pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
 
 fn derivation_from(v: &CanonicalValue) -> Result<Derivation, RecordDecodeError> {
     let m = as_obj(v)?;
-    only_keys(m, &["source", "source_version", "mapping_version", "snapshot_ref"])?;
+    only_keys(
+        m,
+        &[
+            "source",
+            "source_version",
+            "mapping_version",
+            "snapshot_ref",
+        ],
+    )?;
     Ok(Derivation {
         source: ResolverId::new(get_str(m, "source")?),
         source_version: u32::try_from(get_int(m, "source_version")?)
@@ -450,7 +468,10 @@ fn unhex(s: &str) -> Result<[u8; 32], RecordDecodeError> {
     }
     // Lowercase hex digits only — `from_str_radix` would also take a
     // leading `+` and uppercase, giving one salt several spellings.
-    if !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if !s
+        .bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return err("salt must be lowercase hex");
     }
     let mut out = [0u8; 32];
@@ -515,8 +536,21 @@ pub fn entry_from(v: &CanonicalValue) -> Result<Entry, RecordDecodeError> {
     only_keys(
         m,
         &[
-            "k", "record", "seq", "prev", "actor", "actor_kind", "timestamp", "revision",
-            "base_version", "content_hash", "origin", "note", "ops", "meta_salt", "op_salts",
+            "k",
+            "record",
+            "seq",
+            "prev",
+            "actor",
+            "actor_kind",
+            "timestamp",
+            "revision",
+            "base_version",
+            "content_hash",
+            "origin",
+            "note",
+            "ops",
+            "meta_salt",
+            "op_salts",
         ],
     )?;
     let ops = as_arr(get(m, "ops")?)?
@@ -572,7 +606,11 @@ pub fn entry_from(v: &CanonicalValue) -> Result<Entry, RecordDecodeError> {
             .parse()
             .map_err(|_| RecordDecodeError("bad content hash".into()))?,
     };
-    Ok(Entry { envelope, content, salts })
+    Ok(Entry {
+        envelope,
+        content,
+        salts,
+    })
 }
 
 #[cfg(test)]
@@ -612,21 +650,47 @@ mod tests {
             any::<bool>().prop_map(Scalar::Boolean),
             any::<i64>().prop_map(Scalar::Integer),
             // Fractional and integral, negative and zero, normalized by parse.
-            "-?[0-9]{1,12}(\\.[0-9]{1,6})?".prop_map(|s| Scalar::Decimal(Decimal::parse(&s).unwrap())),
+            "-?[0-9]{1,12}(\\.[0-9]{1,6})?"
+                .prop_map(|s| Scalar::Decimal(Decimal::parse(&s).unwrap())),
             (0i32..=9998, 1u8..=12, 1u8..=28).prop_map(|(y, m, d)| {
                 Scalar::Date(Date::parse(&format!("{y:04}-{m:02}-{d:02}")).unwrap())
             }),
-            (1970i32..=2100, 1u8..=12, 1u8..=28, 0u8..24, 0u8..60, 0u8..60, proptest::option::of(1u32..1_000_000_000))
+            (
+                1970i32..=2100,
+                1u8..=12,
+                1u8..=28,
+                0u8..24,
+                0u8..60,
+                0u8..60,
+                proptest::option::of(1u32..1_000_000_000)
+            )
                 .prop_map(|(y, mo, d, h, mi, s, frac)| {
-                    let frac = frac.map(|f| format!(".{f:09}").trim_end_matches('0').to_string()).unwrap_or_default();
+                    let frac = frac
+                        .map(|f| format!(".{f:09}").trim_end_matches('0').to_string())
+                        .unwrap_or_default();
                     Scalar::Datetime(
-                        Instant::parse(&format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}Z")).unwrap(),
+                        Instant::parse(&format!(
+                            "{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}Z"
+                        ))
+                        .unwrap(),
                     )
                 }),
             "[a-z0-9]{1,5}".prop_map(|s| Scalar::Enum(OptionId::new(s))),
-            ("[a-z0-9]{1,4}", content_hash(), "\\PC{0,8}", "[a-z]{1,5}/[a-z.+-]{1,8}", 0u64..(1 << 53))
+            (
+                "[a-z0-9]{1,4}",
+                content_hash(),
+                "\\PC{0,8}",
+                "[a-z]{1,5}/[a-z.+-]{1,8}",
+                0u64..(1 << 53)
+            )
                 .prop_map(|(id, hash, filename, content_type, byte_size)| {
-                    Scalar::Attachment(Box::new(AttachmentRef { id, hash, filename, content_type, byte_size }))
+                    Scalar::Attachment(Box::new(AttachmentRef {
+                        id,
+                        hash,
+                        filename,
+                        content_type,
+                        byte_size,
+                    }))
                 }),
             feature().prop_map(|f| Scalar::Geometry(Box::new(f))),
         ]
@@ -636,14 +700,18 @@ mod tests {
         prop_oneof![
             Just(CellState::Empty),
             scalar().prop_map(|s| CellState::Value(CellValue::One(s))),
-            proptest::collection::vec(scalar(), 1..4).prop_map(|v| CellState::Value(CellValue::Many(v))),
+            proptest::collection::vec(scalar(), 1..4)
+                .prop_map(|v| CellState::Value(CellValue::Many(v))),
         ]
     }
 
     fn row_path() -> impl Strategy<Value = RowPath> {
         proptest::collection::vec(("[a-z]{1,3}", "[a-z0-9]{1,3}"), 0..3).prop_map(|segs| {
             segs.into_iter().fold(RowPath::root(), |p, (g, i)| {
-                p.child(PathSeg { group: GroupId::new(g), item: ItemId::new(i) })
+                p.child(PathSeg {
+                    group: GroupId::new(g),
+                    item: ItemId::new(i),
+                })
             })
         })
     }
@@ -653,13 +721,32 @@ mod tests {
         let group = || "[a-z]{1,4}".prop_map(GroupId::new);
         let item = || "[a-z0-9]{1,4}".prop_map(ItemId::new);
         prop_oneof![
-            (column(), row_path(), cell_state()).prop_map(|(column, path, state)| Op::Set { column, path, state }),
+            (column(), row_path(), cell_state()).prop_map(|(column, path, state)| Op::Set {
+                column,
+                path,
+                state
+            }),
             (column(), row_path()).prop_map(|(column, path)| Op::Unset { column, path }),
-            (group(), row_path(), item(), 0usize..1000)
-                .prop_map(|(group, parent, item, at)| Op::AddItem { group, parent, item, at }),
-            (group(), row_path(), item()).prop_map(|(group, parent, item)| Op::RemoveItem { group, parent, item }),
-            (group(), row_path(), proptest::collection::vec(item(), 0..4))
-                .prop_map(|(group, parent, order)| Op::Reorder { group, parent, order }),
+            (group(), row_path(), item(), 0usize..1000).prop_map(|(group, parent, item, at)| {
+                Op::AddItem {
+                    group,
+                    parent,
+                    item,
+                    at,
+                }
+            }),
+            (group(), row_path(), item()).prop_map(|(group, parent, item)| Op::RemoveItem {
+                group,
+                parent,
+                item
+            }),
+            (group(), row_path(), proptest::collection::vec(item(), 0..4)).prop_map(
+                |(group, parent, order)| Op::Reorder {
+                    group,
+                    parent,
+                    order
+                }
+            ),
         ]
     }
 
@@ -679,7 +766,9 @@ mod tests {
             Just(Origin::Entered),
             any_derivation().prop_map(Origin::Derived),
             Just(Origin::Overridden { superseded: None }),
-            any_derivation().prop_map(|d| Origin::Overridden { superseded: Some(d) }),
+            any_derivation().prop_map(|d| Origin::Overridden {
+                superseded: Some(d)
+            }),
         ]
     }
 
@@ -690,7 +779,11 @@ mod tests {
     fn actor() -> impl Strategy<Value = Actor> {
         (
             "\\PC{1,8}",
-            prop_oneof![Just(ActorKind::Human), Just(ActorKind::Resolver), Just(ActorKind::System)],
+            prop_oneof![
+                Just(ActorKind::Human),
+                Just(ActorKind::Resolver),
+                Just(ActorKind::System)
+            ],
         )
             .prop_map(|(id, kind)| Actor { id, kind })
     }
@@ -712,7 +805,19 @@ mod tests {
             content_hash(),
         )
             .prop_flat_map(
-                |(ops, origin, note, meta, seq, prev, actor, timestamp, revision, base_version, content_hash)| {
+                |(
+                    ops,
+                    origin,
+                    note,
+                    meta,
+                    seq,
+                    prev,
+                    actor,
+                    timestamp,
+                    revision,
+                    base_version,
+                    content_hash,
+                )| {
                     let n = ops.len();
                     proptest::collection::vec(salt(), n..=n).prop_map(move |op_salts| Entry {
                         envelope: Envelope {
@@ -724,8 +829,15 @@ mod tests {
                             base_version: base_version >> 11,
                             content_hash,
                         },
-                        content: EntryContent { ops: ops.clone(), origin: origin.clone(), note: note.clone() },
-                        salts: EntrySalts { meta, ops: op_salts },
+                        content: EntryContent {
+                            ops: ops.clone(),
+                            origin: origin.clone(),
+                            note: note.clone(),
+                        },
+                        salts: EntrySalts {
+                            meta,
+                            ops: op_salts,
+                        },
                     })
                 },
             )
@@ -785,17 +897,29 @@ mod tests {
     fn scalars_have_one_text_each() {
         // Integers: the normalized i64 rendering only.
         for bad in ["007", "+1", "-0", " 1", "1 ", "1.0", "", "0x10"] {
-            assert!(scalar_from(&one("integer", s(bad))).is_err(), "integer {bad:?}");
+            assert!(
+                scalar_from(&one("integer", s(bad))).is_err(),
+                "integer {bad:?}"
+            );
         }
         for good in ["0", "-1", "9223372036854775807", "-9223372036854775808"] {
-            assert!(scalar_from(&one("integer", s(good))).is_ok(), "integer {good:?}");
+            assert!(
+                scalar_from(&one("integer", s(good))).is_ok(),
+                "integer {good:?}"
+            );
         }
         // Decimals: what `Decimal::parse` accepts *and* renders back the same.
         for bad in ["1.50", "1.", ".5", "007", "-0", "+1", "1,5", ""] {
-            assert!(scalar_from(&one("decimal", s(bad))).is_err(), "decimal {bad:?}");
+            assert!(
+                scalar_from(&one("decimal", s(bad))).is_err(),
+                "decimal {bad:?}"
+            );
         }
         for good in ["1.5", "0", "-0.05", "12345678901234567890"] {
-            assert!(scalar_from(&one("decimal", s(good))).is_ok(), "decimal {good:?}");
+            assert!(
+                scalar_from(&one("decimal", s(good))).is_ok(),
+                "decimal {good:?}"
+            );
         }
         // Datetimes: the normalized UTC form only.
         assert!(scalar_from(&one("datetime", s("2026-08-16T12:00:00+02:00"))).is_err());
@@ -814,10 +938,25 @@ mod tests {
         // Tagged union: exactly one known key.
         assert!(scalar_from(&one("float", CanonicalValue::Float(1.0))).is_err());
         assert!(scalar_from(&obj(vec![])).is_err());
-        assert!(scalar_from(&obj(vec![("text", s("a")), ("boolean", CanonicalValue::Bool(true))])).is_err());
+        assert!(
+            scalar_from(&obj(vec![
+                ("text", s("a")),
+                ("boolean", CanonicalValue::Bool(true))
+            ]))
+            .is_err()
+        );
         assert!(scalar_from(&s("text")).is_err());
         // Geometry must be a Feature.
-        assert!(scalar_from(&one("geometry", obj(vec![("type", s("Point")), ("coordinates", CanonicalValue::Array(vec![]))]))).is_err());
+        assert!(
+            scalar_from(&one(
+                "geometry",
+                obj(vec![
+                    ("type", s("Point")),
+                    ("coordinates", CanonicalValue::Array(vec![]))
+                ])
+            ))
+            .is_err()
+        );
     }
 
     #[test]
@@ -835,7 +974,14 @@ mod tests {
             one("attachment", obj(pairs))
         };
         assert!(scalar_from(&att(vec![], CanonicalValue::Int(10), &hash)).is_ok());
-        assert!(scalar_from(&att(vec![("extra", s("x"))], CanonicalValue::Int(10), &hash)).is_err());
+        assert!(
+            scalar_from(&att(
+                vec![("extra", s("x"))],
+                CanonicalValue::Int(10),
+                &hash
+            ))
+            .is_err()
+        );
         assert!(scalar_from(&att(vec![], CanonicalValue::Int(-1), &hash)).is_err());
         assert!(scalar_from(&att(vec![], CanonicalValue::Float(10.0), &hash)).is_err());
         assert!(scalar_from(&att(vec![], s("10"), &hash)).is_err());
@@ -856,14 +1002,67 @@ mod tests {
 
         let path = CanonicalValue::Array(vec![]);
         // Unknown op; extra key; negative index; missing field.
-        assert!(op_from(&obj(vec![("op", s("delete")), ("column", s("c")), ("path", path.clone())])).is_err());
-        assert!(op_from(&obj(vec![("op", s("unset")), ("column", s("c")), ("path", path.clone()), ("state", CanonicalValue::Null)])).is_err());
-        assert!(op_from(&obj(vec![("op", s("add_item")), ("group", s("g")), ("parent", path.clone()), ("item", s("i")), ("at", CanonicalValue::Int(-1))])).is_err());
-        assert!(op_from(&obj(vec![("op", s("add_item")), ("group", s("g")), ("parent", path.clone()), ("item", s("i")), ("at", CanonicalValue::Float(0.0))])).is_err());
-        assert!(op_from(&obj(vec![("op", s("set")), ("column", s("c")), ("path", path.clone())])).is_err());
-        assert!(op_from(&obj(vec![("op", s("reorder")), ("group", s("g")), ("parent", path.clone()), ("order", CanonicalValue::Array(vec![CanonicalValue::Int(1)]))])).is_err());
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("delete")),
+                ("column", s("c")),
+                ("path", path.clone())
+            ]))
+            .is_err()
+        );
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("unset")),
+                ("column", s("c")),
+                ("path", path.clone()),
+                ("state", CanonicalValue::Null)
+            ]))
+            .is_err()
+        );
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("add_item")),
+                ("group", s("g")),
+                ("parent", path.clone()),
+                ("item", s("i")),
+                ("at", CanonicalValue::Int(-1))
+            ]))
+            .is_err()
+        );
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("add_item")),
+                ("group", s("g")),
+                ("parent", path.clone()),
+                ("item", s("i")),
+                ("at", CanonicalValue::Float(0.0))
+            ]))
+            .is_err()
+        );
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("set")),
+                ("column", s("c")),
+                ("path", path.clone())
+            ]))
+            .is_err()
+        );
+        assert!(
+            op_from(&obj(vec![
+                ("op", s("reorder")),
+                ("group", s("g")),
+                ("parent", path.clone()),
+                ("order", CanonicalValue::Array(vec![CanonicalValue::Int(1)]))
+            ]))
+            .is_err()
+        );
         // Paths: segments are [group, item] string pairs.
-        assert!(path_from(&CanonicalValue::Array(vec![CanonicalValue::Array(vec![s("g")])])).is_err());
+        assert!(
+            path_from(&CanonicalValue::Array(vec![CanonicalValue::Array(vec![
+                s("g")
+            ])]))
+            .is_err()
+        );
         assert!(path_from(&CanonicalValue::Array(vec![s("g/i")])).is_err());
         assert!(path_from(&s("")).is_err());
 
@@ -887,7 +1086,13 @@ mod tests {
         assert!(origin_from(&one("derived", derivation(true))).is_err());
         assert!(origin_from(&one("overridden", derivation(true))).is_err());
         assert!(origin_from(&one("overridden", CanonicalValue::Null)).is_ok());
-        assert!(origin_from(&obj(vec![("derived", derivation(false)), ("overridden", CanonicalValue::Null)])).is_err());
+        assert!(
+            origin_from(&obj(vec![
+                ("derived", derivation(false)),
+                ("overridden", CanonicalValue::Null)
+            ]))
+            .is_err()
+        );
     }
 
     #[test]
@@ -931,14 +1136,32 @@ mod tests {
         assert!(entry_from(&with(vec![("meta_salt", s(&"zz".repeat(32)))])).is_err());
         assert!(entry_from(&with(vec![("meta_salt", CanonicalValue::Int(1))])).is_err());
         // One salt per op, both ways.
-        let set_op = op(&Op::Set { column: ColumnId::new("c"), path: RowPath::root(), state: CellState::Empty });
-        assert!(entry_from(&with(vec![("ops", CanonicalValue::Array(vec![set_op.clone()]))])).is_err());
-        assert!(entry_from(&with(vec![("op_salts", CanonicalValue::Array(vec![s(&salt_hex)]))])).is_err());
-        assert!(entry_from(&with(vec![
-            ("ops", CanonicalValue::Array(vec![set_op])),
-            ("op_salts", CanonicalValue::Array(vec![s(&salt_hex)])),
-        ]))
-        .is_ok());
+        let set_op = op(&Op::Set {
+            column: ColumnId::new("c"),
+            path: RowPath::root(),
+            state: CellState::Empty,
+        });
+        assert!(
+            entry_from(&with(vec![(
+                "ops",
+                CanonicalValue::Array(vec![set_op.clone()])
+            )]))
+            .is_err()
+        );
+        assert!(
+            entry_from(&with(vec![(
+                "op_salts",
+                CanonicalValue::Array(vec![s(&salt_hex)])
+            )]))
+            .is_err()
+        );
+        assert!(
+            entry_from(&with(vec![
+                ("ops", CanonicalValue::Array(vec![set_op])),
+                ("op_salts", CanonicalValue::Array(vec![s(&salt_hex)])),
+            ]))
+            .is_ok()
+        );
         // Envelope fields.
         assert!(entry_from(&with(vec![("actor_kind", s("robot"))])).is_err());
         assert!(entry_from(&with(vec![("note", CanonicalValue::Int(1))])).is_err());

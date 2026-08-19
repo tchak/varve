@@ -58,7 +58,11 @@ pub enum ApplyError {
 /// Apply one op. Errors leave `values` unchanged.
 pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
     match op {
-        Op::Set { column, path, state } => {
+        Op::Set {
+            column,
+            path,
+            state,
+        } => {
             if matches!(state, CellState::Value(CellValue::Many(list)) if list.is_empty()) {
                 return Err(ApplyError::EmptyList(column.clone()));
             }
@@ -97,7 +101,11 @@ pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
             if *at > len {
                 return Err(ApplyError::BadIndex(group.clone(), *at));
             }
-            values.items.entry(addr).or_default().insert(*at, item.clone());
+            values
+                .items
+                .entry(addr)
+                .or_default()
+                .insert(*at, item.clone());
             Ok(())
         }
         Op::RemoveItem {
@@ -123,7 +131,9 @@ pub fn apply(values: &mut RecordValues, op: &Op) -> Result<(), ApplyError> {
                 group: group.clone(),
                 item: item.clone(),
             });
-            values.cells.retain(|addr, _| !addr.path.starts_with(&prefix));
+            values
+                .cells
+                .retain(|addr, _| !addr.path.starts_with(&prefix));
             values
                 .items
                 .retain(|addr, _| !addr.parent.starts_with(&prefix));
@@ -181,12 +191,7 @@ pub fn diff(from: &RecordValues, to: &RecordValues) -> Vec<Op> {
     for (addr, to_list) in &to.items {
         let from_list = from.items.get(addr);
         let mut simulated: Vec<ItemId> = from_list
-            .map(|l| {
-                l.iter()
-                    .filter(|i| to_list.contains(i))
-                    .cloned()
-                    .collect()
-            })
+            .map(|l| l.iter().filter(|i| to_list.contains(i)).cloned().collect())
             .unwrap_or_default();
         for (index, item) in to_list.iter().enumerate() {
             if !simulated.contains(item) {

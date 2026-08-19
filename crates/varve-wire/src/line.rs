@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash};
-use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
+use varve_core::{
+    ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+};
 use varve_record::Entry;
 use varve_schema::{Block, OptionRow, Schema};
 use varve_value::{CellState, ItemsAddr, RecordValues};
@@ -88,7 +90,10 @@ impl SnapshotRecord {
     pub fn lines(&self) -> Vec<Line> {
         let mut cells_at: BTreeMap<&RowPath, BTreeMap<ColumnId, CellState>> = BTreeMap::new();
         for (addr, state) in &self.values.cells {
-            cells_at.entry(&addr.path).or_default().insert(addr.column.clone(), state.clone());
+            cells_at
+                .entry(&addr.path)
+                .or_default()
+                .insert(addr.column.clone(), state.clone());
         }
         let root = RowPath::root();
         let mut out = vec![Line::Record(RecordLine {
@@ -99,10 +104,15 @@ impl SnapshotRecord {
         // Parents before children: sort item lists by parent depth, then
         // (parent, group) for determinism.
         let mut lists: Vec<(&ItemsAddr, &Vec<ItemId>)> = self.values.items.iter().collect();
-        lists.sort_by_key(|(addr, _)| (addr.parent.depth(), addr.parent.clone(), addr.group.clone()));
+        lists.sort_by_key(|(addr, _)| {
+            (addr.parent.depth(), addr.parent.clone(), addr.group.clone())
+        });
         for (addr, ids) in lists {
             for (ord, id) in ids.iter().enumerate() {
-                let path = addr.parent.child(PathSeg { group: addr.group.clone(), item: id.clone() });
+                let path = addr.parent.child(PathSeg {
+                    group: addr.group.clone(),
+                    item: id.clone(),
+                });
                 out.push(Line::Item(ItemLine {
                     record: self.record.clone(),
                     group: addr.group.clone(),
@@ -120,18 +130,32 @@ impl SnapshotRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
     Header(Manifest),
-    Revision { id: RevisionId, schema: Schema },
-    Nomenclature { id: NomenclatureId, version: u32, rows: Vec<OptionRow> },
+    Revision {
+        id: RevisionId,
+        schema: Schema,
+    },
+    Nomenclature {
+        id: NomenclatureId,
+        version: u32,
+        rows: Vec<OptionRow>,
+    },
     /// A published block's schema-side half (§2.1): travels like a
     /// nomenclature. Its surface-side defaults travel with surfaces
     /// (§10 Q14).
     Block(Block),
     Record(RecordLine),
     Item(ItemLine),
-    Entry { record: RecordId, entry: Entry },
+    Entry {
+        record: RecordId,
+        entry: Entry,
+    },
     /// Describes a blob (§2.15): hash, size, type. Filenames stay in
     /// cells.
-    Attachment { hash: ContentHash, byte_size: u64, content_type: String },
+    Attachment {
+        hash: ContentHash,
+        byte_size: u64,
+        content_type: String,
+    },
 }
 
 pub(crate) fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {

@@ -109,9 +109,7 @@ fn iban(value: &str) -> bool {
         .filter(|c| *c != ' ')
         .map(|c| c.to_ascii_uppercase())
         .collect();
-    if !(15..=34).contains(&compact.len())
-        || !compact.chars().all(|c| c.is_ascii_alphanumeric())
-    {
+    if !(15..=34).contains(&compact.len()) || !compact.chars().all(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
     let rotated = format!("{}{}", &compact[4..], &compact[..4]);

@@ -35,8 +35,14 @@ fn resolver(id: &str, version: u32) -> ResolverDeclaration {
         version,
         anchor: GroupId::new("g"),
         input: vec![(ColumnId::new("a"), ScalarType::Text)],
-        result_type: vec![ResultField { name: "out".into(), ty: ScalarType::Text }],
-        mapping: vec![Mapping { result_field: "out".into(), target: ColumnId::new("b") }],
+        result_type: vec![ResultField {
+            name: "out".into(),
+            ty: ScalarType::Text,
+        }],
+        mapping: vec![Mapping {
+            result_field: "out".into(),
+            target: ColumnId::new("b"),
+        }],
     }
 }
 
@@ -96,7 +102,12 @@ fn resolvers() -> impl Strategy<Value = Vec<ResolverDeclaration>> {
 /// with children from {x, y}, placed at a random root position, plus
 /// resolvers.
 fn schema() -> impl Strategy<Value = Schema> {
-    (columns(&["a", "b", "c", "d"]), proptest::option::of(group()), any::<usize>(), resolvers())
+    (
+        columns(&["a", "b", "c", "d"]),
+        proptest::option::of(group()),
+        any::<usize>(),
+        resolvers(),
+    )
         .prop_map(|(mut root, group, at, resolvers)| {
             if let Some(g) = group {
                 let at = at % (root.len() + 1);
@@ -122,8 +133,11 @@ fn edit_of(base: Schema) -> impl Strategy<Value = Schema> {
                 Element::Group(_) => None,
             })
             .collect();
-        let fresh: Vec<&'static str> =
-            fresh.iter().copied().filter(|id| !present.iter().any(|p| p == id)).collect();
+        let fresh: Vec<&'static str> = fresh
+            .iter()
+            .copied()
+            .filter(|id| !present.iter().any(|p| p == id))
+            .collect();
         (
             proptest::collection::vec(0u8..4, n),
             proptest::collection::vec(scalar_type(), n),
@@ -174,11 +188,16 @@ fn edit_of(base: Schema) -> impl Strategy<Value = Schema> {
             .boxed()
     }
     let resolvers = base.resolvers.clone();
-    (edit_elements(base.root, &["a", "b", "c", "d"]), resolvers_edit(resolvers))
+    (
+        edit_elements(base.root, &["a", "b", "c", "d"]),
+        resolvers_edit(resolvers),
+    )
         .prop_map(|(root, resolvers)| Schema { root, resolvers })
 }
 
-fn resolvers_edit(base: Vec<ResolverDeclaration>) -> impl Strategy<Value = Vec<ResolverDeclaration>> {
+fn resolvers_edit(
+    base: Vec<ResolverDeclaration>,
+) -> impl Strategy<Value = Vec<ResolverDeclaration>> {
     proptest::collection::vec(0u8..3, base.len()).prop_map(move |ops| {
         base.iter()
             .cloned()
@@ -330,19 +349,36 @@ proptest! {
 /// Resolver declarations follow the same three-way rule, by id.
 #[test]
 fn resolvers_merge_three_way() {
-    let with = |decls: Vec<ResolverDeclaration>| Schema { root: vec![], resolvers: decls };
+    let with = |decls: Vec<ResolverDeclaration>| Schema {
+        root: vec![],
+        resolvers: decls,
+    };
     let base = with(vec![resolver("r", 1)]);
     // Both bump differently: conflict, named.
     assert_eq!(
-        merge(&base, &with(vec![resolver("r", 2)]), &with(vec![resolver("r", 3)])),
+        merge(
+            &base,
+            &with(vec![resolver("r", 2)]),
+            &with(vec![resolver("r", 3)])
+        ),
         Err(vec![MergeConflict::Resolver(ResolverId::new("r"))])
     );
     // One side bumps, the other leaves it: the bump wins.
-    assert_eq!(merge(&base, &with(vec![resolver("r", 2)]), &base), Ok(with(vec![resolver("r", 2)])));
-    assert_eq!(merge(&base, &base, &with(vec![resolver("r", 2)])), Ok(with(vec![resolver("r", 2)])));
+    assert_eq!(
+        merge(&base, &with(vec![resolver("r", 2)]), &base),
+        Ok(with(vec![resolver("r", 2)]))
+    );
+    assert_eq!(
+        merge(&base, &base, &with(vec![resolver("r", 2)])),
+        Ok(with(vec![resolver("r", 2)]))
+    );
     // Identical bumps agree.
     assert_eq!(
-        merge(&base, &with(vec![resolver("r", 2)]), &with(vec![resolver("r", 2)])),
+        merge(
+            &base,
+            &with(vec![resolver("r", 2)]),
+            &with(vec![resolver("r", 2)])
+        ),
         Ok(with(vec![resolver("r", 2)]))
     );
     // Delete vs untouched deletes; delete vs bump conflicts.
@@ -353,7 +389,15 @@ fn resolvers_merge_three_way() {
     );
     // Disjoint additions combine.
     assert_eq!(
-        merge(&base, &with(vec![resolver("r", 1), resolver("s", 1)]), &with(vec![resolver("r", 1), resolver("t", 1)])),
-        Ok(with(vec![resolver("r", 1), resolver("s", 1), resolver("t", 1)]))
+        merge(
+            &base,
+            &with(vec![resolver("r", 1), resolver("s", 1)]),
+            &with(vec![resolver("r", 1), resolver("t", 1)])
+        ),
+        Ok(with(vec![
+            resolver("r", 1),
+            resolver("s", 1),
+            resolver("t", 1)
+        ]))
     );
 }

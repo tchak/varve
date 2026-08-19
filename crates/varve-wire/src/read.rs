@@ -7,13 +7,17 @@
 use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash, MAX_SAFE_INTEGER};
-use varve_core::{ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath};
+use varve_core::{
+    ColumnId, GroupId, ItemId, NomenclatureId, PathSeg, RecordId, RevisionId, RowPath,
+};
 use varve_record::canon as record_canon;
-use varve_schema::{block_from_canonical, option_row_from_canonical, revision_id, schema_from_canonical};
+use varve_schema::{
+    block_from_canonical, option_row_from_canonical, revision_id, schema_from_canonical,
+};
 use varve_value::{CellAddr, CellState, ItemsAddr, RecordValues};
 
-use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
 use crate::FORMAT_VERSION;
+use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ReadError {
@@ -27,7 +31,11 @@ pub enum ReadError {
     UnsupportedVersion(u32),
     /// §5: history and snapshot lines never mix.
     #[error("line {line}: '{kind}' line in a {mode:?} stream")]
-    ModeMismatch { line: usize, kind: String, mode: Mode },
+    ModeMismatch {
+        line: usize,
+        kind: String,
+        mode: Mode,
+    },
     #[error("stream ends without the {expected} records the manifest declared (got {got})")]
     RecordCountMismatch { expected: u64, got: u64 },
     /// The manifest's revision ids and the stream's `revision` lines
@@ -48,8 +56,10 @@ pub struct Stream {
 }
 
 pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| ReadError::Malformed { line: 1, reason: "not UTF-8".into() })?;
+    let text = std::str::from_utf8(bytes).map_err(|_| ReadError::Malformed {
+        line: 1,
+        reason: "not UTF-8".into(),
+    })?;
     let mut manifest: Option<Manifest> = None;
     let mut lines = Vec::new();
     let mut records_seen: std::collections::BTreeSet<RecordId> = Default::default();
@@ -67,7 +77,10 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
         if raw.trim().is_empty() {
             continue;
         }
-        let malformed = |reason: String| ReadError::Malformed { line: line_no, reason };
+        let malformed = |reason: String| ReadError::Malformed {
+            line: line_no,
+            reason,
+        };
         let value = match serde_json::from_str::<JsonLine>(raw) {
             Ok(JsonLine(v)) => v,
             Err(e) if e.classify() == serde_json::error::Category::Data => {
@@ -132,7 +145,9 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                 // The id *is* the content (§2.13): a revision line whose
                 // id is not its schema's hash is lying about identity.
                 if revision_id(&schema) != id {
-                    return Err(malformed(format!("revision id '{id}' is not the schema's content hash")));
+                    return Err(malformed(format!(
+                        "revision id '{id}' is not the schema's content hash"
+                    )));
                 }
                 revisions_seen.insert(id.clone());
                 Line::Revision { id, schema }
@@ -147,7 +162,9 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     .collect::<Result<_, _>>()
                     .map_err(|e| malformed(e.to_string()))?,
             },
-            "block" => Line::Block(block_from_canonical(&value).map_err(|e| malformed(e.to_string()))?),
+            "block" => {
+                Line::Block(block_from_canonical(&value).map_err(|e| malformed(e.to_string()))?)
+            }
             "attachment" => Line::Attachment {
                 hash: get_str(map, "hash")
                     .map_err(malformed)?
@@ -195,16 +212,30 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     )));
                 };
                 if i.parent.depth() != 0 && !current.paths.contains(&i.parent) {
-                    return Err(malformed("item's parent is not an item seen for this record".into()));
+                    return Err(malformed(
+                        "item's parent is not an item seen for this record".into(),
+                    ));
                 }
-                let count = current.counts.entry((i.group.clone(), i.parent.clone())).or_insert(0);
+                let count = current
+                    .counts
+                    .entry((i.group.clone(), i.parent.clone()))
+                    .or_insert(0);
                 if i.ord != *count {
-                    return Err(malformed(format!("item ord {} out of sequence (expected {count})", i.ord)));
+                    return Err(malformed(format!(
+                        "item ord {} out of sequence (expected {count})",
+                        i.ord
+                    )));
                 }
                 *count += 1;
-                let path = i.parent.child(PathSeg { group: i.group.clone(), item: i.id.clone() });
+                let path = i.parent.child(PathSeg {
+                    group: i.group.clone(),
+                    item: i.id.clone(),
+                });
                 if !current.paths.insert(path) {
-                    return Err(malformed(format!("duplicate item '{}' in group '{}'", i.id, i.group)));
+                    return Err(malformed(format!(
+                        "duplicate item '{}' in group '{}'",
+                        i.id, i.group
+                    )));
                 }
                 Line::Item(i)
             }
@@ -217,8 +248,8 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     });
                 }
                 let record = RecordId::new(get_str(map, "record").map_err(malformed)?);
-                let entry = record_canon::entry_from(&value)
-                    .map_err(|e| malformed(e.to_string()))?;
+                let entry =
+                    record_canon::entry_from(&value).map_err(|e| malformed(e.to_string()))?;
                 records_seen.insert(record.clone());
                 revisions_named.insert(entry.envelope.revision.clone());
                 Line::Entry { record, entry }
@@ -231,11 +262,15 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     let manifest = manifest.ok_or(ReadError::MissingHeader)?;
     let got = records_seen.len() as u64;
     if got != manifest.record_count {
-        return Err(ReadError::RecordCountMismatch { expected: manifest.record_count, got });
+        return Err(ReadError::RecordCountMismatch {
+            expected: manifest.record_count,
+            got,
+        });
     }
     // The manifest's revision list is the stream's revision lines, and
     // every lens / authored-against revision is among them.
-    let declared: std::collections::BTreeSet<RevisionId> = manifest.revisions.iter().cloned().collect();
+    let declared: std::collections::BTreeSet<RevisionId> =
+        manifest.revisions.iter().cloned().collect();
     if declared != revisions_seen {
         return Err(ReadError::RevisionsMismatch);
     }
@@ -303,14 +338,20 @@ impl<'de> serde::de::Visitor<'de> for JsonVisitor {
     fn visit_string<E>(self, s: String) -> Result<CanonicalValue, E> {
         Ok(CanonicalValue::String(s))
     }
-    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<CanonicalValue, A::Error> {
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> Result<CanonicalValue, A::Error> {
         let mut items = Vec::new();
         while let Some(JsonLine(v)) = seq.next_element()? {
             items.push(v);
         }
         Ok(CanonicalValue::Array(items))
     }
-    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<CanonicalValue, A::Error> {
+    fn visit_map<A: serde::de::MapAccess<'de>>(
+        self,
+        mut map: A,
+    ) -> Result<CanonicalValue, A::Error> {
         let mut out = BTreeMap::new();
         while let Some((key, JsonLine(v))) = map.next_entry::<String, JsonLine>()? {
             if out.insert(key.clone(), v).is_some() {
@@ -435,28 +476,44 @@ pub fn snapshot_records(stream: &Stream) -> Vec<SnapshotRecord> {
                 let mut values = RecordValues::new();
                 for (column, state) in &r.cells {
                     values.cells.insert(
-                        CellAddr { column: column.clone(), path: RowPath::root() },
+                        CellAddr {
+                            column: column.clone(),
+                            path: RowPath::root(),
+                        },
                         state.clone(),
                     );
                 }
-                out.push(SnapshotRecord { record: r.record.clone(), lens: r.lens.clone(), values });
+                out.push(SnapshotRecord {
+                    record: r.record.clone(),
+                    lens: r.lens.clone(),
+                    values,
+                });
             }
             Line::Item(i) => {
                 let Some(current) = out.last_mut().filter(|c| c.record == i.record) else {
                     continue; // unreachable after read_stream's contiguity check
                 };
-                let path = i.parent.child(PathSeg { group: i.group.clone(), item: i.id.clone() });
+                let path = i.parent.child(PathSeg {
+                    group: i.group.clone(),
+                    item: i.id.clone(),
+                });
                 current
                     .values
                     .items
-                    .entry(ItemsAddr { group: i.group.clone(), parent: i.parent.clone() })
+                    .entry(ItemsAddr {
+                        group: i.group.clone(),
+                        parent: i.parent.clone(),
+                    })
                     .or_default()
                     .push(i.id.clone());
                 for (column, state) in &i.cells {
-                    current
-                        .values
-                        .cells
-                        .insert(CellAddr { column: column.clone(), path: path.clone() }, state.clone());
+                    current.values.cells.insert(
+                        CellAddr {
+                            column: column.clone(),
+                            path: path.clone(),
+                        },
+                        state.clone(),
+                    );
                 }
             }
             _ => {}

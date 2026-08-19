@@ -1,11 +1,10 @@
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, RevisionId};
 use varve_revision::{
-    AggregatePolicy, MergeConflict, NomenclatureRegistry, PublishNomenclatureError,
-    RevisionDag, aggregate, merge,
+    AggregatePolicy, MergeConflict, NomenclatureRegistry, PublishNomenclatureError, RevisionDag,
+    aggregate, merge,
 };
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, OptionRow, ScalarType, Schema, Unit,
-    revision_id,
+    Arity, Cardinality, Column, Element, Group, OptionRow, ScalarType, Schema, Unit, revision_id,
 };
 
 fn column(id: &str, ty: ScalarType) -> Element {
@@ -18,11 +17,18 @@ fn column(id: &str, ty: ScalarType) -> Element {
 }
 
 fn schema(elements: Vec<Element>) -> Schema {
-    Schema { root: elements, resolvers: vec![] }
+    Schema {
+        root: elements,
+        resolvers: vec![],
+    }
 }
 
 fn row(id: &str, label: &str) -> OptionRow {
-    OptionRow { id: OptionId::new(id), label: label.into(), fields: vec![] }
+    OptionRow {
+        id: OptionId::new(id),
+        label: label.into(),
+        fields: vec![],
+    }
 }
 
 #[test]
@@ -46,10 +52,15 @@ fn revision_ids_converge_and_diverge() {
 #[test]
 fn dag_publishes_and_deduplicates() {
     let mut dag = RevisionDag::new();
-    let r1 = dag.publish(schema(vec![column("a", ScalarType::Text)]), vec![]).unwrap();
+    let r1 = dag
+        .publish(schema(vec![column("a", ScalarType::Text)]), vec![])
+        .unwrap();
     let r2 = dag
         .publish(
-            schema(vec![column("a", ScalarType::Text), column("b", ScalarType::Boolean)]),
+            schema(vec![
+                column("a", ScalarType::Text),
+                column("b", ScalarType::Boolean),
+            ]),
             vec![r1.clone()],
         )
         .unwrap();
@@ -58,7 +69,12 @@ fn dag_publishes_and_deduplicates() {
     // Republishing r1's schema after r2 is a *revert*: the same object
     // (content-addressed — no new revision), but a new publication
     // event: it is `latest` again, following r2.
-    let again = dag.publish(schema(vec![column("a", ScalarType::Text)]), vec![r2.clone()]).unwrap();
+    let again = dag
+        .publish(
+            schema(vec![column("a", ScalarType::Text)]),
+            vec![r2.clone()],
+        )
+        .unwrap();
     assert_eq!(again, r1);
     assert_eq!(dag.latest(), Some(&r1));
     assert_eq!(dag.history().count(), 3);
@@ -66,9 +82,10 @@ fn dag_publishes_and_deduplicates() {
     // The object's own parents are those of its first publication.
     assert_eq!(dag.get(&r1).unwrap().parents, vec![]);
     // Unknown parents are rejected.
-    assert!(dag
-        .publish(schema(vec![]), vec![RevisionId::new("nope")])
-        .is_err());
+    assert!(
+        dag.publish(schema(vec![]), vec![RevisionId::new("nope")])
+            .is_err()
+    );
 }
 
 #[test]
@@ -105,7 +122,10 @@ fn nomenclature_publication_is_append_only() {
     assert_eq!(table.get(&id, 1).unwrap().len(), 2);
     assert_eq!(table.get(&id, 2).unwrap().len(), 3);
     assert!(table.get(&id, 3).is_none());
-    assert_eq!(table.versions(&id).map(|(v, _)| v).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(
+        table.versions(&id).map(|(v, _)| v).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }
 
 #[test]
@@ -131,7 +151,11 @@ fn block_publication_numbers_versions_and_validates() {
     // Versions are numbered by the registry: a stale author fails loudly.
     assert!(matches!(
         registry.publish(block(1), DepthPolicy::default()),
-        Err(PublishBlockError::VersionMismatch { expected: 1, next: 2, .. })
+        Err(PublishBlockError::VersionMismatch {
+            expected: 1,
+            next: 2,
+            ..
+        })
     ));
     assert_eq!(registry.publish(block(2), DepthPolicy::default()), Ok(2));
     assert_eq!(registry.get(&BlockId::new("rib"), 1).unwrap().version, 1);
@@ -145,7 +169,10 @@ fn block_publication_numbers_versions_and_validates() {
     ));
     // An invalid shell (duplicate column ids) is refused.
     let mut invalid = block(3);
-    invalid.group.children.push(column("iban", ScalarType::Text));
+    invalid
+        .group
+        .children
+        .push(column("iban", ScalarType::Text));
     assert!(matches!(
         registry.publish(invalid, DepthPolicy::default()),
         Err(PublishBlockError::Invalid { .. })
@@ -179,7 +206,9 @@ fn three_way_merge_combines_disjoint_edits() {
         })
         .collect();
     assert_eq!(ids, vec!["a", "b", "c"]);
-    let Element::Column(b) = &merged.root[1] else { panic!() };
+    let Element::Column(b) = &merged.root[1] else {
+        panic!()
+    };
     assert_eq!(b.ty, ScalarType::Decimal(None));
 
     // Both modify b differently: conflict, named.
@@ -213,9 +242,13 @@ fn merge_recurses_into_groups() {
     ])]);
     let right = schema(vec![group(vec![column("x", ScalarType::Decimal(None))])]);
     let merged = merge(&base, &left, &right).unwrap();
-    let Element::Group(g) = &merged.root[0] else { panic!() };
+    let Element::Group(g) = &merged.root[0] else {
+        panic!()
+    };
     assert_eq!(g.children.len(), 2);
-    let Element::Column(x) = &g.children[0] else { panic!() };
+    let Element::Column(x) = &g.children[0] else {
+        panic!()
+    };
     assert_eq!(x.ty, ScalarType::Decimal(None));
 
     // One side deletes the group, the other adds a column inside it:
@@ -265,23 +298,43 @@ fn aggregate_joins_history_and_reports() {
     let ids: Vec<&str> = agg.columns.iter().map(|c| c.column.as_str()).collect();
     assert_eq!(ids, vec!["clash", "b", "dropped"]);
 
-    let by_id = |id: &str| agg.columns.iter().find(|c| c.column.as_str() == id).unwrap();
+    let by_id = |id: &str| {
+        agg.columns
+            .iter()
+            .find(|c| c.column.as_str() == id)
+            .unwrap()
+    };
     assert_eq!(by_id("b").ty, ScalarType::Decimal(None));
     assert_eq!(by_id("b").deprecated_since, None);
     assert_eq!(by_id("clash").ty, ScalarType::Text);
     assert_eq!(by_id("dropped").deprecated_since, Some(r(2)));
 
-    assert!(report.entries.contains(&(ColumnId::new("clash"), AggregatePolicy::ViaText)));
-    assert!(report.entries.contains(&(ColumnId::new("broken"), AggregatePolicy::Omitted)));
+    assert!(
+        report
+            .entries
+            .contains(&(ColumnId::new("clash"), AggregatePolicy::ViaText))
+    );
+    assert!(
+        report
+            .entries
+            .contains(&(ColumnId::new("broken"), AggregatePolicy::Omitted))
+    );
     assert!(!agg.columns.iter().any(|c| c.column.as_str() == "broken"));
 
     // Removed then re-added with another type, same id (§5.5 row 2):
     // joined across the gap, and reported.
     let rev3 = schema(vec![column("b", ScalarType::Decimal(None))]);
-    let rev4 = schema(vec![column("b", ScalarType::Decimal(None)), column("dropped", ScalarType::Integer(None))]);
+    let rev4 = schema(vec![
+        column("b", ScalarType::Decimal(None)),
+        column("dropped", ScalarType::Integer(None)),
+    ]);
     let history = [(r(1), &rev1), (r(2), &rev2), (r(3), &rev3), (r(4), &rev4)];
     let (_, report) = aggregate(&history, &noms).unwrap();
-    assert!(report.entries.contains(&(ColumnId::new("dropped"), AggregatePolicy::ReAddedRetyped)));
+    assert!(
+        report
+            .entries
+            .contains(&(ColumnId::new("dropped"), AggregatePolicy::ReAddedRetyped))
+    );
 
     // The DAG builds its own aggregate over distinct revisions, in
     // first-publication order — a revert repeats no revision.

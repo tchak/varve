@@ -8,9 +8,7 @@ use std::collections::BTreeSet;
 
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, RowPath};
-use varve_schema::{
-    NomenclatureTable, ScalarType, SchemaIndex, Unit, nomenclature_rows,
-};
+use varve_schema::{NomenclatureTable, ScalarType, SchemaIndex, Unit, nomenclature_rows};
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
 
 use crate::{Atom, ColumnRef, Const, Expr, Operand};
@@ -65,30 +63,36 @@ fn eval_atom(atom: &Atom, ctx: &EvalContext) -> bool {
         Atom::IsEmpty { source } => read(source, ctx).is_none(),
         Atom::IsFilled { source } => read(source, ctx).is_some(),
         Atom::Contains { source, option } => match read(source, ctx) {
-            Some(CellValue::Many(items)) => {
-                items.iter().any(|s| matches!(s, Scalar::Enum(id) if id == option))
-            }
+            Some(CellValue::Many(items)) => items
+                .iter()
+                .any(|s| matches!(s, Scalar::Enum(id) if id == option)),
             _ => false,
         },
         Atom::Excludes { source, option } => match read(source, ctx) {
-            Some(CellValue::Many(items)) => {
-                !items.iter().any(|s| matches!(s, Scalar::Enum(id) if id == option))
-            }
+            Some(CellValue::Many(items)) => !items
+                .iter()
+                .any(|s| matches!(s, Scalar::Enum(id) if id == option)),
             // Absence loses — an absent list "excludes" nothing.
             _ => false,
         },
-        Atom::Eq { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o == Ordering::Equal),
-        Atom::NotEq { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o != Ordering::Equal),
-        Atom::Lt { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o == Ordering::Less),
-        Atom::Le { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o != Ordering::Greater),
-        Atom::Gt { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o == Ordering::Greater),
-        Atom::Ge { source, right } => compare(source, right, ctx)
-            .is_some_and(|o| o != Ordering::Less),
+        Atom::Eq { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o == Ordering::Equal)
+        }
+        Atom::NotEq { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o != Ordering::Equal)
+        }
+        Atom::Lt { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o == Ordering::Less)
+        }
+        Atom::Le { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o != Ordering::Greater)
+        }
+        Atom::Gt { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o == Ordering::Greater)
+        }
+        Atom::Ge { source, right } => {
+            compare(source, right, ctx).is_some_and(|o| o != Ordering::Less)
+        }
     }
 }
 
@@ -140,8 +144,7 @@ fn compare(source: &ColumnRef, right: &Operand, ctx: &EvalContext) -> Option<Ord
         let Scalar::Enum(id) = scalar else {
             return None;
         };
-        let ScalarType::Enum(nref) = &ctx.index.columns.get(&source.column)?.ty
-        else {
+        let ScalarType::Enum(nref) = &ctx.index.columns.get(&source.column)?.ty else {
             return None;
         };
         let rows = nomenclature_rows(nref, ctx.nomenclatures).ok()?;

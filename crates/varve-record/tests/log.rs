@@ -2,10 +2,9 @@ use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RecordId, ResolverId, RevisionId, RowPath};
 use varve_record::{
-    Actor, ActorKind, AppendError, ChainError, Checkpoint, CheckpointViolation,
-    Derivation, Draft, EntrySalts, ExpectedResolution, Origin, RecordLog,
-    Resolution, ResolutionStatus, SaltCountMismatch, pending_resolutions,
-    validate_after_checkpoint,
+    Actor, ActorKind, AppendError, ChainError, Checkpoint, CheckpointViolation, Derivation, Draft,
+    EntrySalts, ExpectedResolution, Origin, RecordLog, Resolution, ResolutionStatus,
+    SaltCountMismatch, pending_resolutions, validate_after_checkpoint,
 };
 use varve_value::{CellAddr, CellState, CellValue, Op, Scalar};
 
@@ -75,8 +74,14 @@ fn addr(column: &str) -> CellAddr {
 #[test]
 fn append_fold_and_verify() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     log.append(draft(
         resolver_actor(),
         1,
@@ -85,18 +90,32 @@ fn append_fold_and_verify() {
         vec![set("raison_sociale", "ACME SARL")],
     ))
     .unwrap();
-    log.append(draft(human("a1"), 2, 2, Origin::Entered, vec![set("name", "Durand")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        2,
+        2,
+        Origin::Entered,
+        vec![set("name", "Durand")],
+    ))
+    .unwrap();
 
     log.verify_chain().unwrap();
     // A log point past the end is an error, never the head.
-    assert!(matches!(log.fold_at(4), Err(varve_record::FoldError::OutOfRange { upto: 4, version: 3 })));
+    assert!(matches!(
+        log.fold_at(4),
+        Err(varve_record::FoldError::OutOfRange {
+            upto: 4,
+            version: 3
+        })
+    ));
     assert!(log.diff_between(0, 9).is_err());
 
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("name")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("Durand".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "Durand".into()
+        ))))
     );
     // Provenance: last writer's origin, per cell.
     assert_eq!(folded.provenance.get(&addr("name")), Some(&Origin::Entered));
@@ -109,10 +128,22 @@ fn append_fold_and_verify() {
 #[test]
 fn tampering_breaks_the_chain() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
-    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![set("name", "Durand")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![set("name", "Durand")],
+    ))
+    .unwrap();
     log.verify_chain().unwrap();
 
     // A "quiet correction" of history: rewrite the value inside a
@@ -145,13 +176,23 @@ fn append_refuses_ops_that_do_not_apply() {
         parent: RowPath::root(),
         item: ItemId::new("i1"),
     };
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![add])).unwrap();
-    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![remove.clone()])).unwrap();
+    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![add]))
+        .unwrap();
+    log.append(draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![remove.clone()],
+    ))
+    .unwrap();
     let before = log.entries().len();
     let refused = log.append(draft(human("b2"), 2, 1, Origin::Entered, vec![remove]));
     assert!(matches!(
         refused,
-        Err(AppendError::DoesNotApply(varve_value::ApplyError::UnknownItem(..)))
+        Err(AppendError::DoesNotApply(
+            varve_value::ApplyError::UnknownItem(..)
+        ))
     ));
     assert_eq!(log.entries().len(), before);
     assert!(log.fold().is_ok());
@@ -163,7 +204,9 @@ fn append_refuses_ops_that_do_not_apply() {
     };
     assert!(matches!(
         log.append(draft(human("a1"), 3, 2, Origin::Entered, vec![empty_many])),
-        Err(AppendError::DoesNotApply(varve_value::ApplyError::EmptyList(_)))
+        Err(AppendError::DoesNotApply(
+            varve_value::ApplyError::EmptyList(_)
+        ))
     ));
     // A poisoned log (rehydrated with an entry that does not apply)
     // refuses appends until repaired, instead of growing the damage.
@@ -175,7 +218,13 @@ fn append_refuses_ops_that_do_not_apply() {
     });
     let mut poisoned = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert!(matches!(
-        poisoned.append(draft(human("a1"), 4, 2, Origin::Entered, vec![set("name", "x")])),
+        poisoned.append(draft(
+            human("a1"),
+            4,
+            2,
+            Origin::Entered,
+            vec![set("name", "x")]
+        )),
         Err(AppendError::Unfoldable(_))
     ));
 }
@@ -186,11 +235,20 @@ fn a_log_verifies_only_under_its_own_record() {
     // log rehydrated under record B's id is a chain error at entry 0 —
     // logs cannot be transplanted. Still per-record: nothing global.
     let mut log = RecordLog::new(RecordId::new("A"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     log.verify_chain().unwrap();
     let transplanted = RecordLog::from_entries(RecordId::new("B"), log.entries().to_vec());
-    assert_eq!(transplanted.verify_chain(), Err(ChainError::PrevMismatch { at: 0 }));
+    assert_eq!(
+        transplanted.verify_chain(),
+        Err(ChainError::PrevMismatch { at: 0 })
+    );
     let same = RecordLog::from_entries(RecordId::new("A"), log.entries().to_vec());
     assert_eq!(same.verify_chain(), Ok(()));
 }
@@ -201,24 +259,42 @@ fn injected_op_without_a_salt_is_detected() {
     // to a stored entry *without* a salt must not slip outside the
     // commitment: the chain must reject it, not verify around it.
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
-    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![set("city", "Lyon")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![set("city", "Lyon")],
+    ))
+    .unwrap();
 
     let mut entries = log.entries().to_vec();
     entries[0].content.ops.push(set("name", "MALLORY"));
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert_eq!(
         tampered.verify_chain(),
-        Err(ChainError::SaltCount { at: 0, mismatch: SaltCountMismatch { ops: 2, salts: 1 } })
+        Err(ChainError::SaltCount {
+            at: 0,
+            mismatch: SaltCountMismatch { ops: 2, salts: 1 }
+        })
     );
 
     // Same for a tail entry — the last entry is otherwise unanchored.
     let mut entries = log.entries().to_vec();
     entries[1].content.ops.push(set("name", "MALLORY"));
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
-    assert!(matches!(tampered.verify_chain(), Err(ChainError::SaltCount { at: 1, .. })));
+    assert!(matches!(
+        tampered.verify_chain(),
+        Err(ChainError::SaltCount { at: 1, .. })
+    ));
 
     // And the mirror image: a salt without an op.
     let mut entries = log.entries().to_vec();
@@ -226,18 +302,30 @@ fn injected_op_without_a_salt_is_detected() {
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert_eq!(
         tampered.verify_chain(),
-        Err(ChainError::SaltCount { at: 0, mismatch: SaltCountMismatch { ops: 1, salts: 2 } })
+        Err(ChainError::SaltCount {
+            at: 0,
+            mismatch: SaltCountMismatch { ops: 1, salts: 2 }
+        })
     );
 }
 
 #[test]
 fn append_refuses_a_salt_count_mismatch() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    let mut d = draft(human("a1"), 0, 0, Origin::Entered, vec![set("a", "1"), set("b", "2")]);
+    let mut d = draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("a", "1"), set("b", "2")],
+    );
     d.salts = salts(1);
     assert_eq!(
         log.append(d).map(|_| ()),
-        Err(AppendError::SaltCount(SaltCountMismatch { ops: 2, salts: 1 }))
+        Err(AppendError::SaltCount(SaltCountMismatch {
+            ops: 2,
+            salts: 1
+        }))
     );
     assert_eq!(log.version(), 0);
 }
@@ -245,20 +333,50 @@ fn append_refuses_a_salt_count_mismatch() {
 #[test]
 fn conflicts_are_detected_not_merged() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     // Two instructors both edit from version 1.
-    log.append(draft(human("a2"), 1, 1, Origin::Entered, vec![set("name", "Durand")]))
-        .unwrap();
-    log.append(draft(human("a3"), 2, 1, Origin::Entered, vec![set("name", "Martin")]))
-        .unwrap();
+    log.append(draft(
+        human("a2"),
+        1,
+        1,
+        Origin::Entered,
+        vec![set("name", "Durand")],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a3"),
+        2,
+        1,
+        Origin::Entered,
+        vec![set("name", "Martin")],
+    ))
+    .unwrap();
     // A fourth write that saw everything: no conflict.
-    log.append(draft(human("a2"), 3, 3, Origin::Entered, vec![set("name", "Bernard")]))
-        .unwrap();
+    log.append(draft(
+        human("a2"),
+        3,
+        3,
+        Origin::Entered,
+        vec![set("name", "Bernard")],
+    ))
+    .unwrap();
     // The same actor rewriting its own cell from a stale base is not a
     // two-actor conflict.
-    log.append(draft(human("a2"), 4, 3, Origin::Entered, vec![set("name", "Bernard-Durand")]))
-        .unwrap();
+    log.append(draft(
+        human("a2"),
+        4,
+        3,
+        Origin::Entered,
+        vec![set("name", "Bernard-Durand")],
+    ))
+    .unwrap();
 
     let conflicts = log.detect_conflicts();
     assert_eq!(conflicts.len(), 1);
@@ -268,7 +386,9 @@ fn conflicts_are_detected_not_merged() {
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("name")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("Bernard-Durand".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "Bernard-Durand".into()
+        ))))
     );
 }
 
@@ -279,17 +399,41 @@ fn lost_updates_with_different_bases_are_conflicts() {
     // entry landed in between — and the later still never saw the
     // earlier's write.
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     // Unrelated write, so the rivals' bases differ.
-    log.append(draft(human("a2"), 1, 1, Origin::Entered, vec![set("email", "d@ex.fr")]))
-        .unwrap();
+    log.append(draft(
+        human("a2"),
+        1,
+        1,
+        Origin::Entered,
+        vec![set("email", "d@ex.fr")],
+    ))
+    .unwrap();
     // a1 read at version 1 (before the email entry), a3 at version 2 —
     // neither saw the other's "name" write.
-    log.append(draft(human("a1"), 2, 1, Origin::Entered, vec![set("name", "Durand")]))
-        .unwrap();
-    log.append(draft(human("a3"), 3, 2, Origin::Entered, vec![set("name", "Martin")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        2,
+        1,
+        Origin::Entered,
+        vec![set("name", "Durand")],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a3"),
+        3,
+        2,
+        Origin::Entered,
+        vec![set("name", "Martin")],
+    ))
+    .unwrap();
 
     let conflicts = log.detect_conflicts();
     assert_eq!(conflicts.len(), 1);
@@ -300,8 +444,14 @@ fn lost_updates_with_different_bases_are_conflicts() {
 #[test]
 fn diff_between_log_points() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     log.append(draft(
         human("a1"),
         1,
@@ -328,10 +478,22 @@ fn diff_between_log_points() {
 #[test]
 fn snapshots_verify_and_detect_tampering() {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
-    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![set("name", "Durand")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![set("name", "Durand")],
+    ))
+    .unwrap();
 
     let snapshot = log.snapshot_at(1).unwrap();
     log.verify_snapshot(&snapshot).unwrap();
@@ -349,29 +511,39 @@ fn referenced_blobs_cover_history_and_snapshots() {
     use varve_core::canonical::{CanonicalValue, hash_plain};
     use varve_value::AttachmentRef;
     let blob = |s: &str| hash_plain(&CanonicalValue::String(s.into())).unwrap();
-    let file = |name: &str, content: &str| {
-        Op::Set {
-            column: ColumnId::new("piece"),
-            path: RowPath::root(),
-            state: CellState::Value(CellValue::Many(vec![Scalar::Attachment(
-                Box::new(AttachmentRef {
-                    id: name.into(),
-                    hash: blob(content),
-                    filename: format!("{name}.pdf"),
-                    content_type: "application/pdf".into(),
-                    byte_size: 10,
-                }),
-            )])),
-        }
+    let file = |name: &str, content: &str| Op::Set {
+        column: ColumnId::new("piece"),
+        path: RowPath::root(),
+        state: CellState::Value(CellValue::Many(vec![Scalar::Attachment(Box::new(
+            AttachmentRef {
+                id: name.into(),
+                hash: blob(content),
+                filename: format!("{name}.pdf"),
+                content_type: "application/pdf".into(),
+                byte_size: 10,
+            },
+        ))])),
     };
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![file("f1", "v1")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![file("f1", "v1")],
+    ))
+    .unwrap();
     // The file is replaced — the superseded blob must STILL be a root:
     // erasure covers history, so GC must not collect what the log
     // references.
-    log.append(draft(human("a1"), 1, 1, Origin::Entered, vec![file("f1", "v2")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![file("f1", "v2")],
+    ))
+    .unwrap();
     // A derived write carries a snapshot ref.
     log.append(draft(
         resolver_actor(),
@@ -440,7 +612,9 @@ fn resolution_lifecycle() {
     // What the logic language reads: (scope, anchor group) pairs.
     assert_eq!(
         pending_set(&list),
-        [(RowPath::root(), GroupId::new("entreprise"))].into_iter().collect()
+        [(RowPath::root(), GroupId::new("entreprise"))]
+            .into_iter()
+            .collect()
     );
 
     resolution.transition(ResolutionStatus::Failed).unwrap();
@@ -471,45 +645,74 @@ fn override_wins_over_late_resolution() {
     // retained on the cell as `superseded` — divergence visible, restore
     // one `set` away — and the suppressed write is reported.
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("raison_sociale", "ACME (typed)")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("raison_sociale", "ACME (typed)")],
+    ))
+    .unwrap();
     log.append(draft(
         resolver_actor(),
         1,
         1,
         Origin::Derived(derivation()),
-        vec![set("raison_sociale", "ACME SARL"), set("adresse", "1 rue X")],
+        vec![
+            set("raison_sociale", "ACME SARL"),
+            set("adresse", "1 rue X"),
+        ],
     ))
     .unwrap();
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("raison_sociale")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("ACME (typed)".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "ACME (typed)".into()
+        ))))
     );
     assert_eq!(
         folded.provenance.get(&addr("raison_sociale")),
-        Some(&Origin::Overridden { superseded: Some(derivation()) })
+        Some(&Origin::Overridden {
+            superseded: Some(derivation())
+        })
     );
     // The untouched target still lands.
     assert_eq!(
         folded.values.cells.get(&addr("adresse")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("1 rue X".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "1 rue X".into()
+        ))))
     );
-    assert!(matches!(folded.provenance.get(&addr("adresse")), Some(Origin::Derived(_))));
+    assert!(matches!(
+        folded.provenance.get(&addr("adresse")),
+        Some(Origin::Derived(_))
+    ));
     assert_eq!(
         folded.suppressed,
-        vec![varve_record::Suppressed { seq: 1, addr: addr("raison_sociale") }]
+        vec![varve_record::Suppressed {
+            seq: 1,
+            addr: addr("raison_sociale")
+        }]
     );
 
     // A human writing over a derived cell becomes `overridden` with the
     // replaced derivation retained, even though the entry said `entered`
     // — provenance is derived, not copied (§2.7).
-    log.append(draft(human("a1"), 2, 2, Origin::Entered, vec![set("adresse", "2 rue Y")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        2,
+        2,
+        Origin::Entered,
+        vec![set("adresse", "2 rue Y")],
+    ))
+    .unwrap();
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.provenance.get(&addr("adresse")),
-        Some(&Origin::Overridden { superseded: Some(derivation()) })
+        Some(&Origin::Overridden {
+            superseded: Some(derivation())
+        })
     );
     // A later resolver write onto that override is refused too.
     log.append(draft(
@@ -523,7 +726,9 @@ fn override_wins_over_late_resolution() {
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("adresse")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("2 rue Y".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "2 rue Y".into()
+        ))))
     );
     assert_eq!(folded.suppressed.len(), 2);
 
@@ -531,22 +736,39 @@ fn override_wins_over_late_resolution() {
     // a deliberate act with a Derived origin, not a late machine write —
     // and it applies. Machine values never win by force; humans may
     // choose them.
-    log.append(draft(human("a1"), 4, 4, Origin::Derived(derivation()), vec![set("adresse", "3 rue Z")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        4,
+        4,
+        Origin::Derived(derivation()),
+        vec![set("adresse", "3 rue Z")],
+    ))
+    .unwrap();
     let folded = log.fold().unwrap();
     assert_eq!(
         folded.values.cells.get(&addr("adresse")),
-        Some(&CellState::Value(CellValue::One(Scalar::Text("3 rue Z".into()))))
+        Some(&CellState::Value(CellValue::One(Scalar::Text(
+            "3 rue Z".into()
+        ))))
     );
-    assert!(matches!(folded.provenance.get(&addr("adresse")), Some(Origin::Derived(_))));
+    assert!(matches!(
+        folded.provenance.get(&addr("adresse")),
+        Some(Origin::Derived(_))
+    ));
 }
 
 #[test]
 fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
     use std::collections::BTreeSet;
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     // Taken through the applicant form: `name`, `raison_sociale`,
     // `adresse` and the repetition `g1` are frozen; the instructor's
     // `annotation` column is not on that surface.
@@ -578,8 +800,14 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
     .unwrap();
     // An instructor annotating: outside the frozen set, not the
     // checkpoint's business (§2.9 — the record stays a case file).
-    log.append(draft(human("instructor"), 2, 2, Origin::Entered, vec![set("annotation", "ok")]))
-        .unwrap();
+    log.append(draft(
+        human("instructor"),
+        2,
+        2,
+        Origin::Entered,
+        vec![set("annotation", "ok")],
+    ))
+    .unwrap();
     assert_eq!(validate_after_checkpoint(&log, &checkpoint, None), vec![]);
 
     // A human edit into the frozen set — even mixed with a legal
@@ -679,15 +907,24 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
         frozen_groups: BTreeSet::new(),
         ..checkpoint.clone()
     };
-    assert_eq!(validate_after_checkpoint(&log, &checkpoint, Some(&reopened)), vec![]);
+    assert_eq!(
+        validate_after_checkpoint(&log, &checkpoint, Some(&reopened)),
+        vec![]
+    );
     assert_eq!(validate_after_checkpoint(&log, &reopened, None), vec![]);
     // A superseding checkpoint must come after this one.
-    let earlier = Checkpoint { entry: varve_record::genesis_hash(&RecordId::new("r1")), ..reopened.clone() };
+    let earlier = Checkpoint {
+        entry: varve_record::genesis_hash(&RecordId::new("r1")),
+        ..reopened.clone()
+    };
     assert_eq!(
         validate_after_checkpoint(&log, &checkpoint, Some(&earlier)),
         vec![CheckpointViolation::UnknownSupersedingEntry]
     );
-    let unknown = Checkpoint { entry: varve_record::genesis_hash(&RecordId::new("r1")), ..checkpoint.clone() };
+    let unknown = Checkpoint {
+        entry: varve_record::genesis_hash(&RecordId::new("r1")),
+        ..checkpoint.clone()
+    };
     assert_eq!(
         validate_after_checkpoint(&log, &unknown, None),
         vec![CheckpointViolation::UnknownEntry]

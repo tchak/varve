@@ -9,17 +9,12 @@ use varve_core::canonical::{CanonicalValue, ContentHash, hash_plain};
 use varve_core::{BlockId, RevisionId};
 
 use crate::{
-    Arity, Block, BlockRef, Cardinality, Element, NomenclatureRef, OptionRow,
-    ResolverDeclaration, ScalarType, Schema,
+    Arity, Block, BlockRef, Cardinality, Element, NomenclatureRef, OptionRow, ResolverDeclaration,
+    ScalarType, Schema,
 };
 
 fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
-    CanonicalValue::Object(
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect(),
-    )
+    CanonicalValue::Object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
 }
 
 fn string(s: impl ToString) -> CanonicalValue {
@@ -149,9 +144,7 @@ fn scalar_type(ty: &ScalarType) -> CanonicalValue {
             if !constraints.accept.is_empty() {
                 pairs.push((
                     "accept",
-                    CanonicalValue::Array(
-                        constraints.accept.iter().map(string).collect(),
-                    ),
+                    CanonicalValue::Array(constraints.accept.iter().map(string).collect()),
                 ));
             }
             if let Some(max) = constraints.max_bytes {
@@ -177,9 +170,7 @@ fn scalar_type(ty: &ScalarType) -> CanonicalValue {
             (
                 "nomenclature",
                 match nref {
-                    NomenclatureRef::Inline(rows) => {
-                        obj(vec![("inline", array(rows, option_row))])
-                    }
+                    NomenclatureRef::Inline(rows) => obj(vec![("inline", array(rows, option_row))]),
                     NomenclatureRef::Published { id, version } => obj(vec![(
                         "published",
                         obj(vec![
@@ -230,7 +221,12 @@ fn resolver(decl: &ResolverDeclaration) -> CanonicalValue {
             CanonicalValue::Array(
                 decl.result_type
                     .iter()
-                    .map(|f| obj(vec![("name", string(&f.name)), ("type", scalar_type(&f.ty))]))
+                    .map(|f| {
+                        obj(vec![
+                            ("name", string(&f.name)),
+                            ("type", scalar_type(&f.ty)),
+                        ])
+                    })
                     .collect(),
             ),
         ),
@@ -258,7 +254,7 @@ fn resolver(decl: &ResolverDeclaration) -> CanonicalValue {
 // blocks and units, over the whole corpus by `tools/m0 --wire`, and by
 // the wire property suite.
 
-use crate::{Column, Group, Mapping, ResultField, AttachmentConstraints, Unit};
+use crate::{AttachmentConstraints, Column, Group, Mapping, ResultField, Unit};
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -300,7 +296,8 @@ fn get_int(m: &Obj, key: &str) -> Result<i64, SchemaDecodeError> {
 }
 
 fn get<'a>(m: &'a Obj, key: &str) -> Result<&'a CanonicalValue, SchemaDecodeError> {
-    m.get(key).ok_or_else(|| SchemaDecodeError(format!("missing '{key}'")))
+    m.get(key)
+        .ok_or_else(|| SchemaDecodeError(format!("missing '{key}'")))
 }
 
 fn get_u32(m: &Obj, key: &str) -> Result<u32, SchemaDecodeError> {
@@ -342,7 +339,8 @@ fn element_from(v: &CanonicalValue) -> Result<Element, SchemaDecodeError> {
             id: ColumnId::new(get_str(c, "id")?),
             label: get_str(c, "label")?,
             ty: scalar_type_from(
-                c.get("type").ok_or_else(|| SchemaDecodeError("missing 'type'".into()))?,
+                c.get("type")
+                    .ok_or_else(|| SchemaDecodeError("missing 'type'".into()))?,
             )?,
             arity: arity_from(&get_str(c, "arity")?)?,
         }));
@@ -493,7 +491,8 @@ fn resolver_from(v: &CanonicalValue) -> Result<ResolverDeclaration, SchemaDecode
             Ok(ResultField {
                 name: get_str(f, "name")?,
                 ty: scalar_type_from(
-                    f.get("type").ok_or_else(|| SchemaDecodeError("missing 'type'".into()))?,
+                    f.get("type")
+                        .ok_or_else(|| SchemaDecodeError("missing 'type'".into()))?,
                 )?,
             })
         })
@@ -522,13 +521,20 @@ fn resolver_from(v: &CanonicalValue) -> Result<ResolverDeclaration, SchemaDecode
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Arity, Cardinality, Column, Group, Mapping, ResolverDeclaration, ResultField, Unit};
+    use crate::{
+        Arity, Cardinality, Column, Group, Mapping, ResolverDeclaration, ResultField, Unit,
+    };
     use varve_core::{ColumnId, GroupId, ResolverId};
 
     #[test]
     fn schema_round_trips_through_its_canonical_form() {
         let column = |id: &str, ty: ScalarType| {
-            Element::Column(Column { id: ColumnId::new(id), label: id.into(), ty, arity: Arity::Many })
+            Element::Column(Column {
+                id: ColumnId::new(id),
+                label: id.into(),
+                ty,
+                arity: Arity::Many,
+            })
         };
         let schema = Schema {
             root: vec![
@@ -538,7 +544,10 @@ mod tests {
                     label: "RIB".into(),
                     cardinality: Cardinality::One,
                     children: vec![column("iban", ScalarType::Text)],
-                    included_from: Some(BlockRef { id: BlockId::new("rib"), version: 3 }),
+                    included_from: Some(BlockRef {
+                        id: BlockId::new("rib"),
+                        version: 3,
+                    }),
                 }),
             ],
             resolvers: vec![ResolverDeclaration {
@@ -546,13 +555,22 @@ mod tests {
                 version: 1,
                 anchor: GroupId::new("rib"),
                 input: vec![(ColumnId::new("iban"), ScalarType::Text)],
-                result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
-                mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("iban") }],
+                result_type: vec![ResultField {
+                    name: "bic".into(),
+                    ty: ScalarType::Text,
+                }],
+                mapping: vec![Mapping {
+                    result_field: "bic".into(),
+                    target: ColumnId::new("iban"),
+                }],
             }],
         };
         let canonical = schema_canonical(&schema);
         assert_eq!(schema_from_canonical(&canonical).unwrap(), schema);
-        assert_eq!(schema_canonical(&schema_from_canonical(&canonical).unwrap()), canonical);
+        assert_eq!(
+            schema_canonical(&schema_from_canonical(&canonical).unwrap()),
+            canonical
+        );
         // Identity-bearing provenance: dropping it changes the id.
         let mut by_hand = schema.clone();
         if let Element::Group(g) = &mut by_hand.root[1] {

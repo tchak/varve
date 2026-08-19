@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn conversions() {
-        assert_eq!(conversion(Unit::Metre, Unit::Kilometre), Some((1_000, 1_000_000)));
+        assert_eq!(
+            conversion(Unit::Metre, Unit::Kilometre),
+            Some((1_000, 1_000_000))
+        );
         assert_eq!(conversion(Unit::Hour, Unit::Minute), Some((60, 1)));
         assert_eq!(conversion(Unit::Year, Unit::Month), Some((12, 1)));
         // Days ↔ months: refused, not fictionalized.

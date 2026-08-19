@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use varve_core::{ColumnId, GroupId, RevisionId};
 use varve_schema::{
-    Arity, CastError, Element, JoinPath, NomenclatureTable, ScalarType, Schema,
-    SchemaIndex, column_join,
+    Arity, CastError, Element, JoinPath, NomenclatureTable, ScalarType, Schema, SchemaIndex,
+    column_join,
 };
 
 /// Synthetic and non-publishable **by type** (§5.5 guard): an
@@ -82,13 +82,16 @@ pub fn aggregate(
         let schema_index = SchemaIndex::build(schema);
         let labels = column_labels(schema);
         for (column, info) in schema_index.columns {
-            occurrences.entry(column.clone()).or_default().push(Occurrence {
-                revision: index,
-                label: labels.get(&column).cloned().unwrap_or_default(),
-                ty: info.ty,
-                arity: info.arity,
-                scope: info.scope,
-            });
+            occurrences
+                .entry(column.clone())
+                .or_default()
+                .push(Occurrence {
+                    revision: index,
+                    label: labels.get(&column).cloned().unwrap_or_default(),
+                    ty: info.ty,
+                    arity: info.arity,
+                    scope: info.scope,
+                });
         }
     }
 
@@ -102,15 +105,16 @@ pub fn aggregate(
                 .entries
                 .push((column.clone(), AggregatePolicy::ScopeKeptLatest));
         }
-        let in_scope: Vec<&Occurrence> =
-            occs.iter().filter(|o| o.scope == latest.scope).collect();
+        let in_scope: Vec<&Occurrence> = occs.iter().filter(|o| o.scope == latest.scope).collect();
         // Removed then re-added with another type: a gap in the
         // revision indices with a type change across it.
         let re_added_retyped = occs.windows(2).any(|w| {
             w[1].revision > w[0].revision + 1 && (w[1].ty != w[0].ty || w[1].arity != w[0].arity)
         });
         if re_added_retyped {
-            report.entries.push((column.clone(), AggregatePolicy::ReAddedRetyped));
+            report
+                .entries
+                .push((column.clone(), AggregatePolicy::ReAddedRetyped));
         }
 
         let mut ty = in_scope[0].ty.clone();
@@ -136,11 +140,15 @@ pub fn aggregate(
             }
         }
         if omitted {
-            report.entries.push((column.clone(), AggregatePolicy::Omitted));
+            report
+                .entries
+                .push((column.clone(), AggregatePolicy::Omitted));
             continue;
         }
         if via_text {
-            report.entries.push((column.clone(), AggregatePolicy::ViaText));
+            report
+                .entries
+                .push((column.clone(), AggregatePolicy::ViaText));
         }
 
         let last_present = latest.revision;
@@ -174,7 +182,10 @@ pub fn aggregate(
     }
     let mut deprecated: Vec<AggregateColumn> = aggregated.into_values().collect();
     deprecated.sort_by_key(|c| {
-        occurrences[&c.column].first().map(|o| o.revision).unwrap_or(0)
+        occurrences[&c.column]
+            .first()
+            .map(|o| o.revision)
+            .unwrap_or(0)
     });
     columns.extend(deprecated);
 

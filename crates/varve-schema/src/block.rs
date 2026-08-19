@@ -20,8 +20,8 @@ use varve_core::{BlockId, ColumnId, GroupId, ResolverId};
 
 use crate::canon::block_hash;
 use crate::{
-    BlockRef, DepthPolicy, Element, Group, ResolverDeclaration, Schema, SchemaError,
-    SchemaIndex, validate,
+    BlockRef, DepthPolicy, Element, Group, ResolverDeclaration, Schema, SchemaError, SchemaIndex,
+    validate,
 };
 
 /// The schema-side half of a published block.
@@ -65,7 +65,10 @@ pub enum IncludeError {
 
 impl Block {
     pub fn reference(&self) -> BlockRef {
-        BlockRef { id: self.id.clone(), version: self.version }
+        BlockRef {
+            id: self.id.clone(),
+            version: self.version,
+        }
     }
 
     /// The block's content address (plain regime, §2.13).
@@ -100,7 +103,11 @@ impl Block {
             root: vec![Element::Group(self.group.clone())],
             resolvers: self.resolvers.clone(),
         };
-        errors.extend(validate(&standalone, policy).into_iter().map(BlockError::Shell));
+        errors.extend(
+            validate(&standalone, policy)
+                .into_iter()
+                .map(BlockError::Shell),
+        );
         let own: HashSet<ColumnId> = self.columns().into_iter().collect();
         for r in &self.resolvers {
             let inputs = r.input.iter().map(|(c, _)| c);
@@ -136,16 +143,21 @@ impl Block {
         if let Some(g) = nested.into_iter().find(|g| index.groups.contains_key(g)) {
             return Err(IncludeError::DuplicateGroup(g));
         }
-        if let Some(c) = self.columns().into_iter().find(|c| index.columns.contains_key(c)) {
+        if let Some(c) = self
+            .columns()
+            .into_iter()
+            .find(|c| index.columns.contains_key(c))
+        {
             return Err(IncludeError::DuplicateColumn(c));
         }
         // A declaration's identity is (anchor, id) — §10 Q17: two SIRET
         // blocks both bring insee-sirene, anchored at their own groups.
-        if let Some(r) = self
-            .resolvers
-            .iter()
-            .find(|r| schema.resolvers.iter().any(|s| s.id == r.id && s.anchor == r.anchor))
-        {
+        if let Some(r) = self.resolvers.iter().find(|r| {
+            schema
+                .resolvers
+                .iter()
+                .any(|s| s.id == r.id && s.anchor == r.anchor)
+        }) {
             return Err(IncludeError::DuplicateResolver(r.id.clone()));
         }
 

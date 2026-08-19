@@ -70,7 +70,10 @@ pub struct ColumnRef {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Const {
     Boolean(bool),
-    Number { value: Decimal, unit: Option<Unit> },
+    Number {
+        value: Decimal,
+        unit: Option<Unit>,
+    },
     Date(Date),
     Datetime(Instant),
     Option(OptionId),
@@ -90,23 +93,55 @@ pub enum Operand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Atom {
-    Eq { source: ColumnRef, right: Operand },
-    NotEq { source: ColumnRef, right: Operand },
-    Lt { source: ColumnRef, right: Operand },
-    Le { source: ColumnRef, right: Operand },
-    Gt { source: ColumnRef, right: Operand },
-    Ge { source: ColumnRef, right: Operand },
-    IsEmpty { source: ColumnRef },
-    IsFilled { source: ColumnRef },
+    Eq {
+        source: ColumnRef,
+        right: Operand,
+    },
+    NotEq {
+        source: ColumnRef,
+        right: Operand,
+    },
+    Lt {
+        source: ColumnRef,
+        right: Operand,
+    },
+    Le {
+        source: ColumnRef,
+        right: Operand,
+    },
+    Gt {
+        source: ColumnRef,
+        right: Operand,
+    },
+    Ge {
+        source: ColumnRef,
+        right: Operand,
+    },
+    IsEmpty {
+        source: ColumnRef,
+    },
+    IsFilled {
+        source: ColumnRef,
+    },
     /// Arity-`many` enum membership.
-    Contains { source: ColumnRef, option: OptionId },
-    Excludes { source: ColumnRef, option: OptionId },
+    Contains {
+        source: ColumnRef,
+        option: OptionId,
+    },
+    Excludes {
+        source: ColumnRef,
+        option: OptionId,
+    },
     /// §2.8 rule 3: resolution status is readable. Names the **anchor
     /// group** whose resolution is pending — not the resolver: two
     /// blocks fed by one resolver are two questions (§10 Q17). Paired
     /// negative (like `not_eq`): there is no `Not` combinator.
-    Pending { group: GroupId },
-    NotPending { group: GroupId },
+    Pending {
+        group: GroupId,
+    },
+    NotPending {
+        group: GroupId,
+    },
 }
 
 impl Atom {

@@ -9,7 +9,12 @@ use varve_revision::{NomenclatureRegistry, PublishNomenclatureError, RevisionDag
 use varve_schema::{Arity, Column, Element, OptionRow, ScalarType, Schema, revision_id};
 
 fn column(id: &str, ty: ScalarType) -> Element {
-    Element::Column(Column { id: ColumnId::new(id), label: id.into(), ty, arity: Arity::One })
+    Element::Column(Column {
+        id: ColumnId::new(id),
+        label: id.into(),
+        ty,
+        arity: Arity::One,
+    })
 }
 
 /// A handful of distinguishable schemas — small enough that repeats
@@ -17,7 +22,11 @@ fn column(id: &str, ty: ScalarType) -> Element {
 fn schema() -> impl Strategy<Value = Schema> {
     (
         proptest::sample::subsequence(vec!["a", "b", "c"], 0..=3),
-        prop_oneof![Just(ScalarType::Text), Just(ScalarType::Boolean), Just(ScalarType::Integer(None))],
+        prop_oneof![
+            Just(ScalarType::Text),
+            Just(ScalarType::Boolean),
+            Just(ScalarType::Integer(None))
+        ],
     )
         .prop_map(|(ids, ty)| Schema {
             root: ids.into_iter().map(|id| column(id, ty.clone())).collect(),
@@ -26,7 +35,11 @@ fn schema() -> impl Strategy<Value = Schema> {
 }
 
 fn row(id: &str, label: &str) -> OptionRow {
-    OptionRow { id: OptionId::new(id), label: label.into(), fields: vec![] }
+    OptionRow {
+        id: OptionId::new(id),
+        label: label.into(),
+        fields: vec![],
+    }
 }
 
 proptest! {
@@ -154,7 +167,10 @@ fn duplicate_ids_are_refused() {
     let mut registry = NomenclatureRegistry::new();
     assert_eq!(
         registry.publish(id.clone(), vec![row("o1", "A"), row("o1", "B")]),
-        Err(PublishNomenclatureError::DuplicateId { id: id.clone(), option: OptionId::new("o1") })
+        Err(PublishNomenclatureError::DuplicateId {
+            id: id.clone(),
+            option: OptionId::new("o1")
+        })
     );
     assert!(registry.rows(&id, 1).is_none());
     assert!(registry.table().is_empty());

@@ -2,8 +2,7 @@ use varve_core::primitives::{Decimal, Instant};
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_projection::{ColumnStatus, project};
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
-    ScalarType, Schema,
+    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
 };
 use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues, Scalar};
 
@@ -92,7 +91,11 @@ fn widening_casts_convert_values() {
     let writer = schema(vec![
         column("n", ScalarType::Integer(None), Arity::One),
         column("d", ScalarType::Date, Arity::One),
-        column("choice", ScalarType::Enum(options(&[("o1", "Oui")])), Arity::One),
+        column(
+            "choice",
+            ScalarType::Enum(options(&[("o1", "Oui")])),
+            Arity::One,
+        ),
     ]);
     let reader = schema(vec![
         column("n", ScalarType::Decimal(None), Arity::One),
@@ -122,7 +125,10 @@ fn widening_casts_convert_values() {
         ))
     );
     // Enum→text goes through the writer's lens: the label, not the id.
-    assert_eq!(p.values.cells[&addr("choice")], one(Scalar::Text("Oui".into())));
+    assert_eq!(
+        p.values.cells[&addr("choice")],
+        one(Scalar::Text("Oui".into()))
+    );
     assert!(p.report.is_clean());
 }
 
@@ -130,16 +136,26 @@ fn widening_casts_convert_values() {
 fn checked_casts_fail_loudly_per_cell() {
     let writer = schema(vec![
         column("d", ScalarType::Decimal(None), Arity::One),
-        column("choice", ScalarType::Enum(options(&[("o1", "Oui"), ("o2", "Non")])), Arity::One),
+        column(
+            "choice",
+            ScalarType::Enum(options(&[("o1", "Oui"), ("o2", "Non")])),
+            Arity::One,
+        ),
     ]);
     let reader = schema(vec![
         column("d", ScalarType::Integer(None), Arity::One),
-        column("choice", ScalarType::Enum(options(&[("o1", "Oui")])), Arity::One),
+        column(
+            "choice",
+            ScalarType::Enum(options(&[("o1", "Oui")])),
+            Arity::One,
+        ),
     ]);
     let mut v = RecordValues::new();
     // Fractional: fails the exact-or-nothing decimal→integer cast.
-    v.cells
-        .insert(addr("d"), one(Scalar::Decimal(Decimal::parse("1.5").unwrap())));
+    v.cells.insert(
+        addr("d"),
+        one(Scalar::Decimal(Decimal::parse("1.5").unwrap())),
+    );
     // Option o2 was removed from the reader's nomenclature.
     v.cells
         .insert(addr("choice"), one(Scalar::Enum(OptionId::new("o2"))));
@@ -172,7 +188,10 @@ fn many_to_one_truncates_and_reports() {
     );
 
     let p = project(&v, &writer, &reader, &Default::default()).unwrap();
-    assert_eq!(p.values.cells[&addr("tags")], one(Scalar::Enum(OptionId::new("o1"))));
+    assert_eq!(
+        p.values.cells[&addr("tags")],
+        one(Scalar::Enum(OptionId::new("o1")))
+    );
     assert_eq!(p.report.total_lossy(), 1);
 
     // A singleton narrows without loss.
@@ -193,7 +212,9 @@ fn datetime_to_date_loss_is_per_cell() {
     let mut noon = RecordValues::new();
     noon.cells.insert(
         addr("t"),
-        one(Scalar::Datetime(Instant::parse("2026-08-16T12:30:00Z").unwrap())),
+        one(Scalar::Datetime(
+            Instant::parse("2026-08-16T12:30:00Z").unwrap(),
+        )),
     );
     let p = project(&noon, &writer, &reader, &Default::default()).unwrap();
     assert_eq!(p.report.total_lossy(), 1);
@@ -201,7 +222,9 @@ fn datetime_to_date_loss_is_per_cell() {
     let mut midnight = RecordValues::new();
     midnight.cells.insert(
         addr("t"),
-        one(Scalar::Datetime(Instant::parse("2026-08-16T00:00:00Z").unwrap())),
+        one(Scalar::Datetime(
+            Instant::parse("2026-08-16T00:00:00Z").unwrap(),
+        )),
     );
     let p = project(&midnight, &writer, &reader, &Default::default()).unwrap();
     assert_eq!(p.report.total_lossy(), 0);
@@ -331,13 +354,19 @@ fn unit_added_is_free_and_unit_removed_is_lossy() {
     let p = project(&v, &plain, &days, &Default::default()).unwrap();
     assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
     assert!(p.report.is_clean());
-    assert_eq!(p.report.columns[&ColumnId::new("n")].status, ColumnStatus::Cast);
+    assert_eq!(
+        p.report.columns[&ColumnId::new("n")].status,
+        ColumnStatus::Cast
+    );
 
     let p = project(&v, &days, &plain, &Default::default()).unwrap();
     assert_eq!(p.values.cells[&addr("n")], one(Scalar::Integer(12)));
     assert!(!p.report.is_clean());
     assert_eq!(p.report.columns[&ColumnId::new("n")].cells_lossy, 1);
-    assert_eq!(p.report.columns[&ColumnId::new("n")].status, ColumnStatus::Cast);
+    assert_eq!(
+        p.report.columns[&ColumnId::new("n")].status,
+        ColumnStatus::Cast
+    );
 }
 
 #[test]
@@ -351,10 +380,14 @@ fn text_to_enum_matches_labels() {
     let mut v = RecordValues::new();
     v.cells.insert(addr("c"), one(Scalar::Text("Non".into())));
     let p = project(&v, &writer, &reader, &Default::default()).unwrap();
-    assert_eq!(p.values.cells[&addr("c")], one(Scalar::Enum(OptionId::new("o2"))));
+    assert_eq!(
+        p.values.cells[&addr("c")],
+        one(Scalar::Enum(OptionId::new("o2")))
+    );
 
     let mut bad = RecordValues::new();
-    bad.cells.insert(addr("c"), one(Scalar::Text("Peut-être".into())));
+    bad.cells
+        .insert(addr("c"), one(Scalar::Text("Peut-être".into())));
     let p = project(&bad, &writer, &reader, &Default::default()).unwrap();
     assert_eq!(p.report.total_failed(), 1);
 }

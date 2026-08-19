@@ -1,12 +1,11 @@
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
-    ScalarType, Schema,
+    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
 };
 use varve_value::{
-    ApplyError, AttachmentRef, CellAddr, CellState, CellValue, ConformanceError, ItemsAddr,
-    Op, RecordValues, Scalar, apply, cell_delta, check, diff,
+    ApplyError, AttachmentRef, CellAddr, CellState, CellValue, ConformanceError, ItemsAddr, Op,
+    RecordValues, Scalar, apply, cell_delta, check, diff,
 };
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
@@ -38,7 +37,11 @@ fn schema() -> Schema {
             column("name", ScalarType::Text, Arity::One),
             column("amount", ScalarType::Decimal(None), Arity::One),
             column("tags", ScalarType::Enum(tags), Arity::Many),
-            column("files", ScalarType::Attachment(Default::default()), Arity::Many),
+            column(
+                "files",
+                ScalarType::Attachment(Default::default()),
+                Arity::Many,
+            ),
             Element::Group(Group {
                 included_from: None,
                 id: GroupId::new("contacts"),
@@ -234,10 +237,10 @@ fn full_export_is_a_patch_against_empty() {
     // §5: a snapshot export is a patch against the empty state.
     let target = sample();
     let ops = diff(&RecordValues::new(), &target);
-    assert!(ops.iter().all(|op| matches!(
-        op,
-        Op::Set { .. } | Op::AddItem { .. } | Op::Reorder { .. }
-    )));
+    assert!(
+        ops.iter()
+            .all(|op| matches!(op, Op::Set { .. } | Op::AddItem { .. } | Op::Reorder { .. }))
+    );
     let mut replay = RecordValues::new();
     for op in &ops {
         apply(&mut replay, op).expect("op must apply");
@@ -290,21 +293,40 @@ fn attachment_claims_are_checked_against_constraints() {
         a.content_type = ct.into();
         a.byte_size = size;
         v.cells.insert(
-            CellAddr { column: ColumnId::new("piece"), path: RowPath::root() },
+            CellAddr {
+                column: ColumnId::new("piece"),
+                path: RowPath::root(),
+            },
             CellState::Value(CellValue::Many(vec![Scalar::Attachment(a)])),
         );
         v
     };
     // Accepted exactly and by wildcard; within size.
-    assert_eq!(check(&cell("application/pdf", 1_000), &constrained, &Default::default()), vec![]);
-    assert_eq!(check(&cell("image/png", 1_000), &constrained, &Default::default()), vec![]);
+    assert_eq!(
+        check(
+            &cell("application/pdf", 1_000),
+            &constrained,
+            &Default::default()
+        ),
+        vec![]
+    );
+    assert_eq!(
+        check(&cell("image/png", 1_000), &constrained, &Default::default()),
+        vec![]
+    );
     // Wrong type and oversized: both claims checked, zero IO.
     let errors = check(&cell("video/mp4", 9_000), &constrained, &Default::default());
-    assert!(errors.contains(&ConformanceError::AttachmentTypeNotAccepted(
-        ColumnId::new("piece"),
-        "video/mp4".into()
-    )));
-    assert!(errors.contains(&ConformanceError::AttachmentTooLarge(ColumnId::new("piece"))));
+    assert!(
+        errors.contains(&ConformanceError::AttachmentTypeNotAccepted(
+            ColumnId::new("piece"),
+            "video/mp4".into()
+        ))
+    );
+    assert!(
+        errors.contains(&ConformanceError::AttachmentTooLarge(ColumnId::new(
+            "piece"
+        )))
+    );
 }
 
 #[test]
@@ -313,7 +335,11 @@ fn enum_membership_is_checked_against_the_bound_nomenclature_version() {
     // not the latest. Same cell, two bindings, two verdicts.
     use varve_core::NomenclatureId;
     use varve_schema::{NomenclatureRef, NomenclatureTable, OptionRow};
-    let row = |id: &str| OptionRow { id: OptionId::new(id), label: id.into(), fields: vec![] };
+    let row = |id: &str| OptionRow {
+        id: OptionId::new(id),
+        label: id.into(),
+        fields: vec![],
+    };
     let cog = NomenclatureId::new("cog");
     let mut table = NomenclatureTable::new();
     table.insert(cog.clone(), 1, vec![row("01")]);
@@ -321,24 +347,37 @@ fn enum_membership_is_checked_against_the_bound_nomenclature_version() {
     let bound_to = |version: u32| Schema {
         root: vec![column(
             "commune",
-            ScalarType::Enum(NomenclatureRef::Published { id: cog.clone(), version }),
+            ScalarType::Enum(NomenclatureRef::Published {
+                id: cog.clone(),
+                version,
+            }),
             Arity::One,
         )],
         resolvers: vec![],
     };
     let mut v = RecordValues::new();
     v.cells.insert(
-        CellAddr { column: ColumnId::new("commune"), path: RowPath::root() },
+        CellAddr {
+            column: ColumnId::new("commune"),
+            path: RowPath::root(),
+        },
         one(Scalar::Enum(OptionId::new("02"))),
     );
     assert_eq!(check(&v, &bound_to(2), &table), vec![]);
     assert_eq!(
         check(&v, &bound_to(1), &table),
-        vec![ConformanceError::UnknownOption(ColumnId::new("commune"), OptionId::new("02"))]
+        vec![ConformanceError::UnknownOption(
+            ColumnId::new("commune"),
+            OptionId::new("02")
+        )]
     );
     assert_eq!(
         check(&v, &bound_to(3), &table),
-        vec![ConformanceError::UnknownNomenclature(ColumnId::new("commune"), cog, 3)]
+        vec![ConformanceError::UnknownNomenclature(
+            ColumnId::new("commune"),
+            cog,
+            3
+        )]
     );
 }
 
@@ -353,7 +392,10 @@ fn one_state_one_encoding_no_empty_lists() {
         path: RowPath::root(),
         state: CellState::Value(CellValue::Many(vec![])),
     };
-    assert_eq!(apply(&mut v, &tags), Err(ApplyError::EmptyList(ColumnId::new("tags"))));
+    assert_eq!(
+        apply(&mut v, &tags),
+        Err(ApplyError::EmptyList(ColumnId::new("tags")))
+    );
     assert!(v.cells.is_empty());
 
     // A failing AddItem leaves nothing behind — no `[]` under the group.
@@ -363,15 +405,22 @@ fn one_state_one_encoding_no_empty_lists() {
         item: ItemId::new("c1"),
         at: 5,
     };
-    assert_eq!(apply(&mut v, &bad), Err(ApplyError::BadIndex(GroupId::new("contacts"), 5)));
+    assert_eq!(
+        apply(&mut v, &bad),
+        Err(ApplyError::BadIndex(GroupId::new("contacts"), 5))
+    );
     assert!(v.items.is_empty());
     assert_eq!(v, RecordValues::new());
 
     // Hand-built alternatives are non-conforming.
     let mut v = RecordValues::new();
-    v.cells.insert(root_cell("tags"), CellState::Value(CellValue::Many(vec![])));
+    v.cells
+        .insert(root_cell("tags"), CellState::Value(CellValue::Many(vec![])));
     v.items.insert(
-        ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: RowPath::root(),
+        },
         vec![],
     );
     let errors = check(&v, &schema(), &Default::default());
@@ -387,7 +436,10 @@ fn item_lists_must_hang_off_existing_items() {
     v.items.insert(
         ItemsAddr {
             group: GroupId::new("contacts"),
-            parent: RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new("ghost") }),
+            parent: RowPath::root().child(PathSeg {
+                group: GroupId::new("contacts"),
+                item: ItemId::new("ghost"),
+            }),
         },
         vec![ItemId::new("x")],
     );
@@ -395,11 +447,22 @@ fn item_lists_must_hang_off_existing_items() {
     assert!(errors.iter().any(|e| matches!(e, ConformanceError::OrphanItemList(g, p) if g == &GroupId::new("contacts") && p == &GroupId::new("contacts"))));
 
     let mut v = sample();
-    let list = v.items[&ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() }].clone();
+    let list = v.items[&ItemsAddr {
+        group: GroupId::new("contacts"),
+        parent: RowPath::root(),
+    }]
+        .clone();
     let mut repeated = list.clone();
     repeated[1] = repeated[0].clone();
     assert_eq!(
-        apply(&mut v, &Op::Reorder { group: GroupId::new("contacts"), parent: RowPath::root(), order: repeated }),
+        apply(
+            &mut v,
+            &Op::Reorder {
+                group: GroupId::new("contacts"),
+                parent: RowPath::root(),
+                order: repeated
+            }
+        ),
         Err(ApplyError::BadReorder(GroupId::new("contacts")))
     );
 }

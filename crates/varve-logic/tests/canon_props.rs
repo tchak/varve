@@ -7,8 +7,7 @@ use varve_core::canonical::{CanonicalValue, canonical_bytes};
 use varve_core::primitives::{Date, Decimal, Instant};
 use varve_core::{ColumnId, GroupId, OptionId};
 use varve_logic::{
-    Atom, ColumnRef, Const, Expr, Operand, from_canonical, pending_sources, sources,
-    to_canonical,
+    Atom, ColumnRef, Const, Expr, Operand, from_canonical, pending_sources, sources, to_canonical,
 };
 use varve_schema::Unit;
 
@@ -36,12 +35,12 @@ const UNITS: &[Unit] = &[
 ];
 
 fn column_ref() -> impl Strategy<Value = ColumnRef> {
-    ("[a-z][a-z0-9_]{0,6}", proptest::option::of("[a-z]{1,8}")).prop_map(
-        |(column, field)| ColumnRef {
+    ("[a-z][a-z0-9_]{0,6}", proptest::option::of("[a-z]{1,8}")).prop_map(|(column, field)| {
+        ColumnRef {
             column: ColumnId::new(column),
             field,
-        },
-    )
+        }
+    })
 }
 
 /// A calendar date anywhere in the canonical year range (§2.13).
@@ -61,14 +60,18 @@ fn datetime() -> impl Strategy<Value = Instant> {
         0u8..60,
         0u8..60,
         proptest::option::of("[0-9]{1,9}"),
-        prop_oneof![Just("Z".to_string()), (0u8..14, 0u8..60, any::<bool>()).prop_map(
-            |(h, m, neg)| format!("{}{h:02}:{m:02}", if neg { '-' } else { '+' })
-        )],
+        prop_oneof![
+            Just("Z".to_string()),
+            (0u8..14, 0u8..60, any::<bool>())
+                .prop_map(|(h, m, neg)| format!("{}{h:02}:{m:02}", if neg { '-' } else { '+' }))
+        ],
     )
         .prop_map(|(y, mo, d, h, mi, s, frac, off)| {
             let frac = frac.map(|f| format!(".{f}")).unwrap_or_default();
-            Instant::parse(&format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}{off}"))
-                .unwrap()
+            Instant::parse(&format!(
+                "{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}{off}"
+            ))
+            .unwrap()
         })
 }
 
@@ -119,18 +122,24 @@ fn atom() -> impl Strategy<Value = Atom> {
             source,
             option: OptionId::new(o),
         }),
-        "[a-z-]{1,10}".prop_map(|g| Atom::Pending { group: GroupId::new(g) }),
-        "[a-z-]{1,10}".prop_map(|g| Atom::NotPending { group: GroupId::new(g) }),
+        "[a-z-]{1,10}".prop_map(|g| Atom::Pending {
+            group: GroupId::new(g)
+        }),
+        "[a-z-]{1,10}".prop_map(|g| Atom::NotPending {
+            group: GroupId::new(g)
+        }),
     ]
 }
 
 fn expr() -> impl Strategy<Value = Expr> {
-    atom().prop_map(Expr::Atom).prop_recursive(8, 64, 6, |inner| {
-        prop_oneof![
-            proptest::collection::vec(inner.clone(), 0..6).prop_map(Expr::And),
-            proptest::collection::vec(inner, 0..6).prop_map(Expr::Or),
-        ]
-    })
+    atom()
+        .prop_map(Expr::Atom)
+        .prop_recursive(8, 64, 6, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..6).prop_map(Expr::And),
+                proptest::collection::vec(inner, 0..6).prop_map(Expr::Or),
+            ]
+        })
 }
 
 /// The obvious recursive depth — the oracle for the iterative one:
@@ -139,9 +148,11 @@ fn expr() -> impl Strategy<Value = Expr> {
 fn recursive_depth(e: &Expr) -> usize {
     match e {
         Expr::Atom(_) => 0,
-        Expr::And(items) | Expr::Or(items) => {
-            items.iter().map(|i| 1 + recursive_depth(i)).max().unwrap_or(0)
-        }
+        Expr::And(items) | Expr::Or(items) => items
+            .iter()
+            .map(|i| 1 + recursive_depth(i))
+            .max()
+            .unwrap_or(0),
     }
 }
 
@@ -225,7 +236,12 @@ proptest! {
 fn malformed_inputs_error_cleanly() {
     use varve_core::canonical::CanonicalValue;
     let obj = |pairs: &[(&str, CanonicalValue)]| {
-        CanonicalValue::Object(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect())
+        CanonicalValue::Object(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+        )
     };
     let s = |t: &str| CanonicalValue::String(t.into());
     let arr = CanonicalValue::Array(vec![]);
@@ -236,11 +252,21 @@ fn malformed_inputs_error_cleanly() {
         // Strict: one meaning, one text.
         obj(&[("and", arr.clone()), ("or", arr.clone())]),
         obj(&[("and", arr.clone()), ("junk", CanonicalValue::Null)]),
-        obj(&[("op", s("is_empty")), ("source", obj(&[("column", s("a"))])), ("right", obj(&[]))]),
+        obj(&[
+            ("op", s("is_empty")),
+            ("source", obj(&[("column", s("a"))])),
+            ("right", obj(&[])),
+        ]),
         obj(&[
             ("op", s("eq")),
             ("source", obj(&[("column", s("a"))])),
-            ("right", obj(&[("const", obj(&[("boolean", CanonicalValue::Bool(true)), ("text", s("x"))]))])),
+            (
+                "right",
+                obj(&[(
+                    "const",
+                    obj(&[("boolean", CanonicalValue::Bool(true)), ("text", s("x"))]),
+                )]),
+            ),
         ]),
         obj(&[
             ("op", s("eq")),
@@ -250,11 +276,20 @@ fn malformed_inputs_error_cleanly() {
         obj(&[
             ("op", s("eq")),
             ("source", obj(&[("column", s("a"))])),
-            ("right", obj(&[("const", obj(&[("text", s("x"))])), ("column_ref", obj(&[("column", s("b"))]))])),
+            (
+                "right",
+                obj(&[
+                    ("const", obj(&[("text", s("x"))])),
+                    ("column_ref", obj(&[("column", s("b"))])),
+                ]),
+            ),
         ]),
     ];
     for value in &bad {
-        assert!(from_canonical(value).is_err(), "{value:?} should be refused");
+        assert!(
+            from_canonical(value).is_err(),
+            "{value:?} should be refused"
+        );
     }
     // Depth is bounded so every walk stays total: 64 levels decode,
     // 65 are refused; the typechecker refuses too if built in-process.

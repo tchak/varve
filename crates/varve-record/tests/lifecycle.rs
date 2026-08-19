@@ -3,7 +3,7 @@
 //! pinned as a whole rather than sampled.
 
 use varve_core::canonical::ContentHash;
-use varve_core::{RecordId, ResolverId, RowPath, GroupId, ItemId, PathSeg};
+use varve_core::{GroupId, ItemId, PathSeg, RecordId, ResolverId, RowPath};
 use varve_record::{
     Resolution, ResolutionStatus, Scan, ScanStatus, ScanTransitionError, TransitionError,
     genesis_hash, pending_resolutions, pending_scans, pending_set,
@@ -18,8 +18,12 @@ const RESOLUTION_STATUSES: [ResolutionStatus; 6] = [
     ResolutionStatus::Abandoned,
 ];
 
-const SCAN_STATUSES: [ScanStatus; 4] =
-    [ScanStatus::Pending, ScanStatus::Clean, ScanStatus::Infected, ScanStatus::Failed];
+const SCAN_STATUSES: [ScanStatus; 4] = [
+    ScanStatus::Pending,
+    ScanStatus::Clean,
+    ScanStatus::Infected,
+    ScanStatus::Failed,
+];
 
 fn resolution(status: ResolutionStatus, scope: RowPath) -> Resolution {
     Resolution {
@@ -41,7 +45,12 @@ fn payload() -> ContentHash {
 }
 
 fn scan(status: ScanStatus) -> Scan {
-    Scan { element: "f1".into(), hash: payload(), status, attempts: 0 }
+    Scan {
+        element: "f1".into(),
+        hash: payload(),
+        status,
+        attempts: 0,
+    }
 }
 
 #[test]
@@ -55,15 +64,27 @@ fn resolution_transition_table_is_exactly_the_documented_one() {
                 // Never through `transition`: a resolution resolves by
                 // landing its payload (§2.7).
                 Err(TransitionError::ResolvedWithoutSnapshot)
-            } else if matches!((from, to), (Pending, NotFound | Ambiguous | Failed | Abandoned) | (Failed, Pending | Abandoned)) {
+            } else if matches!(
+                (from, to),
+                (Pending, NotFound | Ambiguous | Failed | Abandoned)
+                    | (Failed, Pending | Abandoned)
+            ) {
                 Ok(())
             } else {
                 Err(TransitionError::Illegal { from, to })
             };
             assert_eq!(result, expected, "{from:?} → {to:?}");
             // State moves only on success; attempts count only retries.
-            assert_eq!(r.status, if result.is_ok() { to } else { from }, "{from:?} → {to:?}");
-            assert_eq!(r.attempts, u32::from((from, to) == (Failed, Pending)), "{from:?} → {to:?}");
+            assert_eq!(
+                r.status,
+                if result.is_ok() { to } else { from },
+                "{from:?} → {to:?}"
+            );
+            assert_eq!(
+                r.attempts,
+                u32::from((from, to) == (Failed, Pending)),
+                "{from:?} → {to:?}"
+            );
             assert_eq!(r.snapshot, None);
         }
     }
@@ -80,7 +101,11 @@ fn landing_is_the_only_road_to_resolved_and_starts_from_pending_only() {
             assert_eq!(r.status, Resolved);
             assert_eq!(r.snapshot, Some(payload()));
         } else {
-            assert_eq!(result, Err(TransitionError::Illegal { from, to: Resolved }), "{from:?}");
+            assert_eq!(
+                result,
+                Err(TransitionError::Illegal { from, to: Resolved }),
+                "{from:?}"
+            );
             assert_eq!(r.status, from);
             assert_eq!(r.snapshot, None, "a refused landing records nothing");
         }
@@ -103,26 +128,49 @@ fn scan_transition_table_is_exactly_the_documented_one() {
         for to in SCAN_STATUSES {
             let mut s = scan(from);
             let result = s.transition(to);
-            let legal = matches!((from, to), (Pending, Clean | Infected | Failed) | (Failed, Pending));
-            let expected = if legal { Ok(()) } else { Err(ScanTransitionError { from, to }) };
+            let legal = matches!(
+                (from, to),
+                (Pending, Clean | Infected | Failed) | (Failed, Pending)
+            );
+            let expected = if legal {
+                Ok(())
+            } else {
+                Err(ScanTransitionError { from, to })
+            };
             assert_eq!(result, expected, "{from:?} → {to:?}");
             assert_eq!(s.status, if legal { to } else { from }, "{from:?} → {to:?}");
-            assert_eq!(s.attempts, u32::from((from, to) == (Failed, Pending)), "{from:?} → {to:?}");
+            assert_eq!(
+                s.attempts,
+                u32::from((from, to) == (Failed, Pending)),
+                "{from:?} → {to:?}"
+            );
         }
     }
 }
 
 #[test]
 fn pending_enumerations_keep_only_pending_and_distinguish_scopes() {
-    let item = |i: &str| RowPath::root().child(PathSeg { group: GroupId::new("g1"), item: ItemId::new(i) });
+    let item = |i: &str| {
+        RowPath::root().child(PathSeg {
+            group: GroupId::new("g1"),
+            item: ItemId::new(i),
+        })
+    };
     let all: Vec<Resolution> = RESOLUTION_STATUSES
         .into_iter()
         .map(|status| resolution(status, RowPath::root()))
-        .chain([resolution(ResolutionStatus::Pending, item("i1")), resolution(ResolutionStatus::Pending, item("i2"))])
+        .chain([
+            resolution(ResolutionStatus::Pending, item("i1")),
+            resolution(ResolutionStatus::Pending, item("i2")),
+        ])
         .collect();
     let pending = pending_resolutions(&all);
     assert_eq!(pending.len(), 3);
-    assert!(pending.iter().all(|r| r.status == ResolutionStatus::Pending));
+    assert!(
+        pending
+            .iter()
+            .all(|r| r.status == ResolutionStatus::Pending)
+    );
     // §2.8 rule 3: per group instance — one pair per (scope, resolver),
     // and two instances of the same resolver on two items stay apart.
     let set = pending_set(&all);
@@ -135,7 +183,10 @@ fn pending_enumerations_keep_only_pending_and_distinguish_scopes() {
     );
     // Two pending instances at the same (scope, resolver) collapse to
     // one pair — the set is what the logic language reads.
-    let twice = [resolution(ResolutionStatus::Pending, item("i1")), resolution(ResolutionStatus::Pending, item("i1"))];
+    let twice = [
+        resolution(ResolutionStatus::Pending, item("i1")),
+        resolution(ResolutionStatus::Pending, item("i1")),
+    ];
     assert_eq!(pending_set(&twice).len(), 1);
 
     let scans: Vec<Scan> = SCAN_STATUSES.into_iter().map(scan).collect();

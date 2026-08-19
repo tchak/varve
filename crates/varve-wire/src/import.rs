@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use varve_core::RecordId;
-use varve_core::primitives::Instant;
 use varve_core::RevisionId;
+use varve_core::primitives::Instant;
 use varve_record::{Actor, Draft, Entry, EntrySalts, Origin, RecordLog};
 use varve_value::diff;
 
@@ -48,11 +48,7 @@ pub struct ImportOutcome {
     pub updated: Vec<RecordId>,
 }
 
-fn check_intent(
-    intent: Intent,
-    existing: bool,
-    record: &RecordId,
-) -> Result<(), ImportError> {
+fn check_intent(intent: Intent, existing: bool, record: &RecordId) -> Result<(), ImportError> {
     match (intent, existing) {
         (Intent::CreateOnly, true) => Err(ImportError::AlreadyExists(record.clone())),
         (Intent::UpdateOnly, false) => Err(ImportError::NotFound(record.clone())),
@@ -81,7 +77,10 @@ pub fn adopt_history(
     let mut incoming: BTreeMap<RecordId, Vec<Entry>> = BTreeMap::new();
     for line in &stream.lines {
         if let Line::Entry { record, entry } = line {
-            incoming.entry(record.clone()).or_default().push(entry.clone());
+            incoming
+                .entry(record.clone())
+                .or_default()
+                .push(entry.clone());
         }
     }
     let mut outcome = ImportOutcome::default();
@@ -89,18 +88,24 @@ pub fn adopt_history(
     for (record, mut entries) in incoming {
         entries.sort_by_key(|e| e.envelope.seq);
         let log = RecordLog::from_entries(record.clone(), entries);
-        log.verify_chain().map_err(|e| ImportError::Chain(record.clone(), e))?;
+        log.verify_chain()
+            .map_err(|e| ImportError::Chain(record.clone(), e))?;
         // Adopted logs must fold: a chain that verifies but does not
         // apply would be poison (`RecordLog::append` refuses it later,
         // but importing it would still be importing damage).
-        log.fold().map_err(|e| ImportError::Fold(record.clone(), e))?;
+        log.fold()
+            .map_err(|e| ImportError::Fold(record.clone(), e))?;
         let existing = store.get(&record);
         check_intent(stream.manifest.intent, existing.is_some(), &record)?;
         if let Some(current) = existing {
             // Must extend the current chain: every current entry hash
             // must appear at the same position in the import.
             let extends = current.entries().len() <= log.entries().len()
-                && current.entries().iter().zip(log.entries()).all(|(a, b)| a.hash() == b.hash());
+                && current
+                    .entries()
+                    .iter()
+                    .zip(log.entries())
+                    .all(|(a, b)| a.hash() == b.hash());
             if !extends {
                 return Err(ImportError::Diverges(record.clone()));
             }
@@ -151,8 +156,13 @@ pub fn import_snapshot(
     for r in snapshot_records(stream) {
         let existing = store.get(&r.record);
         check_intent(stream.manifest.intent, existing.is_some(), &r.record)?;
-        let mut log = existing.cloned().unwrap_or_else(|| RecordLog::new(r.record.clone()));
-        let current = log.fold().map_err(|e| ImportError::Fold(r.record.clone(), e))?.values;
+        let mut log = existing
+            .cloned()
+            .unwrap_or_else(|| RecordLog::new(r.record.clone()));
+        let current = log
+            .fold()
+            .map_err(|e| ImportError::Fold(r.record.clone(), e))?
+            .values;
         let ops = diff(&current, &r.values);
         if ops.is_empty() && existing.is_some() {
             outcome.updated.push(r.record.clone());
@@ -192,6 +202,8 @@ pub fn test_salts(seed: u8) -> impl Fn(usize) -> EntrySalts {
     use varve_core::canonical::Salt;
     move |n| EntrySalts {
         meta: Salt([seed; 32]),
-        ops: (0..n).map(|i| Salt([seed.wrapping_add(i as u8 + 1); 32])).collect(),
+        ops: (0..n)
+            .map(|i| Salt([seed.wrapping_add(i as u8 + 1); 32]))
+            .collect(),
     }
 }

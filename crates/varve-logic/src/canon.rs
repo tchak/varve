@@ -91,12 +91,14 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
         Atom::Le { source, right } => comparison("le", source, right),
         Atom::Gt { source, right } => comparison("gt", source, right),
         Atom::Ge { source, right } => comparison("ge", source, right),
-        Atom::IsEmpty { source } => {
-            obj(vec![("op", string("is_empty")), ("source", column_ref(source))])
-        }
-        Atom::IsFilled { source } => {
-            obj(vec![("op", string("is_filled")), ("source", column_ref(source))])
-        }
+        Atom::IsEmpty { source } => obj(vec![
+            ("op", string("is_empty")),
+            ("source", column_ref(source)),
+        ]),
+        Atom::IsFilled { source } => obj(vec![
+            ("op", string("is_filled")),
+            ("source", column_ref(source)),
+        ]),
         Atom::Contains { source, option } => obj(vec![
             ("op", string("contains")),
             ("source", column_ref(source)),
@@ -107,10 +109,7 @@ fn atom_to_canonical(atom: &Atom) -> CanonicalValue {
             ("source", column_ref(source)),
             ("option", string(option)),
         ]),
-        Atom::Pending { group } => obj(vec![
-            ("op", string("pending")),
-            ("group", string(group)),
-        ]),
+        Atom::Pending { group } => obj(vec![("op", string("pending")), ("group", string(group))]),
         Atom::NotPending { group } => obj(vec![
             ("op", string("not_pending")),
             ("group", string(group)),
@@ -127,11 +126,16 @@ pub fn from_canonical(value: &CanonicalValue) -> Result<Expr, DecodeError> {
 
 fn expr_from(value: &CanonicalValue, depth: usize) -> Result<Expr, DecodeError> {
     if depth > crate::MAX_DEPTH {
-        return Err(DecodeError(format!("expression nests deeper than {}", crate::MAX_DEPTH)));
+        return Err(DecodeError(format!(
+            "expression nests deeper than {}",
+            crate::MAX_DEPTH
+        )));
     }
     let map = as_object(value)?;
     match (map.get("and"), map.get("or")) {
-        (Some(_), Some(_)) => Err(DecodeError("an expression is 'and' or 'or', not both".into())),
+        (Some(_), Some(_)) => Err(DecodeError(
+            "an expression is 'and' or 'or', not both".into(),
+        )),
         (Some(operands), None) => {
             only_keys(map, &["and"])?;
             Ok(Expr::And(exprs(operands, depth + 1)?))
@@ -153,7 +157,10 @@ fn only_keys(map: &Object, allowed: &[&str]) -> Result<(), DecodeError> {
 }
 
 /// A tagged union: exactly one key.
-fn single_key<'a>(map: &'a Object, what: &str) -> Result<(&'a String, &'a CanonicalValue), DecodeError> {
+fn single_key<'a>(
+    map: &'a Object,
+    what: &str,
+) -> Result<(&'a String, &'a CanonicalValue), DecodeError> {
     let mut it = map.iter();
     match (it.next(), it.next()) {
         (Some(entry), None) => Ok(entry),
@@ -199,7 +206,10 @@ fn column_ref_from(value: &CanonicalValue) -> Result<ColumnRef, DecodeError> {
 }
 
 fn source_from(map: &Object) -> Result<ColumnRef, DecodeError> {
-    column_ref_from(map.get("source").ok_or_else(|| DecodeError("missing 'source'".into()))?)
+    column_ref_from(
+        map.get("source")
+            .ok_or_else(|| DecodeError("missing 'source'".into()))?,
+    )
 }
 
 fn const_from(value: &CanonicalValue) -> Result<Const, DecodeError> {
@@ -226,8 +236,7 @@ fn const_from(value: &CanonicalValue) -> Result<Const, DecodeError> {
             Const::Number { value, unit }
         }
         "date" => Const::Date(
-            Date::parse(&string_of(inner)?)
-                .map_err(|e| DecodeError(format!("bad date: {e}")))?,
+            Date::parse(&string_of(inner)?).map_err(|e| DecodeError(format!("bad date: {e}")))?,
         ),
         "datetime" => Const::Datetime(
             Instant::parse(&string_of(inner)?)
@@ -247,11 +256,16 @@ fn string_of(value: &CanonicalValue) -> Result<String, DecodeError> {
 }
 
 fn operand_from(map: &Object) -> Result<Operand, DecodeError> {
-    let right = as_object(map.get("right").ok_or_else(|| DecodeError("missing 'right'".into()))?)?;
+    let right = as_object(
+        map.get("right")
+            .ok_or_else(|| DecodeError("missing 'right'".into()))?,
+    )?;
     match single_key(right, "operand")? {
         (k, constant) if k == "const" => Ok(Operand::Const(const_from(constant)?)),
         (k, column) if k == "column_ref" => Ok(Operand::Column(column_ref_from(column)?)),
-        _ => Err(DecodeError("operand must be 'const' or 'column_ref'".into())),
+        _ => Err(DecodeError(
+            "operand must be 'const' or 'column_ref'".into(),
+        )),
     }
 }
 
@@ -274,8 +288,12 @@ fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
         "le" => comparison(|source, right| Atom::Le { source, right }),
         "gt" => comparison(|source, right| Atom::Gt { source, right }),
         "ge" => comparison(|source, right| Atom::Ge { source, right }),
-        "is_empty" => Ok(Atom::IsEmpty { source: source_from(map)? }),
-        "is_filled" => Ok(Atom::IsFilled { source: source_from(map)? }),
+        "is_empty" => Ok(Atom::IsEmpty {
+            source: source_from(map)?,
+        }),
+        "is_filled" => Ok(Atom::IsFilled {
+            source: source_from(map)?,
+        }),
         "contains" => Ok(Atom::Contains {
             source: source_from(map)?,
             option: OptionId::new(text(map, "option")?),
@@ -284,8 +302,12 @@ fn atom_from(map: &Object) -> Result<Atom, DecodeError> {
             source: source_from(map)?,
             option: OptionId::new(text(map, "option")?),
         }),
-        "pending" => Ok(Atom::Pending { group: GroupId::new(text(map, "group")?) }),
-        "not_pending" => Ok(Atom::NotPending { group: GroupId::new(text(map, "group")?) }),
+        "pending" => Ok(Atom::Pending {
+            group: GroupId::new(text(map, "group")?),
+        }),
+        "not_pending" => Ok(Atom::NotPending {
+            group: GroupId::new(text(map, "group")?),
+        }),
         other => Err(DecodeError(format!("unknown op '{other}'"))),
     }
 }

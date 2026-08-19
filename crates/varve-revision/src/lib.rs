@@ -13,8 +13,8 @@ mod nomenclatures;
 pub use aggregate::{
     AggregateColumn, AggregatePolicy, AggregateReport, AggregateRevision, aggregate,
 };
-pub use merge::{MergeConflict, merge};
 pub use blocks::{BlockRegistry, PublishBlockError};
+pub use merge::{MergeConflict, merge};
 pub use nomenclatures::{NomenclatureRegistry, PublishNomenclatureError};
 
 use std::collections::BTreeMap;
@@ -81,8 +81,14 @@ impl RevisionDag {
         let id = revision_id(&schema);
         self.revisions
             .entry(id.clone())
-            .or_insert_with(|| PublishedRevision { schema, parents: parents.clone() });
-        self.log.push(Publication { revision: id.clone(), parents });
+            .or_insert_with(|| PublishedRevision {
+                schema,
+                parents: parents.clone(),
+            });
+        self.log.push(Publication {
+            revision: id.clone(),
+            parents,
+        });
         Ok(id)
     }
 

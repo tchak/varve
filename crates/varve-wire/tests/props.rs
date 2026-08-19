@@ -12,23 +12,33 @@ use varve_core::RecordId;
 use varve_wire::{Intent, Line, Mode, SnapshotRecord, read_stream, snapshot_records, write_lines};
 
 fn snapshot_stream() -> impl Strategy<Value = (Vec<SnapshotRecord>, Vec<Line>)> {
-    proptest::collection::vec(("[a-z0-9]{1,6}", common::record_values()), 0..4).prop_map(|records| {
-        // Distinct record ids: dedup by id. The lens travels in-stream
-        // as a revision line (§5), and its id is its content hash.
-        let lens = common::lens();
-        let mut seen = std::collections::BTreeSet::new();
-        let mut logical = Vec::new();
-        let mut lines = vec![common::revision_line()];
-        for (id, values) in records {
-            if seen.insert(id.clone()) {
-                let rec = SnapshotRecord { record: RecordId::new(id), lens: lens.clone(), values };
-                lines.extend(rec.lines());
-                logical.push(rec);
+    proptest::collection::vec(("[a-z0-9]{1,6}", common::record_values()), 0..4).prop_map(
+        |records| {
+            // Distinct record ids: dedup by id. The lens travels in-stream
+            // as a revision line (§5), and its id is its content hash.
+            let lens = common::lens();
+            let mut seen = std::collections::BTreeSet::new();
+            let mut logical = Vec::new();
+            let mut lines = vec![common::revision_line()];
+            for (id, values) in records {
+                if seen.insert(id.clone()) {
+                    let rec = SnapshotRecord {
+                        record: RecordId::new(id),
+                        lens: lens.clone(),
+                        values,
+                    };
+                    lines.extend(rec.lines());
+                    logical.push(rec);
+                }
             }
-        }
-        let header = Line::Header(common::manifest(Mode::Snapshot, Intent::Upsert, seen.len() as u64));
-        (logical, std::iter::once(header).chain(lines).collect())
-    })
+            let header = Line::Header(common::manifest(
+                Mode::Snapshot,
+                Intent::Upsert,
+                seen.len() as u64,
+            ));
+            (logical, std::iter::once(header).chain(lines).collect())
+        },
+    )
 }
 
 proptest! {

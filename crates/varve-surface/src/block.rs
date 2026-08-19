@@ -65,8 +65,14 @@ impl BlockDefaults {
         let value = CanonicalValue::Object(
             [
                 ("block".to_string(), string(&self.block.id)),
-                ("version".to_string(), CanonicalValue::Int(i64::from(self.block.version))),
-                ("node".to_string(), node_canonical(&Node::Group(self.node.clone()))),
+                (
+                    "version".to_string(),
+                    CanonicalValue::Int(i64::from(self.block.version)),
+                ),
+                (
+                    "node".to_string(),
+                    node_canonical(&Node::Group(self.node.clone())),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -78,7 +84,11 @@ impl BlockDefaults {
     /// version, same group id, only block columns referenced, rules read
     /// only block columns, and the pair typechecks as a surface over the
     /// shell would.
-    pub fn validate(&self, block: &Block, nomenclatures: &NomenclatureTable) -> Vec<BlockDefaultsError> {
+    pub fn validate(
+        &self,
+        block: &Block,
+        nomenclatures: &NomenclatureTable,
+    ) -> Vec<BlockDefaultsError> {
         let mut errors = Vec::new();
         if self.block != block.reference() {
             errors.push(BlockDefaultsError::WrongBlock(
@@ -89,7 +99,10 @@ impl BlockDefaults {
             ));
         }
         if self.node.group != block.group.id {
-            errors.push(BlockDefaultsError::GroupMismatch(self.node.group.clone(), block.group.id.clone()));
+            errors.push(BlockDefaultsError::GroupMismatch(
+                self.node.group.clone(),
+                block.group.id.clone(),
+            ));
         }
         let owned: std::collections::BTreeSet<ColumnId> = block.columns().into_iter().collect();
         for entry in column_nodes(&self.node) {
@@ -99,7 +112,10 @@ impl BlockDefaults {
             for rule in [&entry.visibility, &entry.required].into_iter().flatten() {
                 for source in sources(rule) {
                     if !owned.contains(&source) {
-                        errors.push(BlockDefaultsError::ForeignRuleSource(entry.column.clone(), source));
+                        errors.push(BlockDefaultsError::ForeignRuleSource(
+                            entry.column.clone(),
+                            source,
+                        ));
                     }
                 }
             }
@@ -114,7 +130,11 @@ impl BlockDefaults {
             nodes: vec![Node::Group(self.node.clone())],
             ineligibility: None,
         };
-        errors.extend(validate(&surface, &schema, nomenclatures).into_iter().map(BlockDefaultsError::Surface));
+        errors.extend(
+            validate(&surface, &schema, nomenclatures)
+                .into_iter()
+                .map(BlockDefaultsError::Surface),
+        );
         errors
     }
 
@@ -122,7 +142,11 @@ impl BlockDefaults {
     /// group node): paste the group node. Checked before anything is
     /// touched — an error leaves `surface` unchanged. The schema-side
     /// half is included separately (`Block::include_into`).
-    pub fn include_into(&self, surface: &mut Surface, container: Option<&GroupId>) -> Result<(), IncludeError> {
+    pub fn include_into(
+        &self,
+        surface: &mut Surface,
+        container: Option<&GroupId>,
+    ) -> Result<(), IncludeError> {
         if let Some(c) = container
             && !has_group_node(&surface.nodes, c)
         {
@@ -201,9 +225,11 @@ pub fn format_canonical(format: &Format) -> CanonicalValue {
         Format::Email => string("email"),
         Format::Phone => string("phone"),
         Format::Iban => string("iban"),
-        Format::Regex(pattern) => {
-            CanonicalValue::Object([("regex".to_string(), string(pattern))].into_iter().collect())
-        }
+        Format::Regex(pattern) => CanonicalValue::Object(
+            [("regex".to_string(), string(pattern))]
+                .into_iter()
+                .collect(),
+        ),
     }
 }
 
@@ -212,7 +238,10 @@ pub fn format_canonical(format: &Format) -> CanonicalValue {
 pub fn node_canonical(n: &Node) -> CanonicalValue {
     let obj = |pairs: Vec<(&str, CanonicalValue)>| {
         CanonicalValue::Object(
-            pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<BTreeMap<_, _>>(),
+            pairs
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect::<BTreeMap<_, _>>(),
         )
     };
     let opt = |v: &Option<String>| match v {
@@ -231,7 +260,10 @@ pub fn node_canonical(n: &Node) -> CanonicalValue {
             ("visibility", rule(&c.visibility)),
             ("required", rule(&c.required)),
             ("writable", CanonicalValue::Bool(c.write.writable)),
-            ("override_derived", CanonicalValue::Bool(c.write.override_derived)),
+            (
+                "override_derived",
+                CanonicalValue::Bool(c.write.override_derived),
+            ),
             (
                 "format",
                 match &c.format {
@@ -244,14 +276,23 @@ pub fn node_canonical(n: &Node) -> CanonicalValue {
             ("group", string(&g.group)),
             ("prompt", opt(&g.prompt)),
             ("visibility", rule(&g.visibility)),
-            ("children", CanonicalValue::Array(g.children.iter().map(node_canonical).collect())),
+            (
+                "children",
+                CanonicalValue::Array(g.children.iter().map(node_canonical).collect()),
+            ),
         ]),
         Node::Section(sec) => obj(vec![
             ("section", string(&sec.title)),
             ("help", opt(&sec.help)),
             ("visibility", rule(&sec.visibility)),
-            ("children", CanonicalValue::Array(sec.children.iter().map(node_canonical).collect())),
+            (
+                "children",
+                CanonicalValue::Array(sec.children.iter().map(node_canonical).collect()),
+            ),
         ]),
-        Node::Note(note) => obj(vec![("note", string(&note.body)), ("title", opt(&note.title))]),
+        Node::Note(note) => obj(vec![
+            ("note", string(&note.body)),
+            ("title", opt(&note.title)),
+        ]),
     }
 }

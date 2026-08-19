@@ -3,13 +3,13 @@ use std::collections::BTreeSet;
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, GroupId, OptionId, ResolverId, RowPath};
 use varve_impact::{
-    BreakKind, ChangeClass, ColumnChange, RecordUnderAssessment, ResolverChange, RuleRef,
-    assess, broken_rules, classify, classify_with_rules,
+    BreakKind, ChangeClass, ColumnChange, RecordUnderAssessment, ResolverChange, RuleRef, assess,
+    broken_rules, classify, classify_with_rules,
 };
 use varve_logic::{Atom, ColumnRef, Const, Expr, Operand};
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, Mapping, NomenclatureRef,
-    OptionRow, ResolverDeclaration, ResultField, ScalarType, Schema,
+    Arity, Cardinality, Column, Element, Group, Mapping, NomenclatureRef, OptionRow,
+    ResolverDeclaration, ResultField, ScalarType, Schema,
 };
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar};
 
@@ -57,7 +57,11 @@ fn classification_covers_the_section_3_table() {
         column("widened", ScalarType::Integer(None), Arity::One),
         column("narrowed", ScalarType::Decimal(None), Arity::One),
         column("truncated", ScalarType::Datetime, Arity::One),
-        column("broken", ScalarType::Attachment(Default::default()), Arity::Many),
+        column(
+            "broken",
+            ScalarType::Attachment(Default::default()),
+            Arity::Many,
+        ),
         column("moved", ScalarType::Text, Arity::One),
     ]);
     let to = schema(vec![
@@ -122,7 +126,11 @@ fn enum_option_removal_is_named_precisely() {
     )]);
     let report = classify(&from, &relabeled, &Default::default()).unwrap();
     assert_eq!(report.columns[&ColumnId::new("c")].class, ChangeClass::Safe);
-    assert!(report.columns[&ColumnId::new("c")].removed_options.is_empty());
+    assert!(
+        report.columns[&ColumnId::new("c")]
+            .removed_options
+            .is_empty()
+    );
 }
 
 #[test]
@@ -137,7 +145,10 @@ fn unit_changes_are_named_in_the_report() {
     assert_eq!(impact.class, ChangeClass::Safe);
     assert_eq!(
         impact.unit_change,
-        Some(UnitChange { from: None, to: Some(Unit::Day) })
+        Some(UnitChange {
+            from: None,
+            to: Some(Unit::Day)
+        })
     );
 
     // Unit removed: lossy (meaning dropped — §2.14/§5.5), named.
@@ -146,7 +157,10 @@ fn unit_changes_are_named_in_the_report() {
     assert_eq!(impact.class, ChangeClass::Lossy);
     assert_eq!(
         impact.unit_change,
-        Some(UnitChange { from: Some(Unit::Day), to: None })
+        Some(UnitChange {
+            from: Some(Unit::Day),
+            to: None
+        })
     );
 
     // Within a dimension: checked, named.
@@ -181,7 +195,11 @@ fn attachment_constraint_changes_are_named() {
     use varve_impact::ConstraintChange;
     use varve_schema::AttachmentConstraints;
     let files = |constraints: AttachmentConstraints| {
-        schema(vec![column("piece", ScalarType::Attachment(constraints), Arity::Many)])
+        schema(vec![column(
+            "piece",
+            ScalarType::Attachment(constraints),
+            Arity::Many,
+        )])
     };
     let open = AttachmentConstraints::default();
     let pdf_only = AttachmentConstraints {
@@ -190,12 +208,20 @@ fn attachment_constraint_changes_are_named() {
     };
 
     // Narrowing: checked, and the report names both sides.
-    let report = classify(&files(open.clone()), &files(pdf_only.clone()), &Default::default()).unwrap();
+    let report = classify(
+        &files(open.clone()),
+        &files(pdf_only.clone()),
+        &Default::default(),
+    )
+    .unwrap();
     let impact = &report.columns[&ColumnId::new("piece")];
     assert_eq!(impact.class, ChangeClass::Checked);
     assert_eq!(
         impact.constraint_change,
-        Some(ConstraintChange { from: open.clone(), to: pdf_only.clone() })
+        Some(ConstraintChange {
+            from: open.clone(),
+            to: pdf_only.clone()
+        })
     );
 
     // Broadening: safe, still named.
@@ -206,7 +232,10 @@ fn attachment_constraint_changes_are_named() {
 
     // Unchanged: no noise.
     let report = classify(&files(open.clone()), &files(open), &Default::default()).unwrap();
-    assert_eq!(report.columns[&ColumnId::new("piece")].constraint_change, None);
+    assert_eq!(
+        report.columns[&ColumnId::new("piece")].constraint_change,
+        None
+    );
 }
 
 #[test]
@@ -257,7 +286,10 @@ fn resolver_impact_questions() {
     // Independent questions get independent answers: one declaration
     // that bumps its version, retypes its result and changes its input.
     let mut retyped = decl("r", 2, "fed");
-    retyped.result_type = vec![ResultField { name: "value".into(), ty: ScalarType::Integer(None) }];
+    retyped.result_type = vec![ResultField {
+        name: "value".into(),
+        ty: ScalarType::Integer(None),
+    }];
     retyped.input = vec![(ColumnId::new("other"), ScalarType::Text)];
     let mut from = schema(columns.clone());
     from.resolvers = vec![decl("r", 1, "fed")];
@@ -266,11 +298,18 @@ fn resolver_impact_questions() {
     let report = classify(&from, &to, &Default::default()).unwrap();
     // The result field `value` is now an integer landing in text `fed`:
     // that mapping breaks.
-    assert!(report.resolvers.contains(&ResolverChange::ResultTypeChanged {
-        anchor: GroupId::new("g"),
-        id: ResolverId::new("r"),
-        broken_mappings: vec![Mapping { result_field: "value".into(), target: ColumnId::new("fed") }],
-    }));
+    assert!(
+        report
+            .resolvers
+            .contains(&ResolverChange::ResultTypeChanged {
+                anchor: GroupId::new("g"),
+                id: ResolverId::new("r"),
+                broken_mappings: vec![Mapping {
+                    result_field: "value".into(),
+                    target: ColumnId::new("fed")
+                }],
+            })
+    );
     assert!(report.resolvers.contains(&ResolverChange::InputChanged {
         anchor: GroupId::new("g"),
         id: ResolverId::new("r"),
@@ -281,7 +320,12 @@ fn resolver_impact_questions() {
         from: 1,
         to: 2,
     }));
-    assert!(!report.resolvers.iter().any(|c| matches!(c, ResolverChange::MappingChanged { .. })));
+    assert!(
+        !report
+            .resolvers
+            .iter()
+            .any(|c| matches!(c, ResolverChange::MappingChanged { .. }))
+    );
 }
 
 #[test]
@@ -316,12 +360,21 @@ fn block_bumps_are_named() {
         report.blocks,
         vec![varve_impact::BlockChange::Bumped {
             group: GroupId::new("rib"),
-            from: BlockRef { id: BlockId::new("rib"), version: 1 },
-            to: BlockRef { id: BlockId::new("rib"), version: 2 },
+            from: BlockRef {
+                id: BlockId::new("rib"),
+                version: 1
+            },
+            to: BlockRef {
+                id: BlockId::new("rib"),
+                version: 2
+            },
         }]
     );
     // The block's columns still get their §3 rows.
-    assert_eq!(report.columns[&ColumnId::new("iban")].class, ChangeClass::Checked);
+    assert_eq!(
+        report.columns[&ColumnId::new("iban")].class,
+        ChangeClass::Checked
+    );
 
     // Hand-editing the included group drops the pin: detached.
     let mut detached = to.clone();
@@ -329,9 +382,17 @@ fn block_bumps_are_named() {
         g.included_from = None;
     }
     let report = classify(&to, &detached, &Default::default()).unwrap();
-    assert!(matches!(report.blocks.as_slice(), [varve_impact::BlockChange::Detached { .. }]));
+    assert!(matches!(
+        report.blocks.as_slice(),
+        [varve_impact::BlockChange::Detached { .. }]
+    ));
     // Nothing block-related between two revisions without blocks.
-    assert!(classify(&schema(vec![]), &schema(vec![]), &Default::default()).unwrap().blocks.is_empty());
+    assert!(
+        classify(&schema(vec![]), &schema(vec![]), &Default::default())
+            .unwrap()
+            .blocks
+            .is_empty()
+    );
 }
 
 #[test]
@@ -350,40 +411,81 @@ fn broken_rule_references_follow_the_section_4_1_taxonomy() {
     ]);
     let to = schema(vec![
         column("retyped", ScalarType::Text, Arity::One),
-        column("choice", ScalarType::Enum(options(&[("oui", "Oui")])), Arity::One),
+        column(
+            "choice",
+            ScalarType::Enum(options(&[("oui", "Oui")])),
+            Arity::One,
+        ),
         column("stable", ScalarType::Boolean, Arity::One),
     ]);
-    let source = |id: &str| ColumnRef { column: ColumnId::new(id), field: None };
-    let eq = |id: &str, c: Const| {
-        Expr::Atom(Atom::Eq { source: source(id), right: Operand::Const(c) })
+    let source = |id: &str| ColumnRef {
+        column: ColumnId::new(id),
+        field: None,
     };
-    let rule = |name: &str, expr: Expr| RuleRef { name: name.into(), scope: vec![], expr };
+    let eq = |id: &str, c: Const| {
+        Expr::Atom(Atom::Eq {
+            source: source(id),
+            right: Operand::Const(c),
+        })
+    };
+    let rule = |name: &str, expr: Expr| RuleRef {
+        name: name.into(),
+        scope: vec![],
+        expr,
+    };
     let rules = [
         rule("uses-gone", eq("gone", Const::Boolean(true))),
-        rule("uses-retyped", Expr::Atom(Atom::Gt {
-            source: source("retyped"),
-            right: Operand::Const(Const::Number { value: Decimal::from_i64(3), unit: None }),
-        })),
-        rule("uses-removed-option", eq("choice", Const::Option(OptionId::new("non")))),
-        rule("still-fine", Expr::And(vec![
-            eq("stable", Const::Boolean(true)),
-            eq("choice", Const::Option(OptionId::new("oui"))),
-        ])),
+        rule(
+            "uses-retyped",
+            Expr::Atom(Atom::Gt {
+                source: source("retyped"),
+                right: Operand::Const(Const::Number {
+                    value: Decimal::from_i64(3),
+                    unit: None,
+                }),
+            }),
+        ),
+        rule(
+            "uses-removed-option",
+            eq("choice", Const::Option(OptionId::new("non"))),
+        ),
+        rule(
+            "still-fine",
+            Expr::And(vec![
+                eq("stable", Const::Boolean(true)),
+                eq("choice", Const::Option(OptionId::new("oui"))),
+            ]),
+        ),
         // Broken before and after: not the transition's doing.
-        rule("was-already-broken", eq("never-existed", Const::Boolean(true))),
+        rule(
+            "was-already-broken",
+            eq("never-existed", Const::Boolean(true)),
+        ),
     ];
     let broken = broken_rules(&rules, &from, &to, &Default::default());
     let by_name = |n: &str| broken.iter().find(|b| b.name == n).unwrap();
-    assert_eq!(by_name("uses-gone").kinds, vec![BreakKind::SourceRemoved(ColumnId::new("gone"))]);
+    assert_eq!(
+        by_name("uses-gone").kinds,
+        vec![BreakKind::SourceRemoved(ColumnId::new("gone"))]
+    );
     assert!(!by_name("uses-gone").already_broken);
-    assert_eq!(by_name("uses-retyped").kinds, vec![BreakKind::SourceRetyped(ColumnId::new("retyped"))]);
+    assert_eq!(
+        by_name("uses-retyped").kinds,
+        vec![BreakKind::SourceRetyped(ColumnId::new("retyped"))]
+    );
     assert_eq!(
         by_name("uses-removed-option").kinds,
-        vec![BreakKind::OptionRemoved(ColumnId::new("choice"), OptionId::new("non"))]
+        vec![BreakKind::OptionRemoved(
+            ColumnId::new("choice"),
+            OptionId::new("non")
+        )]
     );
     assert!(broken.iter().all(|b| b.name != "still-fine"));
     assert!(by_name("was-already-broken").already_broken);
-    assert!(matches!(by_name("was-already-broken").kinds.as_slice(), [BreakKind::Other(_)]));
+    assert!(matches!(
+        by_name("was-already-broken").kinds.as_slice(),
+        [BreakKind::Other(_)]
+    ));
 
     // A newly broken rule makes the transition breaking; an already
     // broken one does not.
@@ -403,9 +505,7 @@ fn assessment_turns_checked_into_exact_counts() {
         let mut v = RecordValues::new();
         v.cells.insert(
             addr("d"),
-            CellState::Value(CellValue::One(Scalar::Decimal(
-                Decimal::parse(s).unwrap(),
-            ))),
+            CellState::Value(CellValue::One(Scalar::Decimal(Decimal::parse(s).unwrap()))),
         );
         v
     };
@@ -413,7 +513,10 @@ fn assessment_turns_checked_into_exact_counts() {
     let none = BTreeSet::new();
     let under: Vec<RecordUnderAssessment<'_>> = records
         .iter()
-        .map(|v| RecordUnderAssessment { values: v, pending: &none })
+        .map(|v| RecordUnderAssessment {
+            values: v,
+            pending: &none,
+        })
         .collect();
 
     let report = assess(&from, &to, &Default::default(), &[], under).unwrap();
@@ -437,8 +540,14 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
         version: 1,
         anchor: GroupId::new("g"),
         input: vec![(ColumnId::new("siret"), ScalarType::Text)],
-        result_type: vec![ResultField { name: "name".into(), ty: ScalarType::Text }],
-        mapping: vec![Mapping { result_field: "name".into(), target: ColumnId::new("name") }],
+        result_type: vec![ResultField {
+            name: "name".into(),
+            ty: ScalarType::Text,
+        }],
+        mapping: vec![Mapping {
+            result_field: "name".into(),
+            target: ColumnId::new("name"),
+        }],
     };
     let mut from = schema(vec![
         column("siret", ScalarType::Text, Arity::One),
@@ -457,26 +566,46 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
     .unwrap();
     let with_geometry = {
         let mut v = RecordValues::new();
-        v.cells.insert(addr("g"), CellState::Value(CellValue::One(Scalar::Geometry(Box::new(feature)))));
+        v.cells.insert(
+            addr("g"),
+            CellState::Value(CellValue::One(Scalar::Geometry(Box::new(feature)))),
+        );
         v
     };
     let without = RecordValues::new();
     let pending_insee: BTreeSet<(GroupId, ResolverId)> =
-        [(GroupId::new("g"), ResolverId::new("insee"))].into_iter().collect();
+        [(GroupId::new("g"), ResolverId::new("insee"))]
+            .into_iter()
+            .collect();
     let none = BTreeSet::new();
     let records = [
-        RecordUnderAssessment { values: &with_geometry, pending: &pending_insee },
-        RecordUnderAssessment { values: &without, pending: &pending_insee },
-        RecordUnderAssessment { values: &with_geometry, pending: &none },
+        RecordUnderAssessment {
+            values: &with_geometry,
+            pending: &pending_insee,
+        },
+        RecordUnderAssessment {
+            values: &without,
+            pending: &pending_insee,
+        },
+        RecordUnderAssessment {
+            values: &with_geometry,
+            pending: &none,
+        },
     ];
     let report = assess(&from, &to, &Default::default(), &[], records).unwrap();
-    assert_eq!(report.columns[&ColumnId::new("g")].change, ColumnChange::Forbidden);
+    assert_eq!(
+        report.columns[&ColumnId::new("g")].change,
+        ColumnChange::Forbidden
+    );
     let a = report.records.as_ref().unwrap();
     // The projection drops those cells (nothing failed to cast — there
     // is no cast), so they are counted as uncastable, not failed.
     assert_eq!(a.cells_failed, 0);
     assert_eq!(a.records_with_uncastable, 2);
     assert_eq!(a.uncastable_by_column[&ColumnId::new("g")], 2);
-    assert_eq!(a.pending_on_removed_resolvers[&(GroupId::new("g"), ResolverId::new("insee"))], 2);
+    assert_eq!(
+        a.pending_on_removed_resolvers[&(GroupId::new("g"), ResolverId::new("insee"))],
+        2
+    );
     assert_eq!(report.worst(), ChangeClass::Breaking);
 }

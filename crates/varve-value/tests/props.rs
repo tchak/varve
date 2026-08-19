@@ -8,8 +8,8 @@ use proptest::sample::subsequence;
 use varve_core::primitives::{Date, Decimal, Instant};
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_value::{
-    AttachmentRef, CellAddr, CellState, CellValue, ItemsAddr, Op, RecordValues, Scalar,
-    apply, cell_delta, diff,
+    AttachmentRef, CellAddr, CellState, CellValue, ItemsAddr, Op, RecordValues, Scalar, apply,
+    cell_delta, diff,
 };
 
 const G1: &str = "g1";
@@ -86,7 +86,8 @@ fn op() -> impl Strategy<Value = Op> {
         prop_oneof![
             Just(RowPath::root()),
             g1_item().prop_map(|i| RowPath::root().child(seg(G1, i))),
-            (g1_item(), g2_item()).prop_map(|(i, j)| RowPath::root().child(seg(G1, i)).child(seg(G2, j))),
+            (g1_item(), g2_item())
+                .prop_map(|(i, j)| RowPath::root().child(seg(G1, i)).child(seg(G2, j))),
         ]
     };
     let list_addr = || {
@@ -102,7 +103,10 @@ fn op() -> impl Strategy<Value = Op> {
             path,
             state,
         }),
-        (column(), path()).prop_map(|(c, path)| Op::Unset { column: ColumnId::new(c), path }),
+        (column(), path()).prop_map(|(c, path)| Op::Unset {
+            column: ColumnId::new(c),
+            path
+        }),
         (list_addr(), any_item(), 0usize..4).prop_map(|((group, parent), item, at)| Op::AddItem {
             group,
             parent,

@@ -17,7 +17,9 @@ pub struct NomenclatureRegistry {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PublishNomenclatureError {
-    #[error("nomenclature '{id}': version {version} removes ids {removed:?} — versions are append-only (§2.11)")]
+    #[error(
+        "nomenclature '{id}': version {version} removes ids {removed:?} — versions are append-only (§2.11)"
+    )]
     RemovesIds {
         id: NomenclatureId,
         version: u32,

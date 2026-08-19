@@ -114,8 +114,13 @@ fn decimal_parse_accepts_what_people_type_and_normalizes() {
         assert_eq!(d.to_string(), rendered, "{input}");
         assert_eq!(Decimal::parse(rendered).unwrap(), d);
     }
-    for refused in ["", "-", ".", "-.", "1,5", "+1", "1e3", " 1", "1 ", "1.2.3", "0x10"] {
-        assert!(Decimal::parse(refused).is_err(), "{refused:?} should be refused");
+    for refused in [
+        "", "-", ".", "-.", "1,5", "+1", "1e3", " 1", "1 ", "1.2.3", "0x10",
+    ] {
+        assert!(
+            Decimal::parse(refused).is_err(),
+            "{refused:?} should be refused"
+        );
     }
 }
 
@@ -136,7 +141,8 @@ fn days_in_month(year: i64, month: u8) -> u8 {
 /// A valid calendar date in the shared `Date`/`Instant` range
 /// (`0000-01-01` through `9998-12-31`, `MAX_YEAR`), as components.
 fn civil() -> impl Strategy<Value = (i64, u8, u8)> {
-    (0i64..=i64::from(MAX_YEAR), 1u8..=12, 1u8..=31).prop_map(|(y, m, d)| (y, m, d.min(days_in_month(y, m))))
+    (0i64..=i64::from(MAX_YEAR), 1u8..=12, 1u8..=31)
+        .prop_map(|(y, m, d)| (y, m, d.min(days_in_month(y, m))))
 }
 
 fn date_text(y: i64, m: u8, d: u8) -> String {
@@ -191,12 +197,25 @@ proptest! {
 #[test]
 fn date_refuses_unpadded_and_out_of_range_forms() {
     for refused in [
-        "2024-2-29", "2024-02-9", "24-02-29", "2024/02/29", "2024-02-30", "2024-00-10",
-        "2024-13-01", "10000-01-01", "-001-01-01", "2024-02-29T", "2024-02-29 ",
+        "2024-2-29",
+        "2024-02-9",
+        "24-02-29",
+        "2024/02/29",
+        "2024-02-30",
+        "2024-00-10",
+        "2024-13-01",
+        "10000-01-01",
+        "-001-01-01",
+        "2024-02-29T",
+        "2024-02-29 ",
         // Past MAX_YEAR: a valid calendar date the shared range leaves out.
-        "9999-01-01", "9999-12-31",
+        "9999-01-01",
+        "9999-12-31",
     ] {
-        assert!(Date::parse(refused).is_err(), "{refused:?} should be refused");
+        assert!(
+            Date::parse(refused).is_err(),
+            "{refused:?} should be refused"
+        );
     }
     assert!(Date::parse("0000-01-01").is_ok());
     assert!(Date::parse("9998-12-31").is_ok());
@@ -248,7 +267,11 @@ fn spelled() -> impl Strategy<Value = Spelled> {
                 + i64::from(hh) * 3_600
                 + i64::from(mm) * 60
                 + i64::from(ss);
-            Spelled { text, utc_seconds: local - offset_minutes * 60, offset_minutes }
+            Spelled {
+                text,
+                utc_seconds: local - offset_minutes * 60,
+                offset_minutes,
+            }
         })
 }
 
@@ -350,7 +373,10 @@ fn instant_year_range_edges() {
         "9999-12-31T23:59:59Z",
         "10000-01-01T00:00:00Z",
     ] {
-        assert!(Instant::parse(refused).is_err(), "{refused:?} should be refused");
+        assert!(
+            Instant::parse(refused).is_err(),
+            "{refused:?} should be refused"
+        );
     }
     // Accepted: the very edges, with and without a fraction.
     for (accepted, rendered) in [
@@ -358,7 +384,10 @@ fn instant_year_range_edges() {
         ("0000-01-01T01:00:00+01:00", "0000-01-01T00:00:00Z"),
         ("9998-12-31T23:59:59Z", "9998-12-31T23:59:59Z"),
         ("9999-01-01T00:59:59+01:00", "9998-12-31T23:59:59Z"),
-        ("9998-12-31T23:59:59.999999999Z", "9998-12-31T23:59:59.999999999Z"),
+        (
+            "9998-12-31T23:59:59.999999999Z",
+            "9998-12-31T23:59:59.999999999Z",
+        ),
     ] {
         let instant = Instant::parse(accepted).unwrap_or_else(|e| panic!("{accepted}: {e}"));
         assert_eq!(instant.to_string(), rendered, "{accepted}");

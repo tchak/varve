@@ -95,7 +95,10 @@ pub struct ConstraintChange {
 /// A declaration is identified by `(anchor, id)` (§10 Q17): the same
 /// resolver at two groups is two declarations, judged independently.
 pub enum ResolverChange {
-    Added { anchor: GroupId, id: ResolverId },
+    Added {
+        anchor: GroupId,
+        id: ResolverId,
+    },
     /// Which columns are orphaned (still exist in the new revision but
     /// nothing feeds them anymore); pending resolutions against this
     /// declaration can never land — `assess` counts the records.
@@ -124,8 +127,16 @@ pub enum ResolverChange {
     },
     /// The input signature changed: pending resolutions were requested
     /// against the old one (§2.8 rule 1 binds at request time).
-    InputChanged { anchor: GroupId, id: ResolverId },
-    VersionChanged { anchor: GroupId, id: ResolverId, from: u32, to: u32 },
+    InputChanged {
+        anchor: GroupId,
+        id: ResolverId,
+    },
+    VersionChanged {
+        anchor: GroupId,
+        id: ResolverId,
+        from: u32,
+        to: u32,
+    },
 }
 
 /// A rule the caller wants judged against the new revision — Tier 2
@@ -213,7 +224,11 @@ pub enum BlockChange {
     Removed { group: GroupId, block: BlockRef },
     /// The same group is included from another version of its block
     /// (or another block): the block's columns cast per the §3 rows.
-    Bumped { group: GroupId, from: BlockRef, to: BlockRef },
+    Bumped {
+        group: GroupId,
+        from: BlockRef,
+        to: BlockRef,
+    },
     /// The group stays but lost its provenance: edited by hand — no
     /// longer pinned to any block version.
     Detached { group: GroupId, was: BlockRef },
@@ -238,7 +253,12 @@ impl ImpactReport {
     /// The one-line verdict: the worst class any column hits — and a
     /// rule newly broken by the transition is breaking.
     pub fn worst(&self) -> ChangeClass {
-        let columns = self.columns.values().map(|c| c.class).max().unwrap_or(ChangeClass::Safe);
+        let columns = self
+            .columns
+            .values()
+            .map(|c| c.class)
+            .max()
+            .unwrap_or(ChangeClass::Safe);
         if self.rules.iter().any(|r| !r.already_broken) {
             ChangeClass::Breaking
         } else {
@@ -282,7 +302,11 @@ pub fn broken_rules(
                 other => BreakKind::Other(other),
             })
             .collect();
-        out.push(BrokenRule { name: rule.name.clone(), kinds, already_broken });
+        out.push(BrokenRule {
+            name: rule.name.clone(),
+            kinds,
+            already_broken,
+        });
     }
     out
 }
@@ -331,8 +355,7 @@ pub fn classify(
                     (&tinfo.ty, tinfo.arity),
                     nomenclatures,
                 )?;
-                let removed_options =
-                    removed_options(&finfo.ty, &tinfo.ty, nomenclatures)?;
+                let removed_options = removed_options(&finfo.ty, &tinfo.ty, nomenclatures)?;
                 let unit_change = unit_change(&finfo.ty, &tinfo.ty);
                 let constraint_change = constraint_change(&finfo.ty, &tinfo.ty);
                 match cast.class() {
@@ -449,19 +472,27 @@ pub fn assess<'a>(
         for addr in values.cells.keys() {
             if uncastable.contains(&addr.column) {
                 hit_uncastable = true;
-                *assessment.uncastable_by_column.entry(addr.column.clone()).or_default() += 1;
+                *assessment
+                    .uncastable_by_column
+                    .entry(addr.column.clone())
+                    .or_default() += 1;
             }
         }
         if hit_uncastable {
             assessment.records_with_uncastable += 1;
         }
         for declaration in record.pending.intersection(&removed_resolvers) {
-            *assessment.pending_on_removed_resolvers.entry(declaration.clone()).or_default() += 1;
+            *assessment
+                .pending_on_removed_resolvers
+                .entry(declaration.clone())
+                .or_default() += 1;
         }
         for (column, col) in &projection.report.columns {
             if col.cells_failed > 0 {
-                *assessment.failed_by_column.entry(column.clone()).or_default() +=
-                    col.cells_failed;
+                *assessment
+                    .failed_by_column
+                    .entry(column.clone())
+                    .or_default() += col.cells_failed;
             }
         }
     }
@@ -474,7 +505,10 @@ pub fn assess<'a>(
 fn constraint_change(from: &ScalarType, to: &ScalarType) -> Option<ConstraintChange> {
     match (from, to) {
         (ScalarType::Attachment(f), ScalarType::Attachment(t)) if f != t => {
-            Some(ConstraintChange { from: f.clone(), to: t.clone() })
+            Some(ConstraintChange {
+                from: f.clone(),
+                to: t.clone(),
+            })
         }
         _ => None,
     }
@@ -528,10 +562,14 @@ fn block_changes(
                 from: was.clone(),
                 to: now.clone(),
             }),
-            None if to_index.groups.contains_key(group) => {
-                changes.push(BlockChange::Detached { group: group.clone(), was: was.clone() })
-            }
-            None => changes.push(BlockChange::Removed { group: group.clone(), block: was.clone() }),
+            None if to_index.groups.contains_key(group) => changes.push(BlockChange::Detached {
+                group: group.clone(),
+                was: was.clone(),
+            }),
+            None => changes.push(BlockChange::Removed {
+                group: group.clone(),
+                block: was.clone(),
+            }),
         }
     }
     for (group, now) in &after {
@@ -539,19 +577,21 @@ fn block_changes(
             continue;
         }
         if from_index.groups.contains_key(group) {
-            changes.push(BlockChange::Attached { group: group.clone(), now: now.clone() });
+            changes.push(BlockChange::Attached {
+                group: group.clone(),
+                now: now.clone(),
+            });
         } else {
-            changes.push(BlockChange::Included { group: group.clone(), block: now.clone() });
+            changes.push(BlockChange::Included {
+                group: group.clone(),
+                block: now.clone(),
+            });
         }
     }
     changes
 }
 
-fn resolver_changes(
-    from: &Schema,
-    to: &Schema,
-    to_index: &SchemaIndex,
-) -> Vec<ResolverChange> {
+fn resolver_changes(from: &Schema, to: &Schema, to_index: &SchemaIndex) -> Vec<ResolverChange> {
     let by_id = |s: &Schema| -> BTreeMap<(GroupId, ResolverId), ResolverDeclaration> {
         s.resolvers
             .iter()
@@ -647,7 +687,10 @@ fn resolver_changes(
     }
     for (anchor, id) in to_resolvers.keys() {
         if !from_resolvers.contains_key(&(anchor.clone(), id.clone())) {
-            changes.push(ResolverChange::Added { anchor: anchor.clone(), id: id.clone() });
+            changes.push(ResolverChange::Added {
+                anchor: anchor.clone(),
+                id: id.clone(),
+            });
         }
     }
     changes

@@ -16,16 +16,15 @@ pub use block::{Block, BlockError, IncludeError, included_blocks};
 #[cfg(test)]
 pub(crate) use canon::scalar_type_canonical_for_test;
 pub use canon::{
-    SchemaDecodeError, block_canonical, block_from_canonical, block_hash,
-    option_row_canonical, option_row_from_canonical, revision_id,
-    scalar_type_from_canonical, schema_canonical, schema_from_canonical,
+    SchemaDecodeError, block_canonical, block_from_canonical, block_hash, option_row_canonical,
+    option_row_from_canonical, revision_id, scalar_type_from_canonical, schema_canonical,
+    schema_from_canonical,
 };
 pub use units::{Dimension, Unit, conversion};
 
 pub use cast::{
-    Cast, CastClass, CastError, JoinConflict, JoinPath, NomenclatureTable,
-    arity_cast, arity_join, column_cast, column_join, nomenclature_rows,
-    scalar_cast, scalar_join,
+    Cast, CastClass, CastError, JoinConflict, JoinPath, NomenclatureTable, arity_cast, arity_join,
+    column_cast, column_join, nomenclature_rows, scalar_cast, scalar_join,
 };
 
 use std::collections::HashSet;
@@ -101,20 +100,30 @@ impl AttachmentConstraints {
     /// and joins see, so `["image/*","application/pdf"]` and
     /// `["Application/PDF","image/*"]` are one constraint.
     pub fn normalized(&self) -> AttachmentConstraints {
-        let mut accept: Vec<String> =
-            self.accept.iter().map(|p| media_type(p).to_string()).collect();
+        let mut accept: Vec<String> = self
+            .accept
+            .iter()
+            .map(|p| media_type(p).to_string())
+            .collect();
         accept.sort();
         accept.dedup();
         if accept.iter().any(|p| p == "*/*") {
             accept.clear();
         }
-        AttachmentConstraints { accept, max_bytes: self.max_bytes }
+        AttachmentConstraints {
+            accept,
+            max_bytes: self.max_bytes,
+        }
     }
 
     pub fn accepts(&self, content_type: &str) -> bool {
         let claim = media_type(content_type);
         let this = self.normalized();
-        this.accept.is_empty() || this.accept.iter().any(|pattern| pattern_covers(pattern, &claim))
+        this.accept.is_empty()
+            || this
+                .accept
+                .iter()
+                .any(|pattern| pattern_covers(pattern, &claim))
     }
 
     pub fn admits_size(&self, byte_size: u64) -> bool {
@@ -144,7 +153,11 @@ impl AttachmentConstraints {
 /// surrounding whitespace dropped (RFC 2045: types and subtypes are
 /// case-insensitive; parameters are not part of the type).
 fn media_type(s: &str) -> String {
-    s.split(';').next().unwrap_or("").trim().to_ascii_lowercase()
+    s.split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 /// `q` covers `p`: exact match, or `q` is a `type/*` wildcard covering
@@ -155,9 +168,7 @@ fn pattern_covers(q: &str, p: &str) -> bool {
         return true;
     }
     match q.strip_suffix("/*") {
-        Some(prefix) => p
-            .split_once('/')
-            .is_some_and(|(ty, _)| ty == prefix),
+        Some(prefix) => p.split_once('/').is_some_and(|(ty, _)| ty == prefix),
         None => false,
     }
 }
@@ -292,11 +303,7 @@ pub struct SchemaIndex {
 
 impl SchemaIndex {
     pub fn build(schema: &Schema) -> Self {
-        fn walk(
-            elements: &[Element],
-            scope: &mut Vec<GroupId>,
-            index: &mut SchemaIndex,
-        ) {
+        fn walk(elements: &[Element], scope: &mut Vec<GroupId>, index: &mut SchemaIndex) {
             for el in elements {
                 match el {
                     Element::Column(c) => {
@@ -350,7 +357,10 @@ pub struct DepthPolicy {
 
 impl Default for DepthPolicy {
     fn default() -> Self {
-        Self { max_many_depth: 1, max_group_depth: 24 }
+        Self {
+            max_many_depth: 1,
+            max_group_depth: 24,
+        }
     }
 }
 
@@ -387,12 +397,13 @@ pub enum SchemaError {
         resolver: ResolverId,
         target: ColumnId,
     },
-    #[error("resolver '{resolver}' maps result field '{field}' absent from its declared result type")]
-    UnknownMappingField {
-        resolver: ResolverId,
-        field: String,
-    },
-    #[error("resolver '{resolver}': result field '{field}' does not typecheck against column '{target}'")]
+    #[error(
+        "resolver '{resolver}' maps result field '{field}' absent from its declared result type"
+    )]
+    UnknownMappingField { resolver: ResolverId, field: String },
+    #[error(
+        "resolver '{resolver}': result field '{field}' does not typecheck against column '{target}'"
+    )]
     MappingTypeMismatch {
         resolver: ResolverId,
         field: String,
@@ -425,7 +436,9 @@ pub enum SchemaError {
         anchor: GroupId,
     },
     /// The declared input type disagrees with the column it reads.
-    #[error("resolver '{resolver}': input '{column}' is declared with a type the column does not have")]
+    #[error(
+        "resolver '{resolver}': input '{column}' is declared with a type the column does not have"
+    )]
     InputTypeMismatch {
         resolver: ResolverId,
         column: ColumnId,
@@ -465,7 +478,9 @@ pub fn validate(schema: &Schema, policy: DepthPolicy) -> Vec<SchemaError> {
                         errors.push(SchemaError::DuplicateColumnId(c.id.clone()));
                     }
                     if let ScalarType::Attachment(constraints) = &c.ty
-                        && constraints.max_bytes.is_some_and(|m| m > MAX_SAFE_INTEGER as u64)
+                        && constraints
+                            .max_bytes
+                            .is_some_and(|m| m > MAX_SAFE_INTEGER as u64)
                     {
                         errors.push(SchemaError::MaxBytesUnrepresentable(c.id.clone()));
                     }
@@ -642,7 +657,11 @@ mod tests {
         let errors = validate(&schema, DepthPolicy::default());
         assert!(matches!(
             errors.as_slice(),
-            [SchemaError::DepthExceeded { depth: 2, max: 1, .. }]
+            [SchemaError::DepthExceeded {
+                depth: 2,
+                max: 1,
+                ..
+            }]
         ));
     }
 
@@ -665,12 +684,20 @@ mod tests {
             el
         }
         let policy = DepthPolicy::default();
-        let ok = Schema { root: vec![nested(policy.max_group_depth)], resolvers: vec![] };
+        let ok = Schema {
+            root: vec![nested(policy.max_group_depth)],
+            resolvers: vec![],
+        };
         assert_eq!(validate(&ok, policy), vec![]);
-        let deep = Schema { root: vec![nested(policy.max_group_depth + 1)], resolvers: vec![] };
-        assert!(validate(&deep, policy)
-            .iter()
-            .any(|e| matches!(e, SchemaError::GroupDepthExceeded { .. })));
+        let deep = Schema {
+            root: vec![nested(policy.max_group_depth + 1)],
+            resolvers: vec![],
+        };
+        assert!(
+            validate(&deep, policy)
+                .iter()
+                .any(|e| matches!(e, SchemaError::GroupDepthExceeded { .. }))
+        );
     }
 
     #[test]
@@ -701,7 +728,10 @@ mod tests {
             })
         };
         let schema = Schema {
-            root: vec![block(vec![col("siret", ScalarType::Text), col("name", ScalarType::Text)])],
+            root: vec![block(vec![
+                col("siret", ScalarType::Text),
+                col("name", ScalarType::Text),
+            ])],
             resolvers: vec![ResolverDeclaration {
                 id: ResolverId::new("insee"),
                 version: 1,
@@ -728,16 +758,36 @@ mod tests {
         let mut bad = schema.clone();
         bad.resolvers[0].input = vec![(ColumnId::new("siret"), ScalarType::Integer(None))];
         bad.resolvers[0].result_type = vec![
-            ResultField { name: "a".into(), ty: ScalarType::Text },
-            ResultField { name: "b".into(), ty: ScalarType::Text },
+            ResultField {
+                name: "a".into(),
+                ty: ScalarType::Text,
+            },
+            ResultField {
+                name: "b".into(),
+                ty: ScalarType::Text,
+            },
         ];
         bad.resolvers[0].mapping = vec![
-            Mapping { result_field: "a".into(), target: ColumnId::new("name") },
-            Mapping { result_field: "b".into(), target: ColumnId::new("name") },
+            Mapping {
+                result_field: "a".into(),
+                target: ColumnId::new("name"),
+            },
+            Mapping {
+                result_field: "b".into(),
+                target: ColumnId::new("name"),
+            },
         ];
         let errors = validate(&bad, DepthPolicy::default());
-        assert!(errors.iter().any(|e| matches!(e, SchemaError::InputTypeMismatch { .. })));
-        assert!(errors.iter().any(|e| matches!(e, SchemaError::DuplicateMappingTarget { .. })));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SchemaError::InputTypeMismatch { .. }))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, SchemaError::DuplicateMappingTarget { .. }))
+        );
     }
 
     #[test]
@@ -769,12 +819,24 @@ mod tests {
             version: 1,
             anchor: GroupId::new(anchor),
             input: vec![(ColumnId::new(target), ScalarType::Text)],
-            result_type: vec![ResultField { name: "n".into(), ty: ScalarType::Text }],
-            mapping: vec![Mapping { result_field: "n".into(), target: ColumnId::new(target) }],
+            result_type: vec![ResultField {
+                name: "n".into(),
+                ty: ScalarType::Text,
+            }],
+            mapping: vec![Mapping {
+                result_field: "n".into(),
+                target: ColumnId::new(target),
+            }],
         };
         let two_blocks = Schema {
-            root: vec![block("siege", "siret_siege"), block("filiale", "siret_filiale")],
-            resolvers: vec![decl("siege", "siret_siege"), decl("filiale", "siret_filiale")],
+            root: vec![
+                block("siege", "siret_siege"),
+                block("filiale", "siret_filiale"),
+            ],
+            resolvers: vec![
+                decl("siege", "siret_siege"),
+                decl("filiale", "siret_filiale"),
+            ],
         };
         assert_eq!(validate(&two_blocks, DepthPolicy::default()), vec![]);
 
@@ -782,24 +844,33 @@ mod tests {
             root: vec![block("siege", "siret_siege")],
             resolvers: vec![decl("siege", "siret_siege"), decl("siege", "siret_siege")],
         };
-        assert!(validate(&twice, DepthPolicy::default())
-            .iter()
-            .any(|e| matches!(e, SchemaError::DuplicateDeclaration { .. })));
+        assert!(
+            validate(&twice, DepthPolicy::default())
+                .iter()
+                .any(|e| matches!(e, SchemaError::DuplicateDeclaration { .. }))
+        );
 
         let nowhere = Schema {
             root: vec![block("siege", "siret_siege")],
             resolvers: vec![decl("hq", "siret_siege")],
         };
-        assert!(validate(&nowhere, DepthPolicy::default())
-            .iter()
-            .any(|e| matches!(e, SchemaError::UnknownAnchor { .. })));
+        assert!(
+            validate(&nowhere, DepthPolicy::default())
+                .iter()
+                .any(|e| matches!(e, SchemaError::UnknownAnchor { .. }))
+        );
 
         let outside = Schema {
-            root: vec![block("siege", "siret_siege"), block("filiale", "siret_filiale")],
+            root: vec![
+                block("siege", "siret_siege"),
+                block("filiale", "siret_filiale"),
+            ],
             resolvers: vec![decl("siege", "siret_filiale")],
         };
-        assert!(validate(&outside, DepthPolicy::default())
-            .iter()
-            .any(|e| matches!(e, SchemaError::TargetOutsideAnchor { .. })));
+        assert!(
+            validate(&outside, DepthPolicy::default())
+                .iter()
+                .any(|e| matches!(e, SchemaError::TargetOutsideAnchor { .. }))
+        );
     }
 }

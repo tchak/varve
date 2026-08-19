@@ -13,14 +13,22 @@ use varve_schema::{
 };
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
-    Element::Column(Column { id: ColumnId::new(id), label: format!("Label {id}"), ty, arity })
+    Element::Column(Column {
+        id: ColumnId::new(id),
+        label: format!("Label {id}"),
+        ty,
+        arity,
+    })
 }
 
 fn row(id: &str, label: &str, fields: &[(&str, &str)]) -> OptionRow {
     OptionRow {
         id: OptionId::new(id),
         label: label.into(),
-        fields: fields.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        fields: fields
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
     }
 }
 
@@ -34,7 +42,11 @@ fn kitchen_sink() -> Schema {
             column("nombre", ScalarType::Integer(None), Arity::One),
             column("duree", ScalarType::Integer(Some(Unit::Month)), Arity::One),
             column("montant", ScalarType::Decimal(None), Arity::One),
-            column("surface", ScalarType::Decimal(Some(Unit::Hectare)), Arity::Many),
+            column(
+                "surface",
+                ScalarType::Decimal(Some(Unit::Hectare)),
+                Arity::Many,
+            ),
             column("date", ScalarType::Date, Arity::One),
             column("instant", ScalarType::Datetime, Arity::One),
             column(
@@ -47,10 +59,17 @@ fn kitchen_sink() -> Schema {
             ),
             column(
                 "commune",
-                ScalarType::Enum(NomenclatureRef::Published { id: NomenclatureId::new("cog"), version: 3 }),
+                ScalarType::Enum(NomenclatureRef::Published {
+                    id: NomenclatureId::new("cog"),
+                    version: 3,
+                }),
                 Arity::Many,
             ),
-            column("piece", ScalarType::Attachment(AttachmentConstraints::default()), Arity::One),
+            column(
+                "piece",
+                ScalarType::Attachment(AttachmentConstraints::default()),
+                Arity::One,
+            ),
             column(
                 "photos",
                 ScalarType::Attachment(AttachmentConstraints {
@@ -71,7 +90,10 @@ fn kitchen_sink() -> Schema {
                         id: GroupId::new("rib"),
                         label: "RIB".into(),
                         cardinality: Cardinality::Many,
-                        included_from: Some(BlockRef { id: BlockId::new("rib"), version: 2 }),
+                        included_from: Some(BlockRef {
+                            id: BlockId::new("rib"),
+                            version: 2,
+                        }),
                         children: vec![
                             column("iban", ScalarType::Text, Arity::One),
                             column("bic", ScalarType::Text, Arity::One),
@@ -86,10 +108,19 @@ fn kitchen_sink() -> Schema {
             anchor: GroupId::new("identite"),
             input: vec![(ColumnId::new("nom"), ScalarType::Text)],
             result_type: vec![
-                ResultField { name: "raison_sociale".into(), ty: ScalarType::Text },
-                ResultField { name: "effectif".into(), ty: ScalarType::Integer(None) },
+                ResultField {
+                    name: "raison_sociale".into(),
+                    ty: ScalarType::Text,
+                },
+                ResultField {
+                    name: "effectif".into(),
+                    ty: ScalarType::Integer(None),
+                },
             ],
-            mapping: vec![Mapping { result_field: "raison_sociale".into(), target: ColumnId::new("nom") }],
+            mapping: vec![Mapping {
+                result_field: "raison_sociale".into(),
+                target: ColumnId::new("nom"),
+            }],
         }],
     }
 }
@@ -113,8 +144,14 @@ fn rib_block() -> Block {
             version: 1,
             anchor: GroupId::new("rib"),
             input: vec![(ColumnId::new("iban"), ScalarType::Text)],
-            result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
-            mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("bic") }],
+            result_type: vec![ResultField {
+                name: "bic".into(),
+                ty: ScalarType::Text,
+            }],
+            mapping: vec![Mapping {
+                result_field: "bic".into(),
+                target: ColumnId::new("bic"),
+            }],
         }],
     }
 }

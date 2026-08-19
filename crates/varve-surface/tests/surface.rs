@@ -3,12 +3,12 @@ use std::collections::BTreeSet;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RevisionId, RowPath, SurfaceId};
 use varve_logic::{Atom, ColumnRef, Const, Expr, Operand};
 use varve_schema::{
-    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
-    ScalarType, Schema, revision_id,
+    Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
+    revision_id,
 };
 use varve_surface::{
-    ColumnNode, Finding, Format, GroupNode, Ineligibility, Node, Section, Surface,
-    SurfaceError, WritePolicy, admissibility, reachability, validate,
+    ColumnNode, Finding, Format, GroupNode, Ineligibility, Node, Section, Surface, SurfaceError,
+    WritePolicy, admissibility, reachability, validate,
 };
 use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues, Scalar};
 
@@ -23,8 +23,16 @@ fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
 
 fn yes_no() -> NomenclatureRef {
     NomenclatureRef::Inline(vec![
-        OptionRow { id: OptionId::new("oui"), label: "Oui".into(), fields: vec![] },
-        OptionRow { id: OptionId::new("non"), label: "Non".into(), fields: vec![] },
+        OptionRow {
+            id: OptionId::new("oui"),
+            label: "Oui".into(),
+            fields: vec![],
+        },
+        OptionRow {
+            id: OptionId::new("non"),
+            label: "Non".into(),
+            fields: vec![],
+        },
     ])
 }
 
@@ -63,7 +71,10 @@ fn col_node(id: &str) -> ColumnNode {
 
 fn when_oui(source_id: &str) -> Expr {
     Expr::Atom(Atom::Eq {
-        source: ColumnRef { column: ColumnId::new(source_id), field: None },
+        source: ColumnRef {
+            column: ColumnId::new(source_id),
+            field: None,
+        },
         right: Operand::Const(Const::Option(OptionId::new("oui"))),
     })
 }
@@ -83,7 +94,10 @@ fn surface(nodes: Vec<Node>) -> Surface {
 
 fn set(values: &mut RecordValues, id: &str, scalar: Scalar) {
     values.cells.insert(
-        CellAddr { column: ColumnId::new(id), path: RowPath::root() },
+        CellAddr {
+            column: ColumnId::new(id),
+            path: RowPath::root(),
+        },
         CellState::Value(CellValue::One(scalar)),
     );
 }
@@ -119,11 +133,17 @@ fn validation_catches_structure_and_rules() {
     // A visibility cycle across two columns.
     let mut a = col_node("situation");
     a.visibility = Some(Expr::Atom(Atom::IsFilled {
-        source: ColumnRef { column: ColumnId::new("detail"), field: None },
+        source: ColumnRef {
+            column: ColumnId::new("detail"),
+            field: None,
+        },
     }));
     let mut b = col_node("detail");
     b.visibility = Some(Expr::Atom(Atom::IsFilled {
-        source: ColumnRef { column: ColumnId::new("situation"), field: None },
+        source: ColumnRef {
+            column: ColumnId::new("situation"),
+            field: None,
+        },
     }));
     let bad = surface(vec![Node::Column(a), Node::Column(b)]);
     assert!(matches!(
@@ -197,7 +217,10 @@ fn per_item_reachability() {
 
     let mut values = RecordValues::new();
     values.items.insert(
-        ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("i1"), ItemId::new("i2")],
     );
     let path = |item: &str| {
@@ -207,11 +230,17 @@ fn per_item_reachability() {
         })
     };
     values.cells.insert(
-        CellAddr { column: ColumnId::new("role"), path: path("i1") },
+        CellAddr {
+            column: ColumnId::new("role"),
+            path: path("i1"),
+        },
         CellState::Value(CellValue::One(Scalar::Enum(OptionId::new("oui")))),
     );
     values.cells.insert(
-        CellAddr { column: ColumnId::new("role"), path: path("i2") },
+        CellAddr {
+            column: ColumnId::new("role"),
+            path: path("i2"),
+        },
         CellState::Value(CellValue::One(Scalar::Enum(OptionId::new("non")))),
     );
 
@@ -251,8 +280,7 @@ fn two_surfaces_one_record_disagree_on_admissibility() {
 
     let on_public = admissibility(&public, &s, &noms, &values, &pending).unwrap();
     assert!(on_public.is_admissible());
-    let on_back_office =
-        admissibility(&back_office, &s, &noms, &values, &pending).unwrap();
+    let on_back_office = admissibility(&back_office, &s, &noms, &values, &pending).unwrap();
     assert!(!on_back_office.is_admissible());
     assert!(matches!(
         on_back_office.findings.as_slice(),
@@ -330,15 +358,36 @@ fn formats_apply_to_every_element_of_a_many_text_cell() {
     let cell = |list: &[&str]| {
         let mut v = RecordValues::new();
         v.cells.insert(
-            CellAddr { column: ColumnId::new("emails"), path: RowPath::root() },
-            CellState::Value(CellValue::Many(list.iter().map(|t| Scalar::Text((*t).into())).collect())),
+            CellAddr {
+                column: ColumnId::new("emails"),
+                path: RowPath::root(),
+            },
+            CellState::Value(CellValue::Many(
+                list.iter().map(|t| Scalar::Text((*t).into())).collect(),
+            )),
         );
         v
     };
-    let ok = admissibility(&surf, &s, &Default::default(), &cell(&["a@b.fr", "c@d.fr"]), &BTreeSet::new()).unwrap();
+    let ok = admissibility(
+        &surf,
+        &s,
+        &Default::default(),
+        &cell(&["a@b.fr", "c@d.fr"]),
+        &BTreeSet::new(),
+    )
+    .unwrap();
     assert!(ok.findings.is_empty());
-    let bad = admissibility(&surf, &s, &Default::default(), &cell(&["a@b.fr", "nope"]), &BTreeSet::new()).unwrap();
-    assert!(matches!(bad.findings.as_slice(), [Finding::FormatViolation { column, .. }] if column == &ColumnId::new("emails")));
+    let bad = admissibility(
+        &surf,
+        &s,
+        &Default::default(),
+        &cell(&["a@b.fr", "nope"]),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    assert!(
+        matches!(bad.findings.as_slice(), [Finding::FormatViolation { column, .. }] if column == &ColumnId::new("emails"))
+    );
 }
 
 #[test]
@@ -354,18 +403,14 @@ fn ineligibility_and_columns() {
 
     let mut values = RecordValues::new();
     set(&mut values, "situation", Scalar::Enum(OptionId::new("oui")));
-    let report =
-        admissibility(&surf, &s, &noms, &values, &BTreeSet::new()).unwrap();
+    let report = admissibility(&surf, &s, &noms, &values, &BTreeSet::new()).unwrap();
     assert!(matches!(
         report.findings.as_slice(),
         [Finding::Ineligible { message }] if message == "Non éligible."
     ));
 
     // The §2.9 entry-visibility filter's static column set.
-    assert_eq!(
-        surf.columns(),
-        BTreeSet::from([ColumnId::new("situation")])
-    );
+    assert_eq!(surf.columns(), BTreeSet::from([ColumnId::new("situation")]));
 }
 
 #[test]
@@ -374,9 +419,15 @@ fn writable_set_is_what_a_checkpoint_freezes() {
     // writable there and the groups holding them — read-only columns
     // and groups with no writable column stay out of the frozen set.
     let mut read_only = col_node("detail");
-    read_only.write = WritePolicy { writable: false, override_derived: false };
+    read_only.write = WritePolicy {
+        writable: false,
+        override_derived: false,
+    };
     let mut ro_role = col_node("role");
-    ro_role.write = WritePolicy { writable: false, override_derived: false };
+    ro_role.write = WritePolicy {
+        writable: false,
+        override_derived: false,
+    };
     let surf = surface(vec![
         Node::Column(col_node("situation")),
         Node::Column(read_only),
@@ -391,13 +442,22 @@ fn writable_set_is_what_a_checkpoint_freezes() {
         surf.writable_columns(),
         BTreeSet::from([ColumnId::new("situation"), ColumnId::new("precision")])
     );
-    assert_eq!(surf.writable_groups(), BTreeSet::from([GroupId::new("contacts")]));
+    assert_eq!(
+        surf.writable_groups(),
+        BTreeSet::from([GroupId::new("contacts")])
+    );
 
     // Every column read-only in the group → the group is not writable.
     let mut ro_precision = col_node("precision");
-    ro_precision.write = WritePolicy { writable: false, override_derived: false };
+    ro_precision.write = WritePolicy {
+        writable: false,
+        override_derived: false,
+    };
     let mut ro_role = col_node("role");
-    ro_role.write = WritePolicy { writable: false, override_derived: false };
+    ro_role.write = WritePolicy {
+        writable: false,
+        override_derived: false,
+    };
     let frozen_form = surface(vec![Node::Group(GroupNode {
         group: GroupId::new("contacts"),
         prompt: None,

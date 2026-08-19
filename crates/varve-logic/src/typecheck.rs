@@ -5,8 +5,7 @@
 
 use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{
-    Arity, ColumnInfo, NomenclatureTable, ScalarType, Schema, SchemaIndex, Unit,
-    nomenclature_rows,
+    Arity, ColumnInfo, NomenclatureTable, ScalarType, Schema, SchemaIndex, Unit, nomenclature_rows,
 };
 
 use crate::{Atom, ColumnRef, Const, Expr, Operand};
@@ -176,7 +175,10 @@ fn check_comparison(
         match nomenclature_rows(nref, nomenclatures) {
             Err(_) => errors.push(TypeError::UnknownNomenclature(column.clone())),
             Ok(rows) => {
-                if !rows.iter().any(|r| r.fields.iter().any(|(k, _)| k == field)) {
+                if !rows
+                    .iter()
+                    .any(|r| r.fields.iter().any(|(k, _)| k == field))
+                {
                     errors.push(TypeError::UnknownField(column.clone(), field.clone()));
                 }
             }

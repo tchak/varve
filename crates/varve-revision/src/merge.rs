@@ -20,8 +20,15 @@ type Container = Option<GroupId>;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Def {
-    Column { column: Column, parent: Container },
-    Group { label: String, group: Group, parent: Container },
+    Column {
+        column: Column,
+        parent: Container,
+    },
+    Group {
+        label: String,
+        group: Group,
+        parent: Container,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -35,7 +42,9 @@ pub enum MergeConflict {
     /// One side deleted a group while the other added or changed an
     /// element inside it: the element would survive the merge with
     /// nowhere to live. Reported, never dropped.
-    #[error("group '{group}' was deleted on one side while '{element}' was added or changed inside it on the other")]
+    #[error(
+        "group '{group}' was deleted on one side while '{element}' was added or changed inside it on the other"
+    )]
     OrphanedByDeletedGroup { group: GroupId, element: String },
 }
 
@@ -51,15 +60,24 @@ fn flatten(schema: &Schema) -> Flat {
             match el {
                 Element::Column(c) => {
                     let key = Key::Column(c.id.clone());
-                    flat.containers.entry(parent.clone()).or_default().push(key.clone());
+                    flat.containers
+                        .entry(parent.clone())
+                        .or_default()
+                        .push(key.clone());
                     flat.defs.insert(
                         key,
-                        Def::Column { column: c.clone(), parent: parent.clone() },
+                        Def::Column {
+                            column: c.clone(),
+                            parent: parent.clone(),
+                        },
                     );
                 }
                 Element::Group(g) => {
                     let key = Key::Group(g.id.clone());
-                    flat.containers.entry(parent.clone()).or_default().push(key.clone());
+                    flat.containers
+                        .entry(parent.clone())
+                        .or_default()
+                        .push(key.clone());
                     let mut shell = g.clone();
                     shell.children = Vec::new(); // children merge on their own
                     flat.defs.insert(
@@ -75,7 +93,10 @@ fn flatten(schema: &Schema) -> Flat {
             }
         }
     }
-    let mut flat = Flat { defs: BTreeMap::new(), containers: BTreeMap::new() };
+    let mut flat = Flat {
+        defs: BTreeMap::new(),
+        containers: BTreeMap::new(),
+    };
     walk(&schema.root, &None, &mut flat);
     flat
 }
@@ -99,17 +120,17 @@ fn merge3<T: PartialEq + Clone>(
     Err(())
 }
 
-pub fn merge(
-    base: &Schema,
-    left: &Schema,
-    right: &Schema,
-) -> Result<Schema, Vec<MergeConflict>> {
+pub fn merge(base: &Schema, left: &Schema, right: &Schema) -> Result<Schema, Vec<MergeConflict>> {
     let (b, l, r) = (flatten(base), flatten(left), flatten(right));
     let mut conflicts = Vec::new();
     let mut merged: BTreeMap<Key, Def> = BTreeMap::new();
 
-    let keys: BTreeSet<&Key> =
-        b.defs.keys().chain(l.defs.keys()).chain(r.defs.keys()).collect();
+    let keys: BTreeSet<&Key> = b
+        .defs
+        .keys()
+        .chain(l.defs.keys())
+        .chain(r.defs.keys())
+        .collect();
     for key in keys {
         match merge3(b.defs.get(key), l.defs.get(key), r.defs.get(key)) {
             Ok(Some(def)) => {
@@ -125,7 +146,10 @@ pub fn merge(
 
     // Resolvers: whole-declaration three-way by id.
     let resolver_map = |s: &Schema| -> BTreeMap<ResolverId, ResolverDeclaration> {
-        s.resolvers.iter().map(|d| (d.id.clone(), d.clone())).collect()
+        s.resolvers
+            .iter()
+            .map(|d| (d.id.clone(), d.clone()))
+            .collect()
     };
     let (rb, rl, rr) = (resolver_map(base), resolver_map(left), resolver_map(right));
     let mut resolvers = Vec::new();
@@ -198,5 +222,8 @@ pub fn merge(
         }
         out
     }
-    Ok(Schema { root: rebuild(&None, &merged, &l, &r), resolvers })
+    Ok(Schema {
+        root: rebuild(&None, &merged, &l, &r),
+        resolvers,
+    })
 }

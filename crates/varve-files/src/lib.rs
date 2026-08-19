@@ -44,9 +44,9 @@ use age::x25519;
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::io::AsyncWriteExt as FuturesWriteExt;
-use object_store::{ObjectStore, ObjectStoreExt};
 use object_store::buffered::BufWriter;
 use object_store::path::Path as ObjPath;
+use object_store::{ObjectStore, ObjectStoreExt};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
@@ -248,10 +248,15 @@ impl Keyring for MemoryKeyring {
         Ok(())
     }
 
-    async fn existing_identity(&self, hash: &ContentHash) -> Result<x25519::Identity, KeyringError> {
+    async fn existing_identity(
+        &self,
+        hash: &ContentHash,
+    ) -> Result<x25519::Identity, KeyringError> {
         let keys = self.keys.lock().expect("poisoned");
         match keys.get(hash) {
-            Some(s) => s.parse::<x25519::Identity>().map_err(|e| KeyringError::Backend(e.to_string())),
+            Some(s) => s
+                .parse::<x25519::Identity>()
+                .map_err(|e| KeyringError::Backend(e.to_string())),
             None => Err(KeyringError::Missing(*hash)),
         }
     }
@@ -278,7 +283,9 @@ fn stem(hash: &ContentHash) -> String {
 }
 
 fn unix(t: SystemTime) -> u64 {
-    t.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs()
+    t.duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
 }
 
 /// Sync `Read + Seek` over an object via ranged GETs, for age's
@@ -351,7 +358,11 @@ pub struct ObjectBlobStore<K> {
 
 impl<K: Keyring> ObjectBlobStore<K> {
     pub fn new(store: Arc<dyn ObjectStore>, keyring: K) -> Self {
-        Self { store, keyring, tmp_counter: AtomicU64::new(0) }
+        Self {
+            store,
+            keyring,
+            tmp_counter: AtomicU64::new(0),
+        }
     }
 
     /// Local-filesystem backend (dev, tests): same pipeline, same
@@ -411,7 +422,11 @@ impl<K: Keyring> ObjectBlobStore<K> {
         self.read_manifest(hash).await?;
         let identity = self.keyring.existing_identity(hash).await?;
         let path = Self::blob_path(hash);
-        let meta = self.store.head(&path).await.map_err(|e| map_storage(e, hash))?;
+        let meta = self
+            .store
+            .head(&path)
+            .await
+            .map_err(|e| map_storage(e, hash))?;
         let reader = RangedObjectReader {
             store: self.store.clone(),
             path,
@@ -486,10 +501,9 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
         let mut hasher = Sha256::new();
         let mut byte_size: u64 = 0;
         let upload = BufWriter::new(self.store.clone(), staging.clone());
-        let encryptor = age::Encryptor::with_recipients(std::iter::once(
-            &recipient as &dyn age::Recipient,
-        ))
-        .map_err(|e| FilesError::Encrypt(e.to_string()))?;
+        let encryptor =
+            age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+                .map_err(|e| FilesError::Encrypt(e.to_string()))?;
         let mut writer = encryptor
             .wrap_async_output(upload.compat_write())
             .await
@@ -507,10 +521,16 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
                 .map_err(|e| FilesError::Encrypt(e.to_string()))?;
             byte_size += n as u64;
         }
-        writer.close().await.map_err(|e| FilesError::Encrypt(e.to_string()))?;
+        writer
+            .close()
+            .await
+            .map_err(|e| FilesError::Encrypt(e.to_string()))?;
 
         // Blobs hash plain — the stated §2.15 dedup exception.
-        let hash = ContentHash { alg: HashAlg::Sha256, digest: hasher.finalize().into() };
+        let hash = ContentHash {
+            alg: HashAlg::Sha256,
+            digest: hasher.finalize().into(),
+        };
 
         if self.has(&hash).await? {
             self.store.delete(&staging).await.ok();
@@ -621,12 +641,17 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
         let mut manifests = self.store.list(Some(&ObjPath::from("manifest")));
         while let Some(entry) = manifests.next().await {
             let entry = entry?;
-            let Some(stem) = entry.location.filename().and_then(|n| n.strip_suffix(".json"))
+            let Some(stem) = entry
+                .location
+                .filename()
+                .and_then(|n| n.strip_suffix(".json"))
             else {
                 continue;
             };
             let Ok(hash) = stem.replacen('-', ":", 1).parse::<ContentHash>() else {
-                return Err(FilesError::Corrupt(format!("unparseable manifest name {stem}")));
+                return Err(FilesError::Corrupt(format!(
+                    "unparseable manifest name {stem}"
+                )));
             };
             candidates.push(hash);
         }
@@ -636,7 +661,9 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
                 continue;
             }
             let info = self.stat(&hash).await?;
-            let age_of = now.duration_since(info.created_at).unwrap_or(Duration::ZERO);
+            let age_of = now
+                .duration_since(info.created_at)
+                .unwrap_or(Duration::ZERO);
             if age_of < grace {
                 report.kept_young += 1; // §13.6: young blobs are protected
                 continue;
@@ -657,7 +684,10 @@ mod tests {
     }
 
     fn meta() -> PutMeta {
-        PutMeta { content_type: "application/pdf".into(), created_at: now() }
+        PutMeta {
+            content_type: "application/pdf".into(),
+            created_at: now(),
+        }
     }
 
     async fn store(dir: &tempfile::TempDir) -> ObjectBlobStore<MemoryKeyring> {
@@ -697,7 +727,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = store(&dir).await;
         // > 4 STREAM chunks (64 KiB each), deterministic content.
-        let plain: Vec<u8> = (0..300_000u32).map(|i| (i.wrapping_mul(31) % 251) as u8).collect();
+        let plain: Vec<u8> = (0..300_000u32)
+            .map(|i| (i.wrapping_mul(31) % 251) as u8)
+            .collect();
         let hash = store.put(meta(), plain.as_slice()).await.unwrap();
 
         let mut reader = store.get_range(&hash, 200_123..201_123).await.unwrap();
@@ -722,7 +754,9 @@ mod tests {
         // The same pipeline over the in-memory backend: what an
         // S3-compatible provider sees, minus the network.
         let store = ObjectBlobStore::memory(MemoryKeyring::default());
-        let plain: Vec<u8> = (0..200_000u32).map(|i| (i.wrapping_mul(17) % 249) as u8).collect();
+        let plain: Vec<u8> = (0..200_000u32)
+            .map(|i| (i.wrapping_mul(17) % 249) as u8)
+            .collect();
         let hash = store.put(meta(), plain.as_slice()).await.unwrap();
 
         let mut reader = store.get(&hash).await.unwrap();
@@ -747,7 +781,10 @@ mod tests {
         let b = store.put(meta(), &b"same bytes"[..]).await.unwrap();
         assert_eq!(a, b);
         assert_eq!(store.keyring.len(), 1);
-        assert_eq!(std::fs::read_dir(dir.path().join("blobs")).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("blobs")).unwrap().count(),
+            1
+        );
         // The losing put's staging object was cleaned up.
         let staged: Vec<_> = std::fs::read_dir(dir.path().join("tmp"))
             .map(|d| d.filter_map(Result::ok).collect())
@@ -765,7 +802,10 @@ mod tests {
         store.delete(&hash).await.unwrap();
         assert!(store.keyring.is_empty());
         assert!(!store.has(&hash).await.unwrap());
-        assert!(matches!(store.get(&hash).await.err(), Some(FilesError::NotFound(_))));
+        assert!(matches!(
+            store.get(&hash).await.err(),
+            Some(FilesError::NotFound(_))
+        ));
     }
 
     #[tokio::test]
@@ -785,16 +825,24 @@ mod tests {
     async fn sweep_respects_roots_and_grace() {
         let dir = tempfile::tempdir().unwrap();
         let store = store(&dir).await;
-        let old = PutMeta { content_type: "text/plain".into(), created_at: now() };
+        let old = PutMeta {
+            content_type: "text/plain".into(),
+            created_at: now(),
+        };
         let referenced = store.put(old.clone(), &b"referenced"[..]).await.unwrap();
         let orphaned = store.put(old, &b"orphaned"[..]).await.unwrap();
-        let young_meta =
-            PutMeta { content_type: "text/plain".into(), created_at: now() + Duration::from_secs(3000) };
+        let young_meta = PutMeta {
+            content_type: "text/plain".into(),
+            created_at: now() + Duration::from_secs(3000),
+        };
         let young = store.put(young_meta, &b"just uploaded"[..]).await.unwrap();
 
         let live = BTreeSet::from([referenced]);
         let at = now() + Duration::from_secs(3600);
-        let report = store.sweep(&live, Duration::from_secs(1800), at).await.unwrap();
+        let report = store
+            .sweep(&live, Duration::from_secs(1800), at)
+            .await
+            .unwrap();
 
         assert_eq!(report.deleted, vec![orphaned]);
         assert_eq!(report.kept_live, 1);
@@ -810,13 +858,18 @@ mod tests {
         let store = ObjectBlobStore::memory(MemoryKeyring::default());
         store
             .store
-            .put(&ObjPath::from("tmp/put-999-0"), Bytes::from_static(b"crashed mid-put").into())
+            .put(
+                &ObjPath::from("tmp/put-999-0"),
+                Bytes::from_static(b"crashed mid-put").into(),
+            )
             .await
             .unwrap();
 
         let far_future = SystemTime::now() + Duration::from_secs(7200);
-        let report =
-            store.sweep(&BTreeSet::new(), Duration::from_secs(1800), far_future).await.unwrap();
+        let report = store
+            .sweep(&BTreeSet::new(), Duration::from_secs(1800), far_future)
+            .await
+            .unwrap();
         assert_eq!(report.tmp_removed, 1);
     }
 

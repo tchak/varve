@@ -23,15 +23,16 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, ResolverId};
 use varve_schema::{
-    Arity, Cardinality, Column, DepthPolicy, Element, Group, Mapping,
-    NomenclatureRef, OptionRow, ResolverDeclaration, ResultField, ScalarType,
-    Schema, validate,
+    Arity, Cardinality, Column, DepthPolicy, Element, Group, Mapping, NomenclatureRef, OptionRow,
+    ResolverDeclaration, ResultField, ScalarType, Schema, validate,
 };
 
 /// Fetched by `scripts/fetch-corpus.sh` (gitignored). Manifest-relative
 /// so `cargo run -p m0` works from any directory.
-const DEFAULT_CORPUS: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/data/demarches.json");
+const DEFAULT_CORPUS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../corpus/data/demarches.json"
+);
 
 #[derive(Default)]
 struct Stats {
@@ -247,10 +248,7 @@ impl<'a> Converter<'a> {
                 let mut primaries: Vec<(String, Vec<String>)> = Vec::new();
                 for entry in options() {
                     let trimmed = entry.trim();
-                    if trimmed.len() > 4
-                        && trimmed.starts_with("--")
-                        && trimmed.ends_with("--")
-                    {
+                    if trimmed.len() > 4 && trimmed.starts_with("--") && trimmed.ends_with("--") {
                         let name = trimmed[2..trimmed.len() - 2].to_string();
                         primaries.push((name, Vec::new()));
                     } else if let Some((_, secondaries)) = primaries.last_mut() {
@@ -413,11 +411,9 @@ impl<'a> Converter<'a> {
 
             // Anything else is residue: the reason M0 exists.
             other => {
-                self.stats.residue.push((
-                    self.procedure,
-                    other.to_string(),
-                    label.to_string(),
-                ));
+                self.stats
+                    .residue
+                    .push((self.procedure, other.to_string(), label.to_string()));
             }
         }
     }
@@ -467,8 +463,7 @@ fn main() {
             resolvers: Vec::new(),
         };
         let mut root = Vec::new();
-        if let Some(champs) = procedure["revision"]["champDescriptors"].as_array()
-        {
+        if let Some(champs) = procedure["revision"]["champDescriptors"].as_array() {
             for champ in champs {
                 converter.convert(champ, &mut root);
             }
@@ -503,14 +498,29 @@ fn main() {
     println!("surface-only dropped:  {:>9}", stats.surface_only_dropped);
     println!();
     println!("desugarings:");
-    println!("  otherOption → enum + text: {:>7}", stats.desugar_other_option);
-    println!("  linked dropdown → enums:   {:>7}", stats.desugar_linked_dropdown);
-    println!("  dossier link → text:       {:>7}", stats.desugar_dossier_link);
-    println!("  pre-rempli → surface r/o:  {:>7}", stats.desugar_pre_rempli);
+    println!(
+        "  otherOption → enum + text: {:>7}",
+        stats.desugar_other_option
+    );
+    println!(
+        "  linked dropdown → enums:   {:>7}",
+        stats.desugar_linked_dropdown
+    );
+    println!(
+        "  dossier link → text:       {:>7}",
+        stats.desugar_dossier_link
+    );
+    println!(
+        "  pre-rempli → surface r/o:  {:>7}",
+        stats.desugar_pre_rempli
+    );
     println!();
     println!("warnings:");
     println!("  empty enums:               {:>7}", stats.empty_enums);
-    println!("  linked orphan secondaries: {:>7}", stats.linked_orphan_secondaries);
+    println!(
+        "  linked orphan secondaries: {:>7}",
+        stats.linked_orphan_secondaries
+    );
     println!();
     if stats.validation_errors.is_empty() {
         println!("validation errors: none");
@@ -547,7 +557,10 @@ fn wire_round_trip(schemas: &[Schema]) {
         let id = revision_id(schema);
         distinct.insert(id.clone());
         ids.push(id.clone());
-        lines.push(Line::Revision { id, schema: schema.clone() });
+        lines.push(Line::Revision {
+            id,
+            schema: schema.clone(),
+        });
     }
     lines.insert(
         0,
@@ -586,7 +599,10 @@ fn wire_round_trip(schemas: &[Schema]) {
     println!("distinct revision ids:  {:>9}", distinct.len());
     println!("stream bytes:           {:>9}", bytes.len());
     println!("lines read back:        {:>9}", stream.lines.len());
-    println!("byte-stable re-emit:    {:>9}", if again == bytes { "YES" } else { "NO" });
+    println!(
+        "byte-stable re-emit:    {:>9}",
+        if again == bytes { "YES" } else { "NO" }
+    );
     println!("schema mismatches:      {:>9}", schema_mismatches);
     println!("revision id mismatches: {:>9}", id_mismatches);
     let ok = again == bytes
@@ -596,7 +612,11 @@ fn wire_round_trip(schemas: &[Schema]) {
     println!();
     println!(
         "M3: {}",
-        if ok { "PASS — the corpus round-trips byte-stably" } else { "FAIL" }
+        if ok {
+            "PASS — the corpus round-trips byte-stably"
+        } else {
+            "FAIL"
+        }
     );
     if !ok {
         std::process::exit(1);

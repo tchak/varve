@@ -4,9 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use varve_core::canonical::{
-    CanonicalValue, ContentHash, Salt, commit, commit_vector, hash_plain,
-};
+use varve_core::canonical::{CanonicalValue, ContentHash, Salt, commit, commit_vector, hash_plain};
 use varve_core::primitives::Instant;
 use varve_core::{RecordId, RevisionId};
 use varve_value::Op;
@@ -95,11 +93,13 @@ impl Entry {
         salts: &EntrySalts,
     ) -> Result<ContentHash, SaltCountMismatch> {
         if content.ops.len() != salts.ops.len() {
-            return Err(SaltCountMismatch { ops: content.ops.len(), salts: salts.ops.len() });
+            return Err(SaltCountMismatch {
+                ops: content.ops.len(),
+                salts: salts.ops.len(),
+            });
         }
         let meta = canon::meta(&content.origin, content.note.as_deref());
-        let mut parts =
-            vec![commit(&salts.meta, &meta).expect("no floats in metadata")];
+        let mut parts = vec![commit(&salts.meta, &meta).expect("no floats in metadata")];
         for (op, salt) in content.ops.iter().zip(&salts.ops) {
             parts.push(commit(salt, &canon::op(op)).expect("ops canonicalize"));
         }
@@ -129,7 +129,10 @@ impl Entry {
             ("timestamp", CanonicalValue::String(e.timestamp.to_string())),
             ("revision", CanonicalValue::String(e.revision.to_string())),
             ("base_version", CanonicalValue::Int(e.base_version as i64)),
-            ("content", CanonicalValue::String(e.content_hash.to_string())),
+            (
+                "content",
+                CanonicalValue::String(e.content_hash.to_string()),
+            ),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

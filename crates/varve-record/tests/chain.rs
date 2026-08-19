@@ -12,7 +12,10 @@ use varve_record::{
 use varve_value::{CellState, CellValue, Op, Scalar};
 
 fn human(id: &str) -> Actor {
-    Actor { id: id.into(), kind: ActorKind::Human }
+    Actor {
+        id: id.into(),
+        kind: ActorKind::Human,
+    }
 }
 
 fn ts(minute: u8) -> Instant {
@@ -52,8 +55,14 @@ fn draft(actor: Actor, minute: u8, base: u64, origin: Origin, ops: Vec<Op>) -> D
 /// tail is the unanchored one.
 fn three() -> RecordLog {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     log.append(draft(
         human("a2"),
         1,
@@ -62,8 +71,14 @@ fn three() -> RecordLog {
         vec![set("city", "Lyon"), set("name", "Durand")],
     ))
     .unwrap();
-    log.append(draft(human("a1"), 2, 2, Origin::Entered, vec![set("name", "Martin")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        2,
+        2,
+        Origin::Entered,
+        vec![set("name", "Martin")],
+    ))
+    .unwrap();
     log.verify_chain().unwrap();
     log
 }
@@ -82,11 +97,19 @@ fn tampered(log: &RecordLog, at: usize, f: impl FnOnce(&mut Entry)) -> RecordLog
 #[test]
 fn prev_and_seq_tampers_are_caught_where_they_sit() {
     let log = three();
-    let bad_prev = tampered(&log, 1, |e| e.envelope.prev = genesis_hash(&RecordId::new("r1")));
-    assert_eq!(bad_prev.verify_chain(), Err(ChainError::PrevMismatch { at: 1 }));
+    let bad_prev = tampered(&log, 1, |e| {
+        e.envelope.prev = genesis_hash(&RecordId::new("r1"))
+    });
+    assert_eq!(
+        bad_prev.verify_chain(),
+        Err(ChainError::PrevMismatch { at: 1 })
+    );
 
     let bad_seq = tampered(&log, 1, |e| e.envelope.seq = 5);
-    assert_eq!(bad_seq.verify_chain(), Err(ChainError::SeqMismatch { at: 1 }));
+    assert_eq!(
+        bad_seq.verify_chain(),
+        Err(ChainError::SeqMismatch { at: 1 })
+    );
 }
 
 #[test]
@@ -94,12 +117,18 @@ fn reordering_and_removing_entries_break_contiguity() {
     let log = three();
     let mut swapped = log.entries().to_vec();
     swapped.swap(0, 1);
-    assert_eq!(rehydrate(swapped).verify_chain(), Err(ChainError::SeqMismatch { at: 0 }));
+    assert_eq!(
+        rehydrate(swapped).verify_chain(),
+        Err(ChainError::SeqMismatch { at: 0 })
+    );
 
     let mut middle_gone = log.entries().to_vec();
     middle_gone.remove(1);
     // seq 2 now sits at position 1.
-    assert_eq!(rehydrate(middle_gone).verify_chain(), Err(ChainError::SeqMismatch { at: 1 }));
+    assert_eq!(
+        rehydrate(middle_gone).verify_chain(),
+        Err(ChainError::SeqMismatch { at: 1 })
+    );
 }
 
 /// A named in-place edit of one entry.
@@ -109,11 +138,26 @@ type Tamper = (&'static str, Box<dyn Fn(&mut Entry)>);
 /// non-tail entry breaks the next entry's `prev`.
 fn envelope_tampers() -> Vec<Tamper> {
     vec![
-        ("actor id", Box::new(|e: &mut Entry| e.envelope.actor.id = "mallory".into())),
-        ("actor kind", Box::new(|e: &mut Entry| e.envelope.actor.kind = ActorKind::System)),
-        ("timestamp", Box::new(|e: &mut Entry| e.envelope.timestamp = ts(59))),
-        ("revision", Box::new(|e: &mut Entry| e.envelope.revision = RevisionId::new("rev-9"))),
-        ("base_version", Box::new(|e: &mut Entry| e.envelope.base_version = 0)),
+        (
+            "actor id",
+            Box::new(|e: &mut Entry| e.envelope.actor.id = "mallory".into()),
+        ),
+        (
+            "actor kind",
+            Box::new(|e: &mut Entry| e.envelope.actor.kind = ActorKind::System),
+        ),
+        (
+            "timestamp",
+            Box::new(|e: &mut Entry| e.envelope.timestamp = ts(59)),
+        ),
+        (
+            "revision",
+            Box::new(|e: &mut Entry| e.envelope.revision = RevisionId::new("rev-9")),
+        ),
+        (
+            "base_version",
+            Box::new(|e: &mut Entry| e.envelope.base_version = 0),
+        ),
     ]
 }
 
@@ -122,7 +166,11 @@ fn envelope_tampers_on_a_non_tail_entry_break_the_next_link() {
     let log = three();
     for (name, tamper) in envelope_tampers() {
         let t = tampered(&log, 1, tamper);
-        assert_eq!(t.verify_chain(), Err(ChainError::PrevMismatch { at: 2 }), "{name}");
+        assert_eq!(
+            t.verify_chain(),
+            Err(ChainError::PrevMismatch { at: 2 }),
+            "{name}"
+        );
     }
 }
 
@@ -135,7 +183,11 @@ fn the_tail_is_unanchored_by_construction_and_a_snapshot_pins_it() {
     let head = log.snapshot_at(3).unwrap();
     for (name, tamper) in envelope_tampers() {
         let t = tampered(&log, 2, tamper);
-        assert_eq!(t.verify_chain(), Ok(()), "{name}: chain alone cannot see a tail edit");
+        assert_eq!(
+            t.verify_chain(),
+            Ok(()),
+            "{name}: chain alone cannot see a tail edit"
+        );
         assert_eq!(
             t.verify_snapshot(&head),
             Err(SnapshotError::HashMismatch),
@@ -147,7 +199,10 @@ fn the_tail_is_unanchored_by_construction_and_a_snapshot_pins_it() {
     truncated.pop();
     let truncated = rehydrate(truncated);
     assert_eq!(truncated.verify_chain(), Ok(()));
-    assert_eq!(truncated.verify_snapshot(&head), Err(SnapshotError::OutOfRange));
+    assert_eq!(
+        truncated.verify_snapshot(&head),
+        Err(SnapshotError::OutOfRange)
+    );
 }
 
 #[test]
@@ -157,24 +212,46 @@ fn content_tampers_break_the_commitment_even_on_the_tail() {
     // different content hash — on the tail as much as anywhere.
     let log = three();
     let cases: Vec<Tamper> = vec![
-        ("op edit", Box::new(|e: &mut Entry| e.content.ops[0] = set("name", "MALLORY"))),
+        (
+            "op edit",
+            Box::new(|e: &mut Entry| e.content.ops[0] = set("name", "MALLORY")),
+        ),
         (
             "origin edit",
             Box::new(|e: &mut Entry| e.content.origin = Origin::Overridden { superseded: None }),
         ),
-        ("note added", Box::new(|e: &mut Entry| e.content.note = Some("quiet fix".into()))),
-        ("meta salt", Box::new(|e: &mut Entry| e.salts.meta = Salt([42; 32]))),
-        ("op salt", Box::new(|e: &mut Entry| e.salts.ops[0] = Salt([42; 32]))),
+        (
+            "note added",
+            Box::new(|e: &mut Entry| e.content.note = Some("quiet fix".into())),
+        ),
+        (
+            "meta salt",
+            Box::new(|e: &mut Entry| e.salts.meta = Salt([42; 32])),
+        ),
+        (
+            "op salt",
+            Box::new(|e: &mut Entry| e.salts.ops[0] = Salt([42; 32])),
+        ),
     ];
     for at in [1usize, 2] {
         for (name, tamper) in &cases {
             let t = tampered(&log, at, tamper);
-            assert_eq!(t.verify_chain(), Err(ChainError::ContentMismatch { at }), "{name} at {at}");
+            assert_eq!(
+                t.verify_chain(),
+                Err(ChainError::ContentMismatch { at }),
+                "{name} at {at}"
+            );
         }
     }
     // A note edit (not just an addition).
     let mut with_note = RecordLog::new(RecordId::new("r1"));
-    let mut d = draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]);
+    let mut d = draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    );
     d.note = Some("original".into());
     with_note.append(d).unwrap();
     let t = tampered(&with_note, 0, |e| e.content.note = Some("edited".into()));
@@ -202,10 +279,25 @@ fn identical_content_under_different_salts_commits_differently() {
     // hash-wise, and both verify.
     let mut a = RecordLog::new(RecordId::new("r1"));
     let mut b = RecordLog::new(RecordId::new("r1"));
-    a.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
-    let mut d = draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]);
-    d.salts = EntrySalts { meta: Salt([200; 32]), ops: vec![Salt([201; 32])] };
+    a.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
+    let mut d = draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    );
+    d.salts = EntrySalts {
+        meta: Salt([200; 32]),
+        ops: vec![Salt([201; 32])],
+    };
     b.append(d).unwrap();
     let (ea, eb) = (&a.entries()[0], &b.entries()[0]);
     assert_eq!(ea.content, eb.content);
@@ -219,14 +311,30 @@ fn identical_content_under_different_salts_commits_differently() {
 fn a_base_version_ahead_of_the_log_is_refused() {
     let mut log = three();
     let before = log.entries().to_vec();
-    let refused = log.append(draft(human("a1"), 3, 4, Origin::Entered, vec![set("name", "x")]));
+    let refused = log.append(draft(
+        human("a1"),
+        3,
+        4,
+        Origin::Entered,
+        vec![set("name", "x")],
+    ));
     assert_eq!(
         refused.map(|_| ()),
-        Err(AppendError::BaseVersionAhead { base: 4, version: 3 })
+        Err(AppendError::BaseVersionAhead {
+            base: 4,
+            version: 3
+        })
     );
     assert_eq!(log.entries(), before.as_slice());
     // base == version is the ordinary case.
-    log.append(draft(human("a1"), 3, 3, Origin::Entered, vec![set("name", "x")])).unwrap();
+    log.append(draft(
+        human("a1"),
+        3,
+        3,
+        Origin::Entered,
+        vec![set("name", "x")],
+    ))
+    .unwrap();
 }
 
 #[test]
@@ -241,9 +349,21 @@ fn golden_vectors_pin_the_canonical_shapes() {
         "sha256:eb725b7004da0a5173ed5a17aa39416bb48cd1db7c6aa7a3b03a802964953eee"
     );
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(human("a1"), 0, 0, Origin::Entered, vec![set("name", "Dupont")]))
-        .unwrap();
+    log.append(draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("name", "Dupont")],
+    ))
+    .unwrap();
     let entry = &log.entries()[0];
-    assert_eq!(entry.envelope.content_hash.to_string(), "sha256:de5e446fcda1406826033c9b7f651cf5b89ef7822cf615b6e4bedda6fca9f9fc");
-    assert_eq!(entry.hash().to_string(), "sha256:eb7310677e58a7cda78e2ae36da42ace8a38fa4978fc8f79669b819d2d51d4ce");
+    assert_eq!(
+        entry.envelope.content_hash.to_string(),
+        "sha256:de5e446fcda1406826033c9b7f651cf5b89ef7822cf615b6e4bedda6fca9f9fc"
+    );
+    assert_eq!(
+        entry.hash().to_string(),
+        "sha256:eb7310677e58a7cda78e2ae36da42ace8a38fa4978fc8f79669b819d2d51d4ce"
+    );
 }

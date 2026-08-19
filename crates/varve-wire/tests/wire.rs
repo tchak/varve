@@ -10,8 +10,8 @@ use varve_schema::{
 use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, Op, RecordValues, Scalar};
 use varve_wire::{
     ImportError, Intent, ItemLine, Line, Manifest, Mode, ReadError, RecordLine,
-    SnapshotImportRequest, SnapshotRecord, WriteError, adopt_history, import_snapshot,
-    read_stream, snapshot_records, test_salts, write_history, write_lines, write_snapshot,
+    SnapshotImportRequest, SnapshotRecord, WriteError, adopt_history, import_snapshot, read_stream,
+    snapshot_records, test_salts, write_history, write_lines, write_snapshot,
 };
 
 fn schema() -> Schema {
@@ -49,7 +49,10 @@ fn set(column: &str, value: &str) -> Op {
 fn draft(minute: u8, base: u64, ops: Vec<Op>) -> Draft {
     let n = ops.len();
     Draft {
-        actor: Actor { id: "a1".into(), kind: ActorKind::Human },
+        actor: Actor {
+            id: "a1".into(),
+            kind: ActorKind::Human,
+        },
         timestamp: Instant::parse(&format!("2026-08-17T10:{minute:02}:00Z")).unwrap(),
         revision: revision_id(&schema()),
         base_version: base,
@@ -102,13 +105,18 @@ fn with_rib() -> Schema {
 }
 
 fn schema_lines() -> Vec<Line> {
-    vec![Line::Revision { id: revision_id(&schema()), schema: schema() }]
+    vec![Line::Revision {
+        id: revision_id(&schema()),
+        schema: schema(),
+    }]
 }
 
 fn sample_log() -> RecordLog {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(0, 0, vec![set("name", "Dupont")])).unwrap();
-    log.append(draft(1, 1, vec![set("name", "Durand")])).unwrap();
+    log.append(draft(0, 0, vec![set("name", "Dupont")]))
+        .unwrap();
+    log.append(draft(1, 1, vec![set("name", "Durand")]))
+        .unwrap();
     log
 }
 
@@ -121,7 +129,8 @@ fn history_round_trip_is_byte_stable_and_verifiable() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &log)],
-    ).unwrap();
+    )
+    .unwrap();
 
     let stream = read_stream(&bytes).unwrap();
     // Re-emitting the parsed lines yields the identical bytes.
@@ -152,7 +161,8 @@ fn snapshot_round_trip_and_import_as_log_entry() {
             lens: revision_id(&schema()),
             values: folded.clone(),
         }],
-    ).unwrap();
+    )
+    .unwrap();
     let stream = read_stream(&bytes).unwrap();
     assert_eq!(write_lines(&stream.lines).unwrap(), bytes);
 
@@ -162,7 +172,10 @@ fn snapshot_round_trip_and_import_as_log_entry() {
     let mut store = BTreeMap::new();
     let salts = test_salts(7);
     let request = SnapshotImportRequest {
-        actor: Actor { id: "importer".into(), kind: ActorKind::System },
+        actor: Actor {
+            id: "importer".into(),
+            kind: ActorKind::System,
+        },
         timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
         revision: revision_id(&schema()),
         note: Some("import".into()),
@@ -186,11 +199,17 @@ fn record_and_item_lines_pin_canonical_shapes() {
     // JSON value with ES6 numbers. Changing these bytes changes hashes.
     let mut values = RecordValues::new();
     values.cells.insert(
-        CellAddr { column: ColumnId::new("n"), path: RowPath::root() },
+        CellAddr {
+            column: ColumnId::new("n"),
+            path: RowPath::root(),
+        },
         CellState::Value(CellValue::One(Scalar::Integer(i64::MAX))),
     );
     values.cells.insert(
-        CellAddr { column: ColumnId::new("blank"), path: RowPath::root() },
+        CellAddr {
+            column: ColumnId::new("blank"),
+            path: RowPath::root(),
+        },
         CellState::Empty,
     );
     values.cells.insert(
@@ -203,20 +222,35 @@ fn record_and_item_lines_pin_canonical_shapes() {
         )))),
     );
     let contacts = GroupId::new("contacts");
-    let item = |i: &str| RowPath::root().child(PathSeg { group: contacts.clone(), item: ItemId::new(i) });
+    let item = |i: &str| {
+        RowPath::root().child(PathSeg {
+            group: contacts.clone(),
+            item: ItemId::new(i),
+        })
+    };
     values.items.insert(
-        ItemsAddr { group: contacts.clone(), parent: RowPath::root() },
+        ItemsAddr {
+            group: contacts.clone(),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("c1"), ItemId::new("c2")],
     );
     values.cells.insert(
-        CellAddr { column: ColumnId::new("tags"), path: item("c2") },
+        CellAddr {
+            column: ColumnId::new("tags"),
+            path: item("c2"),
+        },
         CellState::Value(CellValue::Many(vec![
             Scalar::Enum(OptionId::new("a")),
             Scalar::Enum(OptionId::new("b")),
         ])),
     );
     let lens = revision_id(&schema());
-    let rec = SnapshotRecord { record: RecordId::new("r1"), lens: lens.clone(), values };
+    let rec = SnapshotRecord {
+        record: RecordId::new("r1"),
+        lens: lens.clone(),
+        values,
+    };
     let lines = rec.lines();
     let text = String::from_utf8(write_lines(&lines).unwrap()).unwrap();
     assert_eq!(
@@ -247,11 +281,18 @@ fn record_and_item_lines_pin_canonical_shapes() {
     let bad = text.replace(r#""integer":"9223372036854775807""#, r#""integer":"007""#);
     let mut bytes = write_lines(&prelude).unwrap();
     bytes.extend_from_slice(bad.as_bytes());
-    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 3, .. })));
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
     // Nor can the writer produce one: a count beyond the safe range is
     // a `WriteError`, not a rounded number and not a panic.
     assert!(matches!(
-        write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 9007199254740993))]),
+        write_lines(&[Line::Header(manifest(
+            Mode::Snapshot,
+            Intent::Upsert,
+            9007199254740993
+        ))]),
         Err(WriteError::Canonical { line: 1, .. })
     ));
     // And on the read side a too-large count literal is a double, which
@@ -260,7 +301,10 @@ fn record_and_item_lines_pin_canonical_shapes() {
     let bad = String::from_utf8(bad)
         .unwrap()
         .replace(r#""record_count":1"#, r#""record_count":9007199254740993"#);
-    assert!(matches!(read_stream(bad.as_bytes()), Err(ReadError::Malformed { line: 1, .. })));
+    assert!(matches!(
+        read_stream(bad.as_bytes()),
+        Err(ReadError::Malformed { line: 1, .. })
+    ));
 }
 
 #[test]
@@ -287,7 +331,12 @@ fn item_lines_obey_the_contiguity_rule() {
             cells: Default::default(),
         })
     };
-    let g1 = |i: &str| RowPath::root().child(PathSeg { group: GroupId::new("g1"), item: ItemId::new(i) });
+    let g1 = |i: &str| {
+        RowPath::root().child(PathSeg {
+            group: GroupId::new("g1"),
+            item: ItemId::new(i),
+        })
+    };
     let stream = |lines: &[Line]| {
         let mut b = header.clone();
         b.extend_from_slice(&write_lines(lines).unwrap());
@@ -305,21 +354,35 @@ fn item_lines_obey_the_contiguity_rule() {
     let records = snapshot_records(&s);
     assert_eq!(records.len(), 2);
     assert_eq!(
-        records[0].values.items[&ItemsAddr { group: GroupId::new("g1"), parent: RowPath::root() }],
+        records[0].values.items[&ItemsAddr {
+            group: GroupId::new("g1"),
+            parent: RowPath::root()
+        }],
         vec![ItemId::new("a"), ItemId::new("b")]
     );
     assert_eq!(
-        records[0].values.items[&ItemsAddr { group: GroupId::new("g2"), parent: g1("a") }],
+        records[0].values.items[&ItemsAddr {
+            group: GroupId::new("g2"),
+            parent: g1("a")
+        }],
         vec![ItemId::new("x")]
     );
     // Item for a record that is not the open one.
     assert!(matches!(
-        stream(&[rec("r1"), rec("r2"), item("r1", "g1", RowPath::root(), "a", 0)]),
+        stream(&[
+            rec("r1"),
+            rec("r2"),
+            item("r1", "g1", RowPath::root(), "a", 0)
+        ]),
         Err(ReadError::Malformed { line: 5, .. })
     ));
     // Ord out of sequence.
     assert!(matches!(
-        stream(&[rec("r1"), item("r1", "g1", RowPath::root(), "a", 1), rec("r2")]),
+        stream(&[
+            rec("r1"),
+            item("r1", "g1", RowPath::root(), "a", 1),
+            rec("r2")
+        ]),
         Err(ReadError::Malformed { line: 4, .. })
     ));
     // Child before its parent.
@@ -338,7 +401,10 @@ fn item_lines_obey_the_contiguity_rule() {
         Err(ReadError::Malformed { line: 5, .. })
     ));
     // Duplicate record: a stream is authoritative for a record once.
-    assert!(matches!(stream(&[rec("r1"), rec("r1")]), Err(ReadError::Malformed { line: 4, .. })));
+    assert!(matches!(
+        stream(&[rec("r1"), rec("r1")]),
+        Err(ReadError::Malformed { line: 4, .. })
+    ));
 }
 
 #[test]
@@ -363,12 +429,21 @@ fn reader_refuses_the_alternative_blank_encodings() {
     // stream is authoritative for each cell once — malformed, never
     // last-wins.
     let dup = with(r#""tags":null,"tags":{"text":"x"}"#);
-    assert!(matches!(read_stream(&dup), Err(ReadError::Malformed { line: 3, .. })));
+    assert!(matches!(
+        read_stream(&dup),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
     let empty_many = with(r#""tags":[]"#);
-    assert!(matches!(read_stream(&empty_many), Err(ReadError::Malformed { line: 3, .. })));
+    assert!(matches!(
+        read_stream(&empty_many),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
     // The old wrapped shapes are not the encoding.
     let wrapped = with(r#""tags":{"many":[{"option":"a"}]}"#);
-    assert!(matches!(read_stream(&wrapped), Err(ReadError::Malformed { line: 3, .. })));
+    assert!(matches!(
+        read_stream(&wrapped),
+        Err(ReadError::Malformed { line: 3, .. })
+    ));
     // Strict scalars: one value, one text — a multi-kind scalar object,
     // an unknown key, a non-normalized decimal or datetime, uppercase or
     // signed hex are all refused rather than read as something.
@@ -380,7 +455,13 @@ fn reader_refuses_the_alternative_blank_encodings() {
         r#""x":{"attachment":{"id":"f","hash":"sha256:+f00000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1}}"#,
         r#""x":{"attachment":{"id":"f","hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","filename":"f","content_type":"a/b","byte_size":1,"extra":1}}"#,
     ] {
-        assert!(matches!(read_stream(&with(bad)), Err(ReadError::Malformed { line: 3, .. })), "{bad}");
+        assert!(
+            matches!(
+                read_stream(&with(bad)),
+                Err(ReadError::Malformed { line: 3, .. })
+            ),
+            "{bad}"
+        );
     }
     assert!(read_stream(&with(r#""x":{"decimal":"1.5"}"#)).is_ok());
 }
@@ -392,7 +473,8 @@ fn intent_makes_id_mismatches_fail_loudly() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    ).unwrap();
+    )
+    .unwrap();
     let stream = read_stream(&bytes).unwrap();
     // create-only into a store that already has r1: rejected.
     let mut store = BTreeMap::from([(record.clone(), sample_log())]);
@@ -406,7 +488,8 @@ fn intent_makes_id_mismatches_fail_loudly() {
         manifest(Mode::History, Intent::UpdateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    ).unwrap();
+    )
+    .unwrap();
     let stream = read_stream(&bytes).unwrap();
     let mut empty = BTreeMap::new();
     assert!(matches!(
@@ -422,9 +505,13 @@ fn imports_are_all_or_nothing() {
     let fresh = RecordId::new("fresh");
     let old = RecordId::new("old");
     let mut old_log = RecordLog::new(old.clone());
-    old_log.append(draft(0, 0, vec![set("name", "Old")])).unwrap();
+    old_log
+        .append(draft(0, 0, vec![set("name", "Old")]))
+        .unwrap();
     let mut fresh_log = RecordLog::new(fresh.clone());
-    fresh_log.append(draft(0, 0, vec![set("name", "New")])).unwrap();
+    fresh_log
+        .append(draft(0, 0, vec![set("name", "New")]))
+        .unwrap();
 
     // History mode.
     let bytes = write_history(
@@ -435,8 +522,13 @@ fn imports_are_all_or_nothing() {
     .unwrap();
     let stream = read_stream(&bytes).unwrap();
     let mut store = BTreeMap::from([(old.clone(), old_log.clone())]);
-    assert!(matches!(adopt_history(&stream, &mut store), Err(ImportError::AlreadyExists(r)) if r == old));
-    assert!(!store.contains_key(&fresh), "first record was created despite the failure");
+    assert!(
+        matches!(adopt_history(&stream, &mut store), Err(ImportError::AlreadyExists(r)) if r == old)
+    );
+    assert!(
+        !store.contains_key(&fresh),
+        "first record was created despite the failure"
+    );
     assert_eq!(store.len(), 1);
 
     // Snapshot mode.
@@ -445,24 +537,41 @@ fn imports_are_all_or_nothing() {
         manifest(Mode::Snapshot, Intent::CreateOnly, 2),
         schema_lines(),
         &[
-            SnapshotRecord { record: fresh.clone(), lens: revision_id(&schema()), values: folded(&fresh_log) },
-            SnapshotRecord { record: old.clone(), lens: revision_id(&schema()), values: folded(&old_log) },
+            SnapshotRecord {
+                record: fresh.clone(),
+                lens: revision_id(&schema()),
+                values: folded(&fresh_log),
+            },
+            SnapshotRecord {
+                record: old.clone(),
+                lens: revision_id(&schema()),
+                values: folded(&old_log),
+            },
         ],
     )
     .unwrap();
     let stream = read_stream(&bytes).unwrap();
     let salts = test_salts(3);
     let request = SnapshotImportRequest {
-        actor: Actor { id: "importer".into(), kind: ActorKind::System },
+        actor: Actor {
+            id: "importer".into(),
+            kind: ActorKind::System,
+        },
         timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
         revision: revision_id(&schema()),
         note: None,
         salts_for: &salts,
     };
     let mut store = BTreeMap::from([(old.clone(), old_log.clone())]);
-    assert!(matches!(import_snapshot(&stream, &mut store, &request), Err(ImportError::AlreadyExists(r)) if r == old));
+    assert!(
+        matches!(import_snapshot(&stream, &mut store, &request), Err(ImportError::AlreadyExists(r)) if r == old)
+    );
     assert!(!store.contains_key(&fresh));
-    assert_eq!(store[&old].entries().len(), 1, "existing record was touched despite the failure");
+    assert_eq!(
+        store[&old].entries().len(),
+        1,
+        "existing record was touched despite the failure"
+    );
 }
 
 #[test]
@@ -485,11 +594,21 @@ fn a_schema_at_the_nesting_bound_survives_the_wire() {
             included_from: None,
         });
     }
-    let deep = Schema { root: vec![el], resolvers: vec![] };
+    let deep = Schema {
+        root: vec![el],
+        resolvers: vec![],
+    };
     assert_eq!(varve_schema::validate(&deep, policy), vec![]);
     let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
     m.revisions = vec![revision_id(&deep)];
-    let bytes = write_lines(&[Line::Header(m), Line::Revision { id: revision_id(&deep), schema: deep.clone() }]).unwrap();
+    let bytes = write_lines(&[
+        Line::Header(m),
+        Line::Revision {
+            id: revision_id(&deep),
+            schema: deep.clone(),
+        },
+    ])
+    .unwrap();
     let stream = read_stream(&bytes).unwrap();
     assert!(matches!(&stream.lines[1], Line::Revision { schema, .. } if schema == &deep));
 }
@@ -498,9 +617,15 @@ fn a_schema_at_the_nesting_bound_survives_the_wire() {
 fn writers_refuse_a_manifest_of_the_other_mode() {
     // History and snapshot never mix (§5): a real error, in release too.
     let m = manifest(Mode::Snapshot, Intent::Upsert, 0);
-    assert!(matches!(write_history(m, schema_lines(), &[]), Err(WriteError::Mode(Mode::Snapshot))));
+    assert!(matches!(
+        write_history(m, schema_lines(), &[]),
+        Err(WriteError::Mode(Mode::Snapshot))
+    ));
     let m = manifest(Mode::History, Intent::Upsert, 0);
-    assert!(matches!(write_snapshot(m, schema_lines(), &[]), Err(WriteError::Mode(Mode::History))));
+    assert!(matches!(
+        write_snapshot(m, schema_lines(), &[]),
+        Err(WriteError::Mode(Mode::History))
+    ));
 }
 
 #[test]
@@ -511,10 +636,17 @@ fn history_upsert_extends_or_diverges() {
     let record = RecordId::new("r1");
     let mut two = sample_log();
     let mut three = two.clone();
-    three.append(draft(2, 2, vec![set("name", "Third")])).unwrap();
+    three
+        .append(draft(2, 2, vec![set("name", "Third")]))
+        .unwrap();
     let export = |log: &RecordLog| {
         read_stream(
-            &write_history(manifest(Mode::History, Intent::Upsert, 1), schema_lines(), &[(record.clone(), log)]).unwrap(),
+            &write_history(
+                manifest(Mode::History, Intent::Upsert, 1),
+                schema_lines(),
+                &[(record.clone(), log)],
+            )
+            .unwrap(),
         )
         .unwrap()
     };
@@ -525,12 +657,18 @@ fn history_upsert_extends_or_diverges() {
     assert_eq!(store[&record].entries().len(), 3);
     // Shorter: not an extension.
     let mut store = BTreeMap::from([(record.clone(), three.clone())]);
-    assert!(matches!(adopt_history(&export(&two), &mut store), Err(ImportError::Diverges(r)) if r == record));
+    assert!(
+        matches!(adopt_history(&export(&two), &mut store), Err(ImportError::Diverges(r)) if r == record)
+    );
     assert_eq!(store[&record].entries().len(), 3);
     // Diverging at the last entry.
-    two.append(draft(2, 2, vec![set("name", "Other third")])).unwrap();
+    two.append(draft(2, 2, vec![set("name", "Other third")]))
+        .unwrap();
     let mut store = BTreeMap::from([(record.clone(), three)]);
-    assert!(matches!(adopt_history(&export(&two), &mut store), Err(ImportError::Diverges(_))));
+    assert!(matches!(
+        adopt_history(&export(&two), &mut store),
+        Err(ImportError::Diverges(_))
+    ));
 }
 
 #[test]
@@ -540,9 +678,12 @@ fn tampered_history_is_rejected_on_import() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record.clone(), &sample_log())],
-    ).unwrap();
+    )
+    .unwrap();
     // Rewrite a value inside the exported bytes.
-    let text = String::from_utf8(bytes).unwrap().replace("Dupont", "Martin");
+    let text = String::from_utf8(bytes)
+        .unwrap()
+        .replace("Dupont", "Martin");
     let stream = read_stream(text.as_bytes()).unwrap();
     let mut store = BTreeMap::new();
     assert!(matches!(
@@ -564,8 +705,12 @@ fn history_with_an_unsalted_op_is_rejected_at_the_reader() {
         manifest(Mode::History, Intent::CreateOnly, 1),
         schema_lines(),
         &[(record, &tampered)],
-    ).unwrap();
-    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { .. })));
+    )
+    .unwrap();
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::Malformed { .. })
+    ));
 }
 
 #[test]
@@ -578,20 +723,24 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
     // Not JSON.
     let bad = format!(
         "{}\nnot json\n",
-        String::from_utf8(write_lines(&[Line::Header(manifest(
-            Mode::History,
-            Intent::Upsert,
-            0
-        ))]).unwrap())
+        String::from_utf8(
+            write_lines(&[Line::Header(manifest(Mode::History, Intent::Upsert, 0))]).unwrap()
+        )
         .unwrap()
         .trim_end()
     );
-    assert!(matches!(read_stream(bad.as_bytes()), Err(ReadError::Json { line: 2 })));
+    assert!(matches!(
+        read_stream(bad.as_bytes()),
+        Err(ReadError::Json { line: 2 })
+    ));
     // Unsupported version.
     let mut m = manifest(Mode::History, Intent::Upsert, 0);
     m.format_version = 99;
     let bytes = write_lines(&[Line::Header(m)]).unwrap();
-    assert!(matches!(read_stream(&bytes), Err(ReadError::UnsupportedVersion(99))));
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::UnsupportedVersion(99))
+    ));
 
     // A record line in a history stream: two sources of truth, rejected.
     let mixed = write_lines(&[
@@ -601,7 +750,8 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
             lens: RevisionId::new("x"),
             cells: Default::default(),
         }),
-    ]).unwrap();
+    ])
+    .unwrap();
     assert!(matches!(
         read_stream(&mixed),
         Err(ReadError::ModeMismatch { line: 2, .. })
@@ -611,7 +761,10 @@ fn reader_fails_fast_and_rejects_mixed_modes() {
     let short = write_lines(&[Line::Header(manifest(Mode::History, Intent::Upsert, 3))]).unwrap();
     assert!(matches!(
         read_stream(&short),
-        Err(ReadError::RecordCountMismatch { expected: 3, got: 0 })
+        Err(ReadError::RecordCountMismatch {
+            expected: 3,
+            got: 0
+        })
     ));
 }
 
@@ -620,18 +773,30 @@ fn reader_checks_versions_first_and_revisions_for_consistency() {
     // A header from another version may not have this version's shape:
     // the verdict must be "unsupported version", not "malformed".
     let foreign = br#"{"format_version":7,"k":"header","something":"else"}"#;
-    assert!(matches!(read_stream(foreign), Err(ReadError::UnsupportedVersion(7))));
+    assert!(matches!(
+        read_stream(foreign),
+        Err(ReadError::UnsupportedVersion(7))
+    ));
 
     // A revision line whose id is not its schema's hash lies about
     // identity.
     let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))];
-    lines.push(Line::Revision { id: RevisionId::new("bogus"), schema: schema() });
+    lines.push(Line::Revision {
+        id: RevisionId::new("bogus"),
+        schema: schema(),
+    });
     let bytes = write_lines(&lines).unwrap();
-    assert!(matches!(read_stream(&bytes), Err(ReadError::Malformed { line: 2, .. })));
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::Malformed { line: 2, .. })
+    ));
 
     // The manifest declares exactly the revisions the stream carries.
     let bytes = write_lines(&[Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))]).unwrap();
-    assert!(matches!(read_stream(&bytes), Err(ReadError::RevisionsMismatch)));
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::RevisionsMismatch)
+    ));
 
     // A lens the stream does not carry: the data would arrive without
     // its schema.
@@ -640,20 +805,30 @@ fn reader_checks_versions_first_and_revisions_for_consistency() {
     m.revisions.push(other.clone());
     let mut lines = vec![Line::Header(m)];
     lines.extend(schema_lines());
-    lines.push(Line::Revision { id: other, schema: Schema::default() });
+    lines.push(Line::Revision {
+        id: other,
+        schema: Schema::default(),
+    });
     lines.push(Line::Record(RecordLine {
         record: RecordId::new("r1"),
         lens: RevisionId::new("elsewhere"),
         cells: Default::default(),
     }));
     let bytes = write_lines(&lines).unwrap();
-    assert!(matches!(read_stream(&bytes), Err(ReadError::RevisionNotCarried(r)) if r == RevisionId::new("elsewhere")));
+    assert!(
+        matches!(read_stream(&bytes), Err(ReadError::RevisionNotCarried(r)) if r == RevisionId::new("elsewhere"))
+    );
 
     // Unknown keys on a line are refused.
     let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0))];
     lines.extend(schema_lines());
-    let text = String::from_utf8(write_lines(&lines).unwrap()).unwrap().replace(r#""k":"revision""#, r#""k":"revision","junk":1"#);
-    assert!(matches!(read_stream(text.as_bytes()), Err(ReadError::Malformed { line: 2, .. })));
+    let text = String::from_utf8(write_lines(&lines).unwrap())
+        .unwrap()
+        .replace(r#""k":"revision""#, r#""k":"revision","junk":1"#);
+    assert!(matches!(
+        read_stream(text.as_bytes()),
+        Err(ReadError::Malformed { line: 2, .. })
+    ));
 }
 
 #[test]
@@ -662,7 +837,10 @@ fn schema_and_nomenclature_lines_round_trip() {
     header.revisions.push(revision_id(&with_rib()));
     let lines = vec![
         Line::Header(header),
-        Line::Revision { id: revision_id(&schema()), schema: schema() },
+        Line::Revision {
+            id: revision_id(&schema()),
+            schema: schema(),
+        },
         Line::Nomenclature {
             id: varve_core::NomenclatureId::new("cog"),
             version: 3,
@@ -680,7 +858,10 @@ fn schema_and_nomenclature_lines_round_trip() {
         // A published block travels like a nomenclature (§2.1); a
         // schema that includes it carries the provenance.
         Line::Block(rib_block()),
-        Line::Revision { id: revision_id(&with_rib()), schema: with_rib() },
+        Line::Revision {
+            id: revision_id(&with_rib()),
+            schema: with_rib(),
+        },
     ];
     let bytes = write_lines(&lines).unwrap();
     let stream = read_stream(&bytes).unwrap();
@@ -694,7 +875,9 @@ fn schema_and_nomenclature_lines_round_trip() {
     let rec = Line::Record(RecordLine {
         record: RecordId::new("r9"),
         lens: revision_id(&schema()),
-        cells: [(ColumnId::new("name"), CellState::Empty)].into_iter().collect(),
+        cells: [(ColumnId::new("name"), CellState::Empty)]
+            .into_iter()
+            .collect(),
     });
     let mut lines = vec![Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 1))];
     lines.extend(schema_lines());

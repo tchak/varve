@@ -207,13 +207,16 @@ pub fn scalar_cast(
                 .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
             let to_ids = option_ids(b, nomenclatures)
                 .map_err(|(id, v)| CastError::UnknownNomenclature(id, v))?;
-            let ids = if from_ids.is_subset(&to_ids) { Cast::WIDENING } else { Cast::CHECKED };
+            let ids = if from_ids.is_subset(&to_ids) {
+                Cast::WIDENING
+            } else {
+                Cast::CHECKED
+            };
             let binding = match (a, b) {
-                (NomenclatureRef::Published { id: x, .. }, NomenclatureRef::Published { id: y, .. })
-                    if x == y =>
-                {
-                    Cast::WIDENING
-                }
+                (
+                    NomenclatureRef::Published { id: x, .. },
+                    NomenclatureRef::Published { id: y, .. },
+                ) if x == y => Cast::WIDENING,
                 (NomenclatureRef::Published { .. }, _) => Cast::LOSSY,
                 _ => Cast::WIDENING,
             };
@@ -263,9 +266,7 @@ fn number_cast(repr: Cast, from: Option<Unit>, to: Option<Unit>) -> Cast {
         (a, b) if a == b => repr,
         (None, Some(_)) => repr.and(Cast::WIDENING),
         (Some(_), None) => repr.and(Cast::LOSSY),
-        (Some(a), Some(b)) if a.dimension() == b.dimension() => {
-            repr.and(Cast::CHECKED)
-        }
+        (Some(a), Some(b)) if a.dimension() == b.dimension() => repr.and(Cast::CHECKED),
         _ => Cast::FORBIDDEN,
     }
 }
@@ -323,21 +324,15 @@ pub fn scalar_join(
     match (a, b) {
         // §2.15: union of accepts (either-unrestricted wins), max of
         // limits — always an upper bound, always Direct.
-        (Attachment(x), Attachment(y)) => {
-            Ok((Attachment(attachment_join(x, y)), JoinPath::Direct))
-        }
+        (Attachment(x), Attachment(y)) => Ok((Attachment(attachment_join(x, y)), JoinPath::Direct)),
         (Integer(a), Integer(b)) => Ok(number_join(false, *a, *b)),
-        (Integer(a), Decimal(b))
-        | (Decimal(a), Integer(b))
-        | (Decimal(a), Decimal(b)) => Ok(number_join(true, *a, *b)),
+        (Integer(a), Decimal(b)) | (Decimal(a), Integer(b)) | (Decimal(a), Decimal(b)) => {
+            Ok(number_join(true, *a, *b))
+        }
         (Date, Datetime) | (Datetime, Date) => Ok((Datetime, JoinPath::Direct)),
         (Enum(x), Enum(y)) => enum_join(x, y, nomenclatures),
-        (Text, other) | (other, Text) if widens_to_text(other) => {
-            Ok((Text, JoinPath::Direct))
-        }
-        (a, b) if widens_to_text(a) && widens_to_text(b) => {
-            Ok((Text, JoinPath::ViaText))
-        }
+        (Text, other) | (other, Text) if widens_to_text(other) => Ok((Text, JoinPath::Direct)),
+        (a, b) if widens_to_text(a) && widens_to_text(b) => Ok((Text, JoinPath::ViaText)),
         _ => Err(JoinConflict::Incompatible),
     }
 }
@@ -364,8 +359,14 @@ fn enum_join(
 ) -> Result<(ScalarType, JoinPath), JoinConflict> {
     match (x, y) {
         (
-            NomenclatureRef::Published { id: xi, version: xv },
-            NomenclatureRef::Published { id: yi, version: yv },
+            NomenclatureRef::Published {
+                id: xi,
+                version: xv,
+            },
+            NomenclatureRef::Published {
+                id: yi,
+                version: yv,
+            },
         ) if xi == yi => Ok((
             ScalarType::Enum(NomenclatureRef::Published {
                 id: xi.clone(),
@@ -424,11 +425,7 @@ fn enum_join(
 /// (conversion is checked, not widening; the unitless type is *below*
 /// both, not above), so the genuine LUB is `Text`, reported `ViaText`
 /// (§5.5).
-fn number_join(
-    decimal: bool,
-    a: Option<Unit>,
-    b: Option<Unit>,
-) -> (ScalarType, JoinPath) {
+fn number_join(decimal: bool, a: Option<Unit>, b: Option<Unit>) -> (ScalarType, JoinPath) {
     let unit = match (a, b) {
         (None, None) => None,
         (Some(x), Some(y)) if x == y => Some(x),
@@ -443,16 +440,12 @@ fn number_join(
     (ty, JoinPath::Direct)
 }
 
-fn attachment_join(
-    a: &AttachmentConstraints,
-    b: &AttachmentConstraints,
-) -> AttachmentConstraints {
+fn attachment_join(a: &AttachmentConstraints, b: &AttachmentConstraints) -> AttachmentConstraints {
     let (a, b) = (&a.normalized(), &b.normalized());
     let accept = if a.accept.is_empty() || b.accept.is_empty() {
         Vec::new() // unrestricted is the top
     } else {
-        let mut union: Vec<String> =
-            a.accept.iter().chain(&b.accept).cloned().collect();
+        let mut union: Vec<String> = a.accept.iter().chain(&b.accept).cloned().collect();
         union.sort();
         union.dedup();
         union
@@ -511,8 +504,14 @@ mod tests {
         let n = no_noms();
         let cast = |a: &ScalarType, b: &ScalarType| scalar_cast(a, b, &n).unwrap();
         assert_eq!(cast(&Text, &Text).class(), CastClass::Identity);
-        assert_eq!(cast(&Integer(None), &Decimal(None)).class(), CastClass::Widening);
-        assert_eq!(cast(&Decimal(None), &Integer(None)).class(), CastClass::Checked);
+        assert_eq!(
+            cast(&Integer(None), &Decimal(None)).class(),
+            CastClass::Widening
+        );
+        assert_eq!(
+            cast(&Decimal(None), &Integer(None)).class(),
+            CastClass::Checked
+        );
         assert_eq!(cast(&Date, &Datetime).class(), CastClass::Widening);
         assert_eq!(cast(&Datetime, &Date).class(), CastClass::Lossy);
         assert_eq!(cast(&Integer(None), &Text).class(), CastClass::Widening);
@@ -540,7 +539,10 @@ mod tests {
         assert_eq!(cast(&m, &Integer(None)).class(), CastClass::Lossy);
         // Two free casts never compose into what the direct cast refuses:
         // day → none is lossy, so day → none → week is not free.
-        assert_eq!(cast(&Integer(Some(Unit::Day)), &Integer(Some(Unit::Week))).class(), CastClass::Checked);
+        assert_eq!(
+            cast(&Integer(Some(Unit::Day)), &Integer(Some(Unit::Week))).class(),
+            CastClass::Checked
+        );
         // Cross-dimension: no cast (days ↔ months included).
         assert_eq!(cast(&m, &month).class(), CastClass::Forbidden);
         assert_eq!(
@@ -583,24 +585,64 @@ mod tests {
         use ScalarType::Enum;
         let cog = NomenclatureId::new("cog");
         let mut n = NomenclatureTable::new();
-        n.insert(cog.clone(), 1, vec![OptionRow { id: OptionId::new("01"), label: "Ain".into(), fields: vec![] }]);
+        n.insert(
+            cog.clone(),
+            1,
+            vec![OptionRow {
+                id: OptionId::new("01"),
+                label: "Ain".into(),
+                fields: vec![],
+            }],
+        );
         n.insert(
             cog.clone(),
             2,
             vec![
-                OptionRow { id: OptionId::new("01"), label: "Ain".into(), fields: vec![] },
-                OptionRow { id: OptionId::new("02"), label: "Aisne".into(), fields: vec![] },
+                OptionRow {
+                    id: OptionId::new("01"),
+                    label: "Ain".into(),
+                    fields: vec![],
+                },
+                OptionRow {
+                    id: OptionId::new("02"),
+                    label: "Aisne".into(),
+                    fields: vec![],
+                },
             ],
         );
-        let v1 = Enum(NomenclatureRef::Published { id: cog.clone(), version: 1 });
-        let v2 = Enum(NomenclatureRef::Published { id: cog.clone(), version: 2 });
+        let v1 = Enum(NomenclatureRef::Published {
+            id: cog.clone(),
+            version: 1,
+        });
+        let v2 = Enum(NomenclatureRef::Published {
+            id: cog.clone(),
+            version: 2,
+        });
         assert!(scalar_cast(&v1, &v2, &n).unwrap().is_widening());
         assert!(scalar_cast(&v2, &v1, &n).unwrap().checked);
         // Rows resolve at the declared version — never the latest.
-        assert_eq!(nomenclature_rows(&NomenclatureRef::Published { id: cog.clone(), version: 1 }, &n).unwrap().len(), 1);
+        assert_eq!(
+            nomenclature_rows(
+                &NomenclatureRef::Published {
+                    id: cog.clone(),
+                    version: 1
+                },
+                &n
+            )
+            .unwrap()
+            .len(),
+            1
+        );
         // An unknown *version* is unknown, even when the id is known.
         assert_eq!(
-            scalar_cast(&v1, &Enum(NomenclatureRef::Published { id: cog.clone(), version: 3 }), &n),
+            scalar_cast(
+                &v1,
+                &Enum(NomenclatureRef::Published {
+                    id: cog.clone(),
+                    version: 3
+                }),
+                &n
+            ),
             Err(CastError::UnknownNomenclature(cog, 3))
         );
     }
@@ -617,15 +659,27 @@ mod tests {
             accept: vec!["Application/PDF".into(), "IMAGE/*".into(), "image/*".into()],
             max_bytes: None,
         });
-        assert_eq!(scalar_cast(&a, &b, &n).unwrap().class(), CastClass::Identity);
-        assert_eq!(crate::scalar_type_canonical_for_test(&a), crate::scalar_type_canonical_for_test(&b));
+        assert_eq!(
+            scalar_cast(&a, &b, &n).unwrap().class(),
+            CastClass::Identity
+        );
+        assert_eq!(
+            crate::scalar_type_canonical_for_test(&a),
+            crate::scalar_type_canonical_for_test(&b)
+        );
         // Claims are matched case-insensitively and without parameters.
-        let c = AttachmentConstraints { accept: vec!["image/*".into()], max_bytes: None };
+        let c = AttachmentConstraints {
+            accept: vec!["image/*".into()],
+            max_bytes: None,
+        };
         assert!(c.accepts("IMAGE/PNG"));
         assert!(c.accepts("image/png; charset=binary"));
         assert!(!c.accepts("application/pdf"));
         // `*/*` is unrestricted.
-        let any = AttachmentConstraints { accept: vec!["*/*".into()], max_bytes: None };
+        let any = AttachmentConstraints {
+            accept: vec!["*/*".into()],
+            max_bytes: None,
+        };
         assert!(any.accepts("video/mp4"));
         assert_eq!(any.normalized().accept, Vec::<String>::new());
     }
@@ -638,22 +692,56 @@ mod tests {
         // never Text when a published enum bounds both.
         use ScalarType::Enum;
         let mut n = NomenclatureTable::new();
-        let row = |id: &str| OptionRow { id: OptionId::new(id), label: id.into(), fields: vec![] };
+        let row = |id: &str| OptionRow {
+            id: OptionId::new(id),
+            label: id.into(),
+            fields: vec![],
+        };
         n.insert(NomenclatureId::new("pays"), 1, vec![row("FR"), row("DE")]);
         n.insert(NomenclatureId::new("cog"), 1, vec![row("FR")]);
-        let pays = Enum(NomenclatureRef::Published { id: NomenclatureId::new("pays"), version: 1 });
-        let cog = Enum(NomenclatureRef::Published { id: NomenclatureId::new("cog"), version: 1 });
+        let pays = Enum(NomenclatureRef::Published {
+            id: NomenclatureId::new("pays"),
+            version: 1,
+        });
+        let cog = Enum(NomenclatureRef::Published {
+            id: NomenclatureId::new("cog"),
+            version: 1,
+        });
         let inline_fr = Enum(inline(&[("FR", "France")]));
         let inline_xx = Enum(inline(&[("XX", "Nowhere")]));
-        assert_eq!(scalar_cast(&inline_fr, &pays, &n).unwrap().class(), CastClass::Widening);
-        assert_eq!(scalar_cast(&pays, &inline_fr, &n).unwrap().class(), CastClass::Checked); // DE has nowhere to go
+        assert_eq!(
+            scalar_cast(&inline_fr, &pays, &n).unwrap().class(),
+            CastClass::Widening
+        );
+        assert_eq!(
+            scalar_cast(&pays, &inline_fr, &n).unwrap().class(),
+            CastClass::Checked
+        ); // DE has nowhere to go
         assert!(scalar_cast(&pays, &inline_fr, &n).unwrap().lossy);
-        assert_eq!(scalar_cast(&cog, &inline_fr, &n).unwrap().class(), CastClass::Lossy);
-        assert_eq!(scalar_cast(&cog, &pays, &n).unwrap().class(), CastClass::Lossy); // ids ⊆, binding switched
-        assert_eq!(scalar_join(&inline_fr, &pays, &n).unwrap(), (pays.clone(), JoinPath::Direct));
-        assert_eq!(scalar_join(&pays, &inline_fr, &n).unwrap(), (pays.clone(), JoinPath::Direct));
-        assert_eq!(scalar_join(&inline_xx, &pays, &n).unwrap(), (ScalarType::Text, JoinPath::ViaText));
-        assert_eq!(scalar_join(&cog, &pays, &n).unwrap(), (ScalarType::Text, JoinPath::ViaText));
+        assert_eq!(
+            scalar_cast(&cog, &inline_fr, &n).unwrap().class(),
+            CastClass::Lossy
+        );
+        assert_eq!(
+            scalar_cast(&cog, &pays, &n).unwrap().class(),
+            CastClass::Lossy
+        ); // ids ⊆, binding switched
+        assert_eq!(
+            scalar_join(&inline_fr, &pays, &n).unwrap(),
+            (pays.clone(), JoinPath::Direct)
+        );
+        assert_eq!(
+            scalar_join(&pays, &inline_fr, &n).unwrap(),
+            (pays.clone(), JoinPath::Direct)
+        );
+        assert_eq!(
+            scalar_join(&inline_xx, &pays, &n).unwrap(),
+            (ScalarType::Text, JoinPath::ViaText)
+        );
+        assert_eq!(
+            scalar_join(&cog, &pays, &n).unwrap(),
+            (ScalarType::Text, JoinPath::ViaText)
+        );
     }
 
     #[test]
@@ -675,7 +763,10 @@ mod tests {
         use ScalarType::*;
         let n = no_noms();
         assert!(arity_cast(Arity::One, Arity::Many).is_widening());
-        assert_eq!(arity_cast(Arity::Many, Arity::One).class(), CastClass::Lossy);
+        assert_eq!(
+            arity_cast(Arity::Many, Arity::One).class(),
+            CastClass::Lossy
+        );
         // Decimal-many → Integer-one: checked (per element) AND lossy
         // (arity) at once — why Cast is properties, not one enum.
         let cast = column_cast(
@@ -693,7 +784,10 @@ mod tests {
         use ScalarType::*;
         let n = no_noms();
         let join = |a: &ScalarType, b: &ScalarType| scalar_join(a, b, &n).unwrap();
-        assert_eq!(join(&Integer(None), &Decimal(None)), (Decimal(None), JoinPath::Direct));
+        assert_eq!(
+            join(&Integer(None), &Decimal(None)),
+            (Decimal(None), JoinPath::Direct)
+        );
         assert_eq!(join(&Date, &Datetime), (Datetime, JoinPath::Direct));
         assert_eq!(join(&Integer(None), &Text), (Text, JoinPath::Direct));
         // Neither side is text: the LUB is Text but it must be reported.
@@ -736,7 +830,10 @@ mod tests {
         // Same id, different label: a rename (§2.11) — ids kept, the
         // right-hand label wins; both sides widen to the result.
         let c = Enum(inline(&[("o1", "Rouge")]));
-        assert_eq!(scalar_join(&a, &c, &n).unwrap(), (c.clone(), JoinPath::Direct));
+        assert_eq!(
+            scalar_join(&a, &c, &n).unwrap(),
+            (c.clone(), JoinPath::Direct)
+        );
         assert!(scalar_cast(&a, &c, &n).unwrap().is_widening());
         // Same published nomenclature: higher version (append-only §2.11).
         let v1 = Enum(NomenclatureRef::Published {

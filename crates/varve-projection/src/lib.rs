@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use varve_core::primitives::Decimal;
 use varve_core::{ColumnId, OptionId};
 use varve_schema::{
-    Arity, CastError, ColumnInfo, NomenclatureTable, ScalarType, Schema,
-    SchemaIndex, Unit, column_cast, conversion, nomenclature_rows,
+    Arity, CastError, ColumnInfo, NomenclatureTable, ScalarType, Schema, SchemaIndex, Unit,
+    column_cast, conversion, nomenclature_rows,
 };
 use varve_value::{CellState, CellValue, RecordValues, Scalar};
 
@@ -155,8 +155,13 @@ pub fn project(
     // routed to its column's cast, or dropped as the report already
     // says (added/scope-moved/forbidden/writer-only).
     for (addr, state) in &values.cells {
-        let Some((winfo, rinfo)) = castable.get(&addr.column) else { continue };
-        let column_report = report.columns.get_mut(&addr.column).expect("inserted above");
+        let Some((winfo, rinfo)) = castable.get(&addr.column) else {
+            continue;
+        };
+        let column_report = report
+            .columns
+            .get_mut(&addr.column)
+            .expect("inserted above");
         match project_state(state, winfo, rinfo, nomenclatures)? {
             Outcome::Kept { state, lossy } => {
                 column_report.cells_projected += 1;
@@ -221,9 +226,7 @@ fn project_state(
     let (scalars, mut lossy): (Vec<&Scalar>, bool) = match (value, reader.arity) {
         (CellValue::One(s), _) => (vec![s], false),
         (CellValue::Many(list), Arity::Many) => (list.iter().collect(), false),
-        (CellValue::Many(list), Arity::One) => {
-            (list.iter().take(1).collect(), list.len() > 1)
-        }
+        (CellValue::Many(list), Arity::One) => (list.iter().take(1).collect(), list.len() > 1),
     };
 
     let mut projected = Vec::with_capacity(scalars.len());
@@ -350,14 +353,12 @@ fn project_scalar(
             }
         }
         (_, T::Text) => ok(Scalar::Text(render_text(scalar)?)),
-        (T::Text, T::Integer(_)) => {
-            text(scalar, |s| s.parse().ok().map(Scalar::Integer))
-        }
-        (T::Text, T::Decimal(_)) => {
-            text(scalar, |s| Decimal::parse(s).ok().map(Scalar::Decimal))
-        }
+        (T::Text, T::Integer(_)) => text(scalar, |s| s.parse().ok().map(Scalar::Integer)),
+        (T::Text, T::Decimal(_)) => text(scalar, |s| Decimal::parse(s).ok().map(Scalar::Decimal)),
         (T::Text, T::Date) => text(scalar, |s| {
-            varve_core::primitives::Date::parse(s).ok().map(Scalar::Date)
+            varve_core::primitives::Date::parse(s)
+                .ok()
+                .map(Scalar::Date)
         }),
         (T::Text, T::Datetime) => text(scalar, |s| {
             varve_core::primitives::Instant::parse(s)
@@ -387,11 +388,7 @@ fn project_scalar(
 /// (unit added/removed) passes the value through; a within-dimension
 /// change converts on exact rationals or fails; a cross-dimension pair
 /// never gets here (the cast table forbids the column).
-fn convert_number(
-    value: Decimal,
-    from: Option<Unit>,
-    to: Option<Unit>,
-) -> Option<Decimal> {
+fn convert_number(value: Decimal, from: Option<Unit>, to: Option<Unit>) -> Option<Decimal> {
     match (from, to) {
         (None, None) => Some(value),
         (None, Some(_)) | (Some(_), None) => Some(value),
@@ -411,7 +408,10 @@ fn unit_dropped(from: Option<Unit>, to: Option<Unit>) -> bool {
 
 /// §2.12: a published nomenclature binding dropped (→ inline) or
 /// switched (→ another nomenclature) is lossy the same way.
-fn binding_dropped(from: &varve_schema::NomenclatureRef, to: &varve_schema::NomenclatureRef) -> bool {
+fn binding_dropped(
+    from: &varve_schema::NomenclatureRef,
+    to: &varve_schema::NomenclatureRef,
+) -> bool {
     use varve_schema::NomenclatureRef as N;
     match (from, to) {
         (N::Published { id: a, .. }, N::Published { id: b, .. }) => a != b,

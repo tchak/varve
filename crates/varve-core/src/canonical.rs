@@ -229,7 +229,11 @@ impl std::str::FromStr for ContentHash {
         let hex = s.strip_prefix("sha256:").ok_or(ParseHashError)?;
         // Lowercase hex only: one address, one text (`from_str_radix`
         // would also take `+` and uppercase).
-        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
             return Err(ParseHashError);
         }
         let mut digest = [0u8; 32];
@@ -292,12 +296,7 @@ mod tests {
     use super::*;
 
     fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
-        CanonicalValue::Object(
-            pairs
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-        )
+        CanonicalValue::Object(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
     }
 
     fn bytes(value: &CanonicalValue) -> String {
@@ -308,15 +307,26 @@ mod tests {
     fn integers_are_jcs_safe_or_refused() {
         // Within ±(2^53 − 1) an integer renders as its digits — the same
         // bytes ES6 produces for the integral double.
-        assert_eq!(bytes(&CanonicalValue::Int(MAX_SAFE_INTEGER)), "9007199254740991");
-        assert_eq!(bytes(&CanonicalValue::Int(-MAX_SAFE_INTEGER)), "-9007199254740991");
+        assert_eq!(
+            bytes(&CanonicalValue::Int(MAX_SAFE_INTEGER)),
+            "9007199254740991"
+        );
+        assert_eq!(
+            bytes(&CanonicalValue::Int(-MAX_SAFE_INTEGER)),
+            "-9007199254740991"
+        );
         assert_eq!(bytes(&CanonicalValue::Int(0)), "0");
         assert_eq!(
             bytes(&CanonicalValue::Int(MAX_SAFE_INTEGER)),
             bytes(&CanonicalValue::Float(MAX_SAFE_INTEGER as f64))
         );
         // Beyond it, a double cannot hold the value: refuse, never round.
-        for i in [MAX_SAFE_INTEGER + 1, -(MAX_SAFE_INTEGER + 1), i64::MAX, i64::MIN + 1] {
+        for i in [
+            MAX_SAFE_INTEGER + 1,
+            -(MAX_SAFE_INTEGER + 1),
+            i64::MAX,
+            i64::MIN + 1,
+        ] {
             assert_eq!(
                 canonical_bytes(&CanonicalValue::Int(i)),
                 Err(CanonicalError::UnsafeInteger(i))
@@ -334,10 +344,7 @@ mod tests {
         let value = obj(vec![
             ("b", CanonicalValue::Int(2)),
             ("a", CanonicalValue::Null),
-            (
-                "s",
-                CanonicalValue::String("a\"b\\c\n\u{0f}€/".to_string()),
-            ),
+            ("s", CanonicalValue::String("a\"b\\c\n\u{0f}€/".to_string())),
             (
                 "arr",
                 CanonicalValue::Array(vec![
@@ -387,11 +394,7 @@ mod tests {
             (1e-27, "1e-27"),
         ];
         for (input, expected) in cases {
-            assert_eq!(
-                format_es6_number(*input),
-                *expected,
-                "for input {input:e}"
-            );
+            assert_eq!(format_es6_number(*input), *expected, "for input {input:e}");
         }
         assert_eq!(
             canonical_bytes(&CanonicalValue::Float(f64::NAN)),

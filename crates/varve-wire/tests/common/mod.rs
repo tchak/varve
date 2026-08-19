@@ -57,8 +57,10 @@ pub fn instant() -> impl Strategy<Value = Instant> {
     )
         .prop_map(|(y, mo, d, h, mi, s, frac, offset)| {
             let frac = frac.map(|f| format!(".{f}")).unwrap_or_default();
-            Instant::parse(&format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}{offset}"))
-                .unwrap()
+            Instant::parse(&format!(
+                "{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}{frac}{offset}"
+            ))
+            .unwrap()
         })
 }
 
@@ -130,18 +132,32 @@ pub fn record_values() -> impl Strategy<Value = RecordValues> {
         proptest::option::of((
             ids(),
             proptest::collection::btree_map(("[a-z]{1,3}", "[a-z0-9]{1,3}"), state(), 0..4),
-            proptest::option::of((ids(), proptest::collection::btree_map("[a-z]{1,3}", state(), 0..3))),
+            proptest::option::of((
+                ids(),
+                proptest::collection::btree_map("[a-z]{1,3}", state(), 0..3),
+            )),
         )),
     )
         .prop_map(|(root, g1)| {
             let mut v = RecordValues::new();
             for (column, state) in root {
-                v.cells.insert(CellAddr { column: ColumnId::new(column), path: RowPath::root() }, state);
+                v.cells.insert(
+                    CellAddr {
+                        column: ColumnId::new(column),
+                        path: RowPath::root(),
+                    },
+                    state,
+                );
             }
-            let Some((items, item_cells, nested)) = g1 else { return v };
+            let Some((items, item_cells, nested)) = g1 else {
+                return v;
+            };
             let g1 = GroupId::new("g1");
             v.items.insert(
-                ItemsAddr { group: g1.clone(), parent: RowPath::root() },
+                ItemsAddr {
+                    group: g1.clone(),
+                    parent: RowPath::root(),
+                },
                 items.iter().map(ItemId::new).collect(),
             );
             for ((column, item), state) in item_cells {
@@ -149,21 +165,45 @@ pub fn record_values() -> impl Strategy<Value = RecordValues> {
                 if !items.contains(&item) {
                     continue;
                 }
-                let path = RowPath::root().child(PathSeg { group: g1.clone(), item: ItemId::new(item) });
-                v.cells.insert(CellAddr { column: ColumnId::new(column), path }, state);
+                let path = RowPath::root().child(PathSeg {
+                    group: g1.clone(),
+                    item: ItemId::new(item),
+                });
+                v.cells.insert(
+                    CellAddr {
+                        column: ColumnId::new(column),
+                        path,
+                    },
+                    state,
+                );
             }
             if let Some((sub_ids, sub_cells)) = nested {
                 let first = ItemId::new(items.iter().next().expect("non-empty"));
-                let parent = RowPath::root().child(PathSeg { group: g1.clone(), item: first });
+                let parent = RowPath::root().child(PathSeg {
+                    group: g1.clone(),
+                    item: first,
+                });
                 let g2 = GroupId::new("g2");
                 v.items.insert(
-                    ItemsAddr { group: g2.clone(), parent: parent.clone() },
+                    ItemsAddr {
+                        group: g2.clone(),
+                        parent: parent.clone(),
+                    },
                     sub_ids.iter().map(ItemId::new).collect(),
                 );
                 let sub = ItemId::new(sub_ids.iter().next().expect("non-empty"));
-                let path = parent.child(PathSeg { group: g2, item: sub });
+                let path = parent.child(PathSeg {
+                    group: g2,
+                    item: sub,
+                });
                 for (column, state) in sub_cells {
-                    v.cells.insert(CellAddr { column: ColumnId::new(column), path: path.clone() }, state);
+                    v.cells.insert(
+                        CellAddr {
+                            column: ColumnId::new(column),
+                            path: path.clone(),
+                        },
+                        state,
+                    );
                 }
             }
             v
@@ -171,7 +211,10 @@ pub fn record_values() -> impl Strategy<Value = RecordValues> {
 }
 
 fn seg(group: &str, item: &str) -> PathSeg {
-    PathSeg { group: GroupId::new(group), item: ItemId::new(item) }
+    PathSeg {
+        group: GroupId::new(group),
+        item: ItemId::new(item),
+    }
 }
 
 fn items(pool: &'static [&'static str]) -> impl Strategy<Value = Vec<ItemId>> {
@@ -193,9 +236,16 @@ pub fn shared_universe_values() -> impl Strategy<Value = RecordValues> {
             items(&["j1", "j2"]),
             0..=3,
         ),
-        proptest::collection::btree_map(prop_oneof![Just("a"), Just("b"), Just("c")], state(), 0..=3),
         proptest::collection::btree_map(
-            (prop_oneof![Just("a"), Just("b")], prop_oneof![Just("i1"), Just("i2"), Just("i3")]),
+            prop_oneof![Just("a"), Just("b"), Just("c")],
+            state(),
+            0..=3,
+        ),
+        proptest::collection::btree_map(
+            (
+                prop_oneof![Just("a"), Just("b")],
+                prop_oneof![Just("i1"), Just("i2"), Just("i3")],
+            ),
             state(),
             0..=4,
         ),
@@ -212,7 +262,13 @@ pub fn shared_universe_values() -> impl Strategy<Value = RecordValues> {
         .prop_map(|(g1, nested, root_cells, g1_cells, g2_cells)| {
             let mut v = RecordValues::new();
             if !g1.is_empty() {
-                v.items.insert(ItemsAddr { group: GroupId::new("g1"), parent: RowPath::root() }, g1.clone());
+                v.items.insert(
+                    ItemsAddr {
+                        group: GroupId::new("g1"),
+                        parent: RowPath::root(),
+                    },
+                    g1.clone(),
+                );
             }
             for i in &g1 {
                 if let Some(js) = nested.get(i.as_str())
@@ -228,12 +284,21 @@ pub fn shared_universe_values() -> impl Strategy<Value = RecordValues> {
                 }
             }
             for (c, state) in root_cells {
-                v.cells.insert(CellAddr { column: ColumnId::new(c), path: RowPath::root() }, state);
+                v.cells.insert(
+                    CellAddr {
+                        column: ColumnId::new(c),
+                        path: RowPath::root(),
+                    },
+                    state,
+                );
             }
             for ((c, i), state) in g1_cells {
                 if g1.contains(&ItemId::new(i)) {
                     v.cells.insert(
-                        CellAddr { column: ColumnId::new(c), path: RowPath::root().child(seg("g1", i)) },
+                        CellAddr {
+                            column: ColumnId::new(c),
+                            path: RowPath::root().child(seg("g1", i)),
+                        },
                         state,
                     );
                 }
@@ -262,7 +327,10 @@ pub fn lens() -> RevisionId {
 }
 
 pub fn revision_line() -> Line {
-    Line::Revision { id: lens(), schema: Schema::default() }
+    Line::Revision {
+        id: lens(),
+        schema: Schema::default(),
+    }
 }
 
 pub fn manifest(mode: Mode, intent: Intent, record_count: u64) -> Manifest {

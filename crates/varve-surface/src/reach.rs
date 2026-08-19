@@ -29,15 +29,15 @@ impl Reachability {
 
 /// Every item path a scope chain expands to on this record (depth-N
 /// ready; one hop at depth 1).
-pub(crate) fn paths_for_scope(
-    scope: &[GroupId],
-    values: &RecordValues,
-) -> Vec<RowPath> {
+pub(crate) fn paths_for_scope(scope: &[GroupId], values: &RecordValues) -> Vec<RowPath> {
     let mut paths = vec![RowPath::root()];
     for group in scope {
         let mut next = Vec::new();
         for parent in paths {
-            let addr = ItemsAddr { group: group.clone(), parent: parent.clone() };
+            let addr = ItemsAddr {
+                group: group.clone(),
+                parent: parent.clone(),
+            };
             if let Some(items) = values.items.get(&addr) {
                 for item in items {
                     next.push(parent.child(PathSeg {

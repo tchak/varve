@@ -4,9 +4,8 @@
 use proptest::prelude::*;
 use varve_core::{NomenclatureId, OptionId};
 use varve_schema::{
-    Arity, AttachmentConstraints, JoinPath, NomenclatureRef, NomenclatureTable,
-    OptionRow, ScalarType, Unit, arity_join, column_join, scalar_cast,
-    scalar_join,
+    Arity, AttachmentConstraints, JoinPath, NomenclatureRef, NomenclatureTable, OptionRow,
+    ScalarType, Unit, arity_join, column_join, scalar_cast, scalar_join,
 };
 
 /// Small id/label alphabets force collisions, merges, and label
@@ -31,7 +30,11 @@ fn inline_enum() -> impl Strategy<Value = ScalarType> {
 }
 
 fn row(id: &str, label: &str) -> OptionRow {
-    OptionRow { id: OptionId::new(id), label: label.into(), fields: vec![] }
+    OptionRow {
+        id: OptionId::new(id),
+        label: label.into(),
+        fields: vec![],
+    }
 }
 
 /// The table every law runs against: one published nomenclature in two
@@ -40,13 +43,20 @@ fn row(id: &str, label: &str) -> OptionRow {
 fn table() -> NomenclatureTable {
     let mut n = NomenclatureTable::new();
     n.insert(NomenclatureId::new("cog"), 1, vec![row("01", "Ain")]);
-    n.insert(NomenclatureId::new("cog"), 2, vec![row("01", "Ain"), row("02", "Aisne")]);
+    n.insert(
+        NomenclatureId::new("cog"),
+        2,
+        vec![row("01", "Ain"), row("02", "Aisne")],
+    );
     n.insert(NomenclatureId::new("pays"), 1, vec![row("FR", "France")]);
     n
 }
 
 fn published(id: &str, version: u32) -> ScalarType {
-    ScalarType::Enum(NomenclatureRef::Published { id: NomenclatureId::new(id), version })
+    ScalarType::Enum(NomenclatureRef::Published {
+        id: NomenclatureId::new(id),
+        version,
+    })
 }
 
 fn scalar_type() -> impl Strategy<Value = ScalarType> {

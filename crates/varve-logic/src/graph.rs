@@ -18,17 +18,14 @@ pub struct RuleCycle {
 
 /// Check the dependency graph (column → its rule's sources) is acyclic;
 /// return a topological evaluation order over the ruled columns.
-pub fn check_acyclic(
-    rules: &BTreeMap<ColumnId, Expr>,
-) -> Result<Vec<ColumnId>, RuleCycle> {
+pub fn check_acyclic(rules: &BTreeMap<ColumnId, Expr>) -> Result<Vec<ColumnId>, RuleCycle> {
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
         Unvisited,
         InProgress,
         Done,
     }
-    let mut marks: BTreeMap<&ColumnId, Mark> =
-        rules.keys().map(|c| (c, Mark::Unvisited)).collect();
+    let mut marks: BTreeMap<&ColumnId, Mark> = rules.keys().map(|c| (c, Mark::Unvisited)).collect();
     let mut order = Vec::new();
 
     fn visit<'a>(

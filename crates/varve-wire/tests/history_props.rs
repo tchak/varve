@@ -44,21 +44,37 @@ fn origin() -> impl Strategy<Value = Origin> {
         Just(Origin::Entered),
         derivation().prop_map(Origin::Derived),
         Just(Origin::Overridden { superseded: None }),
-        derivation().prop_map(|d| Origin::Overridden { superseded: Some(d) }),
+        derivation().prop_map(|d| Origin::Overridden {
+            superseded: Some(d)
+        }),
     ]
 }
 
 fn actor() -> impl Strategy<Value = Actor> {
     (
         "[a-z0-9:-]{1,10}",
-        prop_oneof![Just(ActorKind::Human), Just(ActorKind::Resolver), Just(ActorKind::System)],
+        prop_oneof![
+            Just(ActorKind::Human),
+            Just(ActorKind::Resolver),
+            Just(ActorKind::System)
+        ],
     )
         .prop_map(|(id, kind)| Actor { id, kind })
 }
 
 fn meta() -> impl Strategy<Value = Meta> {
-    (actor(), common::instant(), origin(), proptest::option::of("\\PC{0,16}"))
-        .prop_map(|(actor, timestamp, origin, note)| Meta { actor, timestamp, origin, note })
+    (
+        actor(),
+        common::instant(),
+        origin(),
+        proptest::option::of("\\PC{0,16}"),
+    )
+        .prop_map(|(actor, timestamp, origin, note)| Meta {
+            actor,
+            timestamp,
+            origin,
+            note,
+        })
 }
 
 /// One record's history: successive target states, each with the

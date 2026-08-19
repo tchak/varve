@@ -19,7 +19,12 @@ use varve_schema::{
 use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues, Scalar};
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
-    Element::Column(Column { id: ColumnId::new(id), label: id.to_string(), ty, arity })
+    Element::Column(Column {
+        id: ColumnId::new(id),
+        label: id.to_string(),
+        ty,
+        arity,
+    })
 }
 
 /// `(id, label, fields)`.
@@ -31,7 +36,10 @@ fn rows(pairs: &[RowSpec]) -> Vec<OptionRow> {
         .map(|(id, label, fields)| OptionRow {
             id: OptionId::new(*id),
             label: (*label).into(),
-            fields: fields.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
+            fields: fields
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
         })
         .collect()
 }
@@ -85,8 +93,19 @@ fn schema() -> Schema {
 
 /// The schema's columns plus ids it does not have.
 const COLUMNS: &[&str] = &[
-    "situation", "duree", "commune", "tags", "note", "montant", "jour", "horodatage", "ok",
-    "pays", "role", "ghost", "unknown",
+    "situation",
+    "duree",
+    "commune",
+    "tags",
+    "note",
+    "montant",
+    "jour",
+    "horodatage",
+    "ok",
+    "pays",
+    "role",
+    "ghost",
+    "unknown",
 ];
 const OPTIONS: &[&str] = &["oui", "non", "01053", "75056", "FR", "zz"];
 const RESOLVERS: &[&str] = &["insee", "ban", "ghost-r"];
@@ -97,7 +116,10 @@ fn column_ref() -> impl Strategy<Value = ColumnRef> {
         proptest::sample::select(COLUMNS),
         proptest::option::weighted(0.25, proptest::sample::select(FIELDS)),
     )
-        .prop_map(|(c, f)| ColumnRef { column: ColumnId::new(c), field: f.map(String::from) })
+        .prop_map(|(c, f)| ColumnRef {
+            column: ColumnId::new(c),
+            field: f.map(String::from),
+        })
 }
 
 fn date() -> impl Strategy<Value = Date> {
@@ -106,11 +128,17 @@ fn date() -> impl Strategy<Value = Date> {
 }
 
 fn datetime() -> impl Strategy<Value = Instant> {
-    (1900i32..=2100, 1u8..=12, 1u8..=28, 0u8..24, 0u8..60, 0u8..60).prop_map(
-        |(y, mo, d, h, mi, s)| {
-            Instant::parse(&format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")).unwrap()
-        },
+    (
+        1900i32..=2100,
+        1u8..=12,
+        1u8..=28,
+        0u8..24,
+        0u8..60,
+        0u8..60,
     )
+        .prop_map(|(y, mo, d, h, mi, s)| {
+            Instant::parse(&format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")).unwrap()
+        })
 }
 
 fn decimal() -> impl Strategy<Value = Decimal> {
@@ -175,12 +203,14 @@ fn atom() -> impl Strategy<Value = Atom> {
 }
 
 fn expr() -> impl Strategy<Value = Expr> {
-    atom().prop_map(Expr::Atom).prop_recursive(4, 24, 4, |inner| {
-        prop_oneof![
-            proptest::collection::vec(inner.clone(), 0..4).prop_map(Expr::And),
-            proptest::collection::vec(inner, 0..4).prop_map(Expr::Or),
-        ]
-    })
+    atom()
+        .prop_map(Expr::Atom)
+        .prop_recursive(4, 24, 4, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..4).prop_map(Expr::And),
+                proptest::collection::vec(inner, 0..4).prop_map(Expr::Or),
+            ]
+        })
 }
 
 /// Any scalar of any kind — deliberately not matched to the column it
@@ -203,12 +233,16 @@ fn state() -> impl Strategy<Value = CellState> {
         scalar().prop_map(|s| CellState::Value(CellValue::One(s))),
         // Includes the zero-length list conformance forbids: eval must
         // still be total (and read it as absent).
-        proptest::collection::vec(scalar(), 0..3).prop_map(|v| CellState::Value(CellValue::Many(v))),
+        proptest::collection::vec(scalar(), 0..3)
+            .prop_map(|v| CellState::Value(CellValue::Many(v))),
     ]
 }
 
 fn item(group: &str, id: &str) -> RowPath {
-    RowPath::root().child(PathSeg { group: GroupId::new(group), item: ItemId::new(id) })
+    RowPath::root().child(PathSeg {
+        group: GroupId::new(group),
+        item: ItemId::new(id),
+    })
 }
 
 /// Root, an item of `contacts`, or an item of a group the schema does
@@ -224,21 +258,26 @@ fn path() -> impl Strategy<Value = RowPath> {
 
 fn record_values() -> impl Strategy<Value = RecordValues> {
     (
-        proptest::collection::btree_map(
-            (proptest::sample::select(COLUMNS), path()),
-            state(),
-            0..8,
-        ),
+        proptest::collection::btree_map((proptest::sample::select(COLUMNS), path()), state(), 0..8),
         proptest::sample::subsequence(vec!["i1", "i2"], 0..=2),
     )
         .prop_map(|(cells, items)| {
             let mut v = RecordValues::new();
             for ((column, path), state) in cells {
-                v.cells.insert(CellAddr { column: ColumnId::new(column), path }, state);
+                v.cells.insert(
+                    CellAddr {
+                        column: ColumnId::new(column),
+                        path,
+                    },
+                    state,
+                );
             }
             if !items.is_empty() {
                 v.items.insert(
-                    ItemsAddr { group: GroupId::new(CONTACTS), parent: RowPath::root() },
+                    ItemsAddr {
+                        group: GroupId::new(CONTACTS),
+                        parent: RowPath::root(),
+                    },
                     items.into_iter().map(ItemId::new).collect(),
                 );
             }
@@ -267,13 +306,23 @@ struct Situation {
 }
 
 fn situation() -> impl Strategy<Value = Situation> {
-    (record_values(), path(), hidden(), pending())
-        .prop_map(|(values, item, hidden, pending)| Situation { values, item, hidden, pending })
+    (record_values(), path(), hidden(), pending()).prop_map(|(values, item, hidden, pending)| {
+        Situation {
+            values,
+            item,
+            hidden,
+            pending,
+        }
+    })
 }
 
 fn published_table() -> NomenclatureTable {
     let mut t = NomenclatureTable::new();
-    t.insert(NomenclatureId::new("pays"), 1, rows(&[("FR", "France", &[])]));
+    t.insert(
+        NomenclatureId::new("pays"),
+        1,
+        rows(&[("FR", "France", &[])]),
+    );
     t
 }
 
@@ -284,7 +333,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        Self { index: SchemaIndex::build(&schema()), noms: published_table() }
+        Self {
+            index: SchemaIndex::build(&schema()),
+            noms: published_table(),
+        }
     }
 
     fn ctx<'a>(&'a self, s: &'a Situation) -> EvalContext<'a> {
@@ -313,8 +365,14 @@ impl Fixture {
         if prefix.iter().map(|seg| &seg.group).ne(info.scope.iter()) {
             return None;
         }
-        let path = prefix.iter().cloned().fold(RowPath::root(), |p, seg| p.child(seg));
-        match s.values.cells.get(&CellAddr { column: source.column.clone(), path })? {
+        let path = prefix
+            .iter()
+            .cloned()
+            .fold(RowPath::root(), |p, seg| p.child(seg));
+        match s.values.cells.get(&CellAddr {
+            column: source.column.clone(),
+            path,
+        })? {
             CellState::Empty => None,
             CellState::Value(CellValue::Many(items)) if items.is_empty() => None,
             CellState::Value(v) => Some(v),
@@ -487,6 +545,9 @@ fn source_of(a: &Atom) -> Option<ColumnRef> {
         | Atom::Contains { source, .. }
         | Atom::Excludes { source, .. } => Some(source.clone()),
         // Presence atoms are the law's conclusion, not its subject.
-        Atom::IsEmpty { .. } | Atom::IsFilled { .. } | Atom::Pending { .. } | Atom::NotPending { .. } => None,
+        Atom::IsEmpty { .. }
+        | Atom::IsFilled { .. }
+        | Atom::Pending { .. }
+        | Atom::NotPending { .. } => None,
     }
 }

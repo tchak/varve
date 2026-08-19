@@ -4,9 +4,7 @@ use proptest::prelude::*;
 use varve_core::primitives::{Date, Decimal};
 use varve_core::{ColumnId, OptionId, RowPath};
 use varve_projection::project;
-use varve_schema::{
-    Arity, Column, Element, NomenclatureRef, OptionRow, ScalarType, Schema,
-};
+use varve_schema::{Arity, Column, Element, NomenclatureRef, OptionRow, ScalarType, Schema};
 use varve_value::{CellAddr, CellState, CellValue, RecordValues, Scalar, check};
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
@@ -69,62 +67,90 @@ fn reader_variant() -> impl Strategy<Value = Schema> {
     prop_oneof![
         Just(base()),
         Just(Schema {
-            root: base().root.into_iter().map(|e| match e {
-                Element::Column(mut c) if c.id.as_str() == "n" => {
-                    c.ty = ScalarType::Decimal(None);
-                    Element::Column(c)
-                }
-                other => other,
-            }).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .map(|e| match e {
+                    Element::Column(mut c) if c.id.as_str() == "n" => {
+                        c.ty = ScalarType::Decimal(None);
+                        Element::Column(c)
+                    }
+                    other => other,
+                })
+                .collect(),
             resolvers: vec![],
         }),
         Just(Schema {
-            root: base().root.into_iter().map(|e| match e {
-                Element::Column(mut c) if c.id.as_str() == "n" => {
-                    c.ty = ScalarType::Text;
-                    Element::Column(c)
-                }
-                other => other,
-            }).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .map(|e| match e {
+                    Element::Column(mut c) if c.id.as_str() == "n" => {
+                        c.ty = ScalarType::Text;
+                        Element::Column(c)
+                    }
+                    other => other,
+                })
+                .collect(),
             resolvers: vec![],
         }),
         Just(Schema {
-            root: base().root.into_iter().map(|e| match e {
-                Element::Column(mut c) if c.id.as_str() == "choice" => {
-                    c.ty = ScalarType::Text;
-                    Element::Column(c)
-                }
-                other => other,
-            }).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .map(|e| match e {
+                    Element::Column(mut c) if c.id.as_str() == "choice" => {
+                        c.ty = ScalarType::Text;
+                        Element::Column(c)
+                    }
+                    other => other,
+                })
+                .collect(),
             resolvers: vec![],
         }),
         Just(Schema {
-            root: base().root.into_iter().map(|e| match e {
-                Element::Column(mut c) if c.id.as_str() == "tags" => {
-                    c.arity = Arity::One;
-                    Element::Column(c)
-                }
-                other => other,
-            }).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .map(|e| match e {
+                    Element::Column(mut c) if c.id.as_str() == "tags" => {
+                        c.arity = Arity::One;
+                        Element::Column(c)
+                    }
+                    other => other,
+                })
+                .collect(),
             resolvers: vec![],
         }),
         Just(Schema {
-            root: base().root.into_iter().filter(|e| !matches!(e, Element::Column(c) if c.id.as_str() == "t")).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .filter(|e| !matches!(e, Element::Column(c) if c.id.as_str() == "t"))
+                .collect(),
             resolvers: vec![],
         }),
         Just(Schema {
-            root: base().root.into_iter().chain([column("added", ScalarType::Boolean, Arity::One)]).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .chain([column("added", ScalarType::Boolean, Arity::One)])
+                .collect(),
             resolvers: vec![],
         }),
         // Text → enum: checked through labels.
         Just(Schema {
-            root: base().root.into_iter().map(|e| match e {
-                Element::Column(mut c) if c.id.as_str() == "t" => {
-                    c.ty = ScalarType::Enum(options());
-                    Element::Column(c)
-                }
-                other => other,
-            }).collect(),
+            root: base()
+                .root
+                .into_iter()
+                .map(|e| match e {
+                    Element::Column(mut c) if c.id.as_str() == "t" => {
+                        c.ty = ScalarType::Enum(options());
+                        Element::Column(c)
+                    }
+                    other => other,
+                })
+                .collect(),
             resolvers: vec![],
         }),
     ]

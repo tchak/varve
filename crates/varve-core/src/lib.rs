@@ -358,7 +358,8 @@ pub mod primitives {
         /// (§3): midnight UTC. Total: every date is within
         /// [`MAX_YEAR`], and so is its midnight.
         pub fn at_midnight_utc(&self) -> Instant {
-            Instant::parse(&format!("{self}T00:00:00Z")).expect("every date's midnight is an instant")
+            Instant::parse(&format!("{self}T00:00:00Z"))
+                .expect("every date's midnight is an instant")
         }
     }
 
@@ -390,7 +391,8 @@ pub mod primitives {
             const ERR: PrimitiveError = PrimitiveError::Malformed("expected RFC 3339 instant");
             let b = s.as_bytes();
             let digits = |range: std::ops::Range<usize>| {
-                b.get(range).is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+                b.get(range)
+                    .is_some_and(|d| d.iter().all(u8::is_ascii_digit))
             };
             // Date + 'T' + HH:MM:SS.
             let ok = b.len() >= 20
@@ -423,7 +425,10 @@ pub mod primitives {
             let offset_ok = match b.get(i) {
                 Some(b'Z') => i + 1 == b.len(),
                 Some(b'+' | b'-') => {
-                    i + 6 == b.len() && digits(i + 1..i + 3) && b[i + 3] == b':' && digits(i + 4..i + 6)
+                    i + 6 == b.len()
+                        && digits(i + 1..i + 3)
+                        && b[i + 3] == b':'
+                        && digits(i + 4..i + 6)
                 }
                 _ => false,
             };
@@ -437,7 +442,10 @@ pub mod primitives {
             // refuse it — an instant is in range iff its UTC date is a
             // `Date`, which is what makes `utc_date` total.
             let rendered = instant.to_string();
-            if rendered.get(..10).is_none_or(|date| Date::parse(date).is_err()) {
+            if rendered
+                .get(..10)
+                .is_none_or(|date| Date::parse(date).is_err())
+            {
                 return Err(ERR);
             }
             Ok(instant)
@@ -539,22 +547,29 @@ pub mod primitives {
             // are refused, so a decoder cannot be fed two texts for one
             // value.
             for liberal in [
-                "2026-08-16 12:00:00Z",       // space separator
-                "2026-08-16t12:00:00z",       // lowercase
-                "2026-08-16T12:00Z",          // no seconds
-                "2026-08-16T12:00:00,5Z",     // comma fraction
-                "2026-08-16T12:00:00.Z",      // bare dot
+                "2026-08-16 12:00:00Z",   // space separator
+                "2026-08-16t12:00:00z",   // lowercase
+                "2026-08-16T12:00Z",      // no seconds
+                "2026-08-16T12:00:00,5Z", // comma fraction
+                "2026-08-16T12:00:00.Z",  // bare dot
                 "2026-08-16T12:00:00+02:00[Europe/Paris]",
-                "2026-08-16T23:59:60Z",       // leap second: no normalized form
-                "2026-08-16T12:00:00+0200",   // offset without colon
-                "-000001-06-01T00:00:00Z",    // signed six-digit year
+                "2026-08-16T23:59:60Z",     // leap second: no normalized form
+                "2026-08-16T12:00:00+0200", // offset without colon
+                "-000001-06-01T00:00:00Z",  // signed six-digit year
                 "+012026-08-16T12:00:00Z",
-                "9998-12-31T23:00:00-02:00",  // normalizes past MAX_YEAR
-                "9999-01-01T00:00:00Z",       // past MAX_YEAR outright
+                "9998-12-31T23:00:00-02:00", // normalizes past MAX_YEAR
+                "9999-01-01T00:00:00Z",      // past MAX_YEAR outright
             ] {
-                assert!(Instant::parse(liberal).is_err(), "{liberal} should be refused");
+                assert!(
+                    Instant::parse(liberal).is_err(),
+                    "{liberal} should be refused"
+                );
             }
-            for strict in ["2026-08-16T12:00:00Z", "0000-01-01T00:00:00Z", "9998-12-31T23:59:59.5Z"] {
+            for strict in [
+                "2026-08-16T12:00:00Z",
+                "0000-01-01T00:00:00Z",
+                "9998-12-31T23:59:59.5Z",
+            ] {
                 let i = Instant::parse(strict).unwrap();
                 // Never panics, always the first ten characters.
                 assert_eq!(i.utc_date().to_string(), &strict[..10]);

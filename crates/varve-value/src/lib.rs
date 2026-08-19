@@ -166,7 +166,9 @@ fn json_to_canonical(v: &serde_json::Value) -> CanonicalValue {
             CanonicalValue::Array(a.iter().map(json_to_canonical).collect())
         }
         serde_json::Value::Object(o) => CanonicalValue::Object(
-            o.iter().map(|(k, v)| (k.clone(), json_to_canonical(v))).collect(),
+            o.iter()
+                .map(|(k, v)| (k.clone(), json_to_canonical(v)))
+                .collect(),
         ),
     }
 }
@@ -186,7 +188,9 @@ fn canonical_to_json(v: &CanonicalValue) -> serde_json::Value {
             serde_json::Value::Array(a.iter().map(canonical_to_json).collect())
         }
         CanonicalValue::Object(o) => serde_json::Value::Object(
-            o.iter().map(|(k, v)| (k.clone(), canonical_to_json(v))).collect(),
+            o.iter()
+                .map(|(k, v)| (k.clone(), canonical_to_json(v)))
+                .collect(),
         ),
     }
 }

@@ -74,10 +74,16 @@ fn rib_defaults() -> BlockDefaults {
     let mut justificatif = col_node("justificatif");
     justificatif.prompt = Some("Justificatif de RIB".into());
     justificatif.required = Some(Expr::Atom(Atom::IsFilled {
-        source: ColumnRef { column: ColumnId::new("iban"), field: None },
+        source: ColumnRef {
+            column: ColumnId::new("iban"),
+            field: None,
+        },
     }));
     BlockDefaults {
-        block: BlockRef { id: BlockId::new("rib"), version: 1 },
+        block: BlockRef {
+            id: BlockId::new("rib"),
+            version: 1,
+        },
         node: GroupNode {
             group: GroupId::new("rib"),
             prompt: Some("Coordonnées bancaires".into()),
@@ -115,40 +121,51 @@ fn both_halves_must_be_self_contained() {
     let noms = Default::default();
     // Defaults naming a column the shell does not own.
     let mut defaults = rib_defaults();
-    defaults.node.children.push(Node::Column(col_node("outsider")));
-    assert!(defaults
-        .validate(&rib_block(), &noms)
-        .iter()
-        .any(|e| matches!(e, BlockDefaultsError::ForeignColumn(c) if c == &ColumnId::new("outsider"))));
+    defaults
+        .node
+        .children
+        .push(Node::Column(col_node("outsider")));
+    assert!(defaults.validate(&rib_block(), &noms).iter().any(
+        |e| matches!(e, BlockDefaultsError::ForeignColumn(c) if c == &ColumnId::new("outsider"))
+    ));
 
     // A rule reading a column outside the block: it would mean
     // different things in different inclusions.
     let mut defaults = rib_defaults();
     if let Node::Column(c) = &mut defaults.node.children[0] {
         c.visibility = Some(Expr::Atom(Atom::IsFilled {
-            source: ColumnRef { column: ColumnId::new("elsewhere"), field: None },
+            source: ColumnRef {
+                column: ColumnId::new("elsewhere"),
+                field: None,
+            },
         }));
     }
-    assert!(defaults
-        .validate(&rib_block(), &noms)
-        .iter()
-        .any(|e| matches!(e, BlockDefaultsError::ForeignRuleSource(..))));
+    assert!(
+        defaults
+            .validate(&rib_block(), &noms)
+            .iter()
+            .any(|e| matches!(e, BlockDefaultsError::ForeignRuleSource(..)))
+    );
 
     // Defaults for another block, or another version.
     let mut defaults = rib_defaults();
     defaults.block.version = 2;
-    assert!(defaults
-        .validate(&rib_block(), &noms)
-        .iter()
-        .any(|e| matches!(e, BlockDefaultsError::WrongBlock(..))));
+    assert!(
+        defaults
+            .validate(&rib_block(), &noms)
+            .iter()
+            .any(|e| matches!(e, BlockDefaultsError::WrongBlock(..)))
+    );
 
     // Halves disagreeing on the group id.
     let mut defaults = rib_defaults();
     defaults.node.group = GroupId::new("other");
-    assert!(defaults
-        .validate(&rib_block(), &noms)
-        .iter()
-        .any(|e| matches!(e, BlockDefaultsError::GroupMismatch(..))));
+    assert!(
+        defaults
+            .validate(&rib_block(), &noms)
+            .iter()
+            .any(|e| matches!(e, BlockDefaultsError::GroupMismatch(..)))
+    );
 
     // Schema side: a resolver mapping into a foreign column.
     let mut block = rib_block();
@@ -157,13 +174,21 @@ fn both_halves_must_be_self_contained() {
         version: 1,
         anchor: GroupId::new("rib"),
         input: vec![(ColumnId::new("iban"), ScalarType::Text)],
-        result_type: vec![ResultField { name: "bic".into(), ty: ScalarType::Text }],
-        mapping: vec![Mapping { result_field: "bic".into(), target: ColumnId::new("elsewhere") }],
+        result_type: vec![ResultField {
+            name: "bic".into(),
+            ty: ScalarType::Text,
+        }],
+        mapping: vec![Mapping {
+            result_field: "bic".into(),
+            target: ColumnId::new("elsewhere"),
+        }],
     });
-    assert!(block
-        .validate(DepthPolicy::default())
-        .iter()
-        .any(|e| matches!(e, varve_schema::BlockError::ForeignResolverColumn(_))));
+    assert!(
+        block
+            .validate(DepthPolicy::default())
+            .iter()
+            .any(|e| matches!(e, varve_schema::BlockError::ForeignResolverColumn(_)))
+    );
 }
 
 #[test]
@@ -190,14 +215,22 @@ fn inclusion_pastes_with_provenance_and_nothing_downstream_knows() {
     surface.revision = revision_id(&schema);
 
     // The included schema and surface validate as ordinary ones.
-    assert_eq!(varve_schema::validate(&schema, DepthPolicy::default()), vec![]);
+    assert_eq!(
+        varve_schema::validate(&schema, DepthPolicy::default()),
+        vec![]
+    );
     assert_eq!(validate(&surface, &schema, &Default::default()), vec![]);
     // And admissibility runs the block's default rules: on a pristine
     // record the IBAN (always required) is missing; the justificatif
     // (required only once IBAN is filled) is not.
-    let report =
-        admissibility(&surface, &schema, &Default::default(), &RecordValues::new(), &BTreeSet::new())
-            .unwrap();
+    let report = admissibility(
+        &surface,
+        &schema,
+        &Default::default(),
+        &RecordValues::new(),
+        &BTreeSet::new(),
+    )
+    .unwrap();
     assert_eq!(report.findings.len(), 1);
     assert!(matches!(
         &report.findings[0],
@@ -208,7 +241,13 @@ fn inclusion_pastes_with_provenance_and_nothing_downstream_knows() {
     // the impact report name a bump).
     assert_eq!(
         included_blocks(&schema),
-        vec![(GroupId::new("rib"), BlockRef { id: BlockId::new("rib"), version: 1 })]
+        vec![(
+            GroupId::new("rib"),
+            BlockRef {
+                id: BlockId::new("rib"),
+                version: 1
+            }
+        )]
     );
     // Provenance is identity-bearing: the same structure typed by hand
     // is a different revision.
@@ -228,19 +267,25 @@ fn inclusion_pastes_with_provenance_and_nothing_downstream_knows() {
     let before = schema.clone();
     assert_eq!(
         block.include_into(&mut schema, None),
-        Err(varve_schema::IncludeError::DuplicateGroup(GroupId::new("rib")))
+        Err(varve_schema::IncludeError::DuplicateGroup(GroupId::new(
+            "rib"
+        )))
     );
     assert_eq!(schema, before);
     let mut fresh = Schema::default();
     assert_eq!(
         block.include_into(&mut fresh, Some(&GroupId::new("nope"))),
-        Err(varve_schema::IncludeError::UnknownContainer(GroupId::new("nope")))
+        Err(varve_schema::IncludeError::UnknownContainer(GroupId::new(
+            "nope"
+        )))
     );
     assert_eq!(fresh, Schema::default());
     let before = surface.clone();
     assert_eq!(
         defaults.include_into(&mut surface, None),
-        Err(varve_surface::IncludeError::DuplicateGroup(GroupId::new("rib")))
+        Err(varve_surface::IncludeError::DuplicateGroup(GroupId::new(
+            "rib"
+        )))
     );
     assert_eq!(surface, before);
 }

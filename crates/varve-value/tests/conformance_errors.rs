@@ -5,8 +5,8 @@ use varve_core::canonical::MAX_SAFE_INTEGER;
 use varve_core::primitives::Date;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RowPath};
 use varve_schema::{
-    Arity, AttachmentConstraints, Cardinality, Column, Element, Group, NomenclatureRef,
-    OptionRow, ScalarType, Schema,
+    Arity, AttachmentConstraints, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
+    ScalarType, Schema,
 };
 use varve_value::{
     AttachmentRef, CellAddr, CellState, CellValue, ConformanceError, Feature, ItemsAddr,
@@ -14,7 +14,12 @@ use varve_value::{
 };
 
 fn column(id: &str, ty: ScalarType, arity: Arity) -> Element {
-    Element::Column(Column { id: ColumnId::new(id), label: id.to_string(), ty, arity })
+    Element::Column(Column {
+        id: ColumnId::new(id),
+        label: id.to_string(),
+        ty,
+        arity,
+    })
 }
 
 fn group(id: &str, cardinality: Cardinality, children: Vec<Element>) -> Element {
@@ -31,7 +36,11 @@ fn tags() -> NomenclatureRef {
     NomenclatureRef::Inline(
         ["o1", "o2"]
             .into_iter()
-            .map(|id| OptionRow { id: OptionId::new(id), label: id.into(), fields: vec![] })
+            .map(|id| OptionRow {
+                id: OptionId::new(id),
+                label: id.into(),
+                fields: vec![],
+            })
             .collect(),
     )
 }
@@ -54,9 +63,17 @@ fn schema() -> Schema {
                 }),
                 Arity::Many,
             ),
-            column("free", ScalarType::Attachment(Default::default()), Arity::One),
+            column(
+                "free",
+                ScalarType::Attachment(Default::default()),
+                Arity::One,
+            ),
             column("geo", ScalarType::Geometry, Arity::One),
-            group("rib", Cardinality::One, vec![column("iban", ScalarType::Text, Arity::One)]),
+            group(
+                "rib",
+                Cardinality::One,
+                vec![column("iban", ScalarType::Text, Arity::One)],
+            ),
             group(
                 "contacts",
                 Cardinality::Many,
@@ -75,7 +92,10 @@ fn schema() -> Schema {
 }
 
 fn root(column: &str) -> CellAddr {
-    CellAddr { column: ColumnId::new(column), path: RowPath::root() }
+    CellAddr {
+        column: ColumnId::new(column),
+        path: RowPath::root(),
+    }
 }
 
 fn one(scalar: Scalar) -> CellState {
@@ -114,18 +134,25 @@ fn errors(v: &RecordValues) -> Vec<ConformanceError> {
 fn unknown_column() {
     let mut v = RecordValues::new();
     v.cells.insert(root("nope"), one(Scalar::Text("x".into())));
-    assert_eq!(errors(&v), vec![ConformanceError::UnknownColumn(ColumnId::new("nope"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::UnknownColumn(ColumnId::new("nope"))]
+    );
     // Empty in an unknown column is still an unknown column.
     let mut v = RecordValues::new();
     v.cells.insert(root("nope"), CellState::Empty);
-    assert_eq!(errors(&v), vec![ConformanceError::UnknownColumn(ColumnId::new("nope"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::UnknownColumn(ColumnId::new("nope"))]
+    );
 }
 
 #[test]
 fn arity_mismatch_both_ways() {
     let mut v = RecordValues::new();
     // A list in a `one` column.
-    v.cells.insert(root("name"), many(vec![Scalar::Text("a".into())]));
+    v.cells
+        .insert(root("name"), many(vec![Scalar::Text("a".into())]));
     // A single value in a `many` column.
     v.cells.insert(root("words"), one(Scalar::Text("a".into())));
     let errs = errors(&v);
@@ -136,17 +163,26 @@ fn arity_mismatch_both_ways() {
     // column is one arity error, not a type error per element.
     let mut v = RecordValues::new();
     v.cells.insert(root("name"), many(vec![Scalar::Integer(1)]));
-    assert_eq!(errors(&v), vec![ConformanceError::ArityMismatch(ColumnId::new("name"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::ArityMismatch(ColumnId::new("name"))]
+    );
 }
 
 #[test]
 fn unknown_group() {
     let mut v = RecordValues::new();
     v.items.insert(
-        ItemsAddr { group: GroupId::new("ghosts"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("ghosts"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("i1")],
     );
-    assert_eq!(errors(&v), vec![ConformanceError::UnknownGroup(GroupId::new("ghosts"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::UnknownGroup(GroupId::new("ghosts"))]
+    );
 }
 
 #[test]
@@ -155,43 +191,73 @@ fn misplaced_items() {
     // items (§2.5).
     let mut v = RecordValues::new();
     v.items.insert(
-        ItemsAddr { group: GroupId::new("rib"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("rib"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("i1")],
     );
-    assert_eq!(errors(&v), vec![ConformanceError::MisplacedItems(GroupId::new("rib"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::MisplacedItems(GroupId::new("rib"))]
+    );
 
     // A `many` group's list at the wrong scope: `phones` lives under a
     // contact, not at the root …
     let mut v = RecordValues::new();
     v.items.insert(
-        ItemsAddr { group: GroupId::new("phones"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("phones"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("p1")],
     );
-    assert_eq!(errors(&v), vec![ConformanceError::MisplacedItems(GroupId::new("phones"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::MisplacedItems(GroupId::new("phones"))]
+    );
     // … and `contacts` lives at the root, not under a contact. The
     // parent path also names an item that exists, so this is purely a
     // scope error.
     let mut v = RecordValues::new();
     v.items.insert(
-        ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("c1")],
     );
-    let under_c1 = RowPath::root().child(PathSeg { group: GroupId::new("contacts"), item: ItemId::new("c1") });
+    let under_c1 = RowPath::root().child(PathSeg {
+        group: GroupId::new("contacts"),
+        item: ItemId::new("c1"),
+    });
     v.items.insert(
-        ItemsAddr { group: GroupId::new("contacts"), parent: under_c1 },
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: under_c1,
+        },
         vec![ItemId::new("c2")],
     );
-    assert_eq!(errors(&v), vec![ConformanceError::MisplacedItems(GroupId::new("contacts"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::MisplacedItems(GroupId::new("contacts"))]
+    );
 }
 
 #[test]
 fn duplicate_item() {
     let mut v = RecordValues::new();
     v.items.insert(
-        ItemsAddr { group: GroupId::new("contacts"), parent: RowPath::root() },
+        ItemsAddr {
+            group: GroupId::new("contacts"),
+            parent: RowPath::root(),
+        },
         vec![ItemId::new("c1"), ItemId::new("c2"), ItemId::new("c1")],
     );
-    assert_eq!(errors(&v), vec![ConformanceError::DuplicateItem(GroupId::new("contacts"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::DuplicateItem(GroupId::new("contacts"))]
+    );
 }
 
 #[test]
@@ -201,9 +267,15 @@ fn duplicate_element_identity() {
     let mut v = RecordValues::new();
     v.cells.insert(
         root("tags"),
-        many(vec![Scalar::Enum(OptionId::new("o1")), Scalar::Enum(OptionId::new("o1"))]),
+        many(vec![
+            Scalar::Enum(OptionId::new("o1")),
+            Scalar::Enum(OptionId::new("o1")),
+        ]),
     );
-    assert_eq!(errors(&v), vec![ConformanceError::DuplicateElement(ColumnId::new("tags"))]);
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::DuplicateElement(ColumnId::new("tags"))]
+    );
 
     // Repeated attachment id — even with different content.
     let mut v = RecordValues::new();
@@ -211,8 +283,12 @@ fn duplicate_element_identity() {
     if let Scalar::Attachment(a) = &mut second {
         a.filename = "other.pdf".into();
     }
-    v.cells.insert(root("files"), many(vec![attachment("f1", 10), second]));
-    assert_eq!(errors(&v), vec![ConformanceError::DuplicateElement(ColumnId::new("files"))]);
+    v.cells
+        .insert(root("files"), many(vec![attachment("f1", 10), second]));
+    assert_eq!(
+        errors(&v),
+        vec![ConformanceError::DuplicateElement(ColumnId::new("files"))]
+    );
 
     // Text elements carry no identity: repeats are not flagged.
     let mut v = RecordValues::new();
@@ -228,7 +304,8 @@ fn attachment_size_unrepresentable() {
     let huge = MAX_SAFE_INTEGER as u64 + 1;
     // With a size limit: too large *and* unrepresentable — both named.
     let mut v = RecordValues::new();
-    v.cells.insert(root("files"), many(vec![attachment("f1", huge)]));
+    v.cells
+        .insert(root("files"), many(vec![attachment("f1", huge)]));
     assert_eq!(
         errors(&v),
         vec![
@@ -241,19 +318,22 @@ fn attachment_size_unrepresentable() {
     v.cells.insert(root("free"), one(attachment("f1", huge)));
     assert_eq!(
         errors(&v),
-        vec![ConformanceError::AttachmentSizeUnrepresentable(ColumnId::new("free"))]
+        vec![ConformanceError::AttachmentSizeUnrepresentable(
+            ColumnId::new("free")
+        )]
     );
     // Exactly the bound is representable.
     let mut v = RecordValues::new();
-    v.cells.insert(root("free"), one(attachment("f1", MAX_SAFE_INTEGER as u64)));
+    v.cells
+        .insert(root("free"), one(attachment("f1", MAX_SAFE_INTEGER as u64)));
     assert_eq!(errors(&v), vec![]);
 }
 
 #[test]
 fn type_mismatch_off_the_diagonal() {
     let cases: Vec<(&str, Scalar)> = vec![
-        ("name", feature()),                       // geometry in a text column
-        ("name", attachment("f1", 10)),            // attachment in a text column
+        ("name", feature()),                        // geometry in a text column
+        ("name", attachment("f1", 10)),             // attachment in a text column
         ("geo", Scalar::Text("POINT(1 2)".into())), // text in a geometry column
         ("free", Scalar::Text("file.pdf".into())),  // text in an attachment column
         ("name", Scalar::Date(Date::parse("2026-08-18").unwrap())),
@@ -272,7 +352,14 @@ fn type_mismatch_off_the_diagonal() {
     }
     // Inside a `many` cell every wrong element is reported.
     let mut v = RecordValues::new();
-    v.cells.insert(root("words"), many(vec![Scalar::Integer(1), Scalar::Text("ok".into()), Scalar::Boolean(false)]));
+    v.cells.insert(
+        root("words"),
+        many(vec![
+            Scalar::Integer(1),
+            Scalar::Text("ok".into()),
+            Scalar::Boolean(false),
+        ]),
+    );
     assert_eq!(
         errors(&v),
         vec![

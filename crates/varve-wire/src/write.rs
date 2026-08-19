@@ -11,12 +11,17 @@ use std::collections::BTreeMap;
 use varve_core::ColumnId;
 use varve_value::CellState;
 
-use crate::line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord, obj, string};
+use crate::line::{
+    Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord, obj, string,
+};
 
 pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
     obj(vec![
         ("k", string("header")),
-        ("format_version", CanonicalValue::Int(i64::from(m.format_version))),
+        (
+            "format_version",
+            CanonicalValue::Int(i64::from(m.format_version)),
+        ),
         ("source_instance", string(&m.source_instance)),
         (
             "mode",
@@ -40,7 +45,11 @@ pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
         ("record_count", CanonicalValue::Int(m.record_count as i64)),
         (
             "attachments",
-            string(if m.attachments_bundled { "bundled" } else { "referenced" }),
+            string(if m.attachments_bundled {
+                "bundled"
+            } else {
+                "referenced"
+            }),
         ),
     ])
 }
@@ -111,7 +120,11 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
             fields.insert("record".into(), string(record));
             CanonicalValue::Object(fields)
         }
-        Line::Attachment { hash, byte_size, content_type } => obj(vec![
+        Line::Attachment {
+            hash,
+            byte_size,
+            content_type,
+        } => obj(vec![
             ("k", string("attachment")),
             ("hash", string(hash)),
             ("byte_size", CanonicalValue::Int(*byte_size as i64)),
@@ -141,8 +154,11 @@ pub enum WriteError {
 pub fn write_lines(lines: &[Line]) -> Result<Vec<u8>, WriteError> {
     let mut out = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        let bytes = canonical_bytes(&line_canonical(line))
-            .map_err(|error| WriteError::Canonical { line: index + 1, error })?;
+        let bytes =
+            canonical_bytes(&line_canonical(line)).map_err(|error| WriteError::Canonical {
+                line: index + 1,
+                error,
+            })?;
         out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
@@ -163,7 +179,10 @@ pub fn write_history(
     lines.extend(schema_lines);
     for (record, log) in records {
         for entry in log.entries() {
-            lines.push(Line::Entry { record: record.clone(), entry: entry.clone() });
+            lines.push(Line::Entry {
+                record: record.clone(),
+                entry: entry.clone(),
+            });
         }
     }
     write_lines(&lines)

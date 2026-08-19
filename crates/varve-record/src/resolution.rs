@@ -55,7 +55,10 @@ pub enum ResolutionStatus {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TransitionError {
     #[error("illegal resolution transition {from:?} → {to:?}")]
-    Illegal { from: ResolutionStatus, to: ResolutionStatus },
+    Illegal {
+        from: ResolutionStatus,
+        to: ResolutionStatus,
+    },
     /// `resolved` always carries its payload: use [`Resolution::land`].
     #[error("a resolution resolves by landing a snapshot (Resolution::land)")]
     ResolvedWithoutSnapshot,
@@ -86,11 +89,16 @@ impl Resolution {
         use ResolutionStatus::*;
         let legal = matches!(
             (self.status, to),
-            (Pending, Resolved | NotFound | Ambiguous | Failed | Abandoned)
-                | (Failed, Pending | Abandoned)
+            (
+                Pending,
+                Resolved | NotFound | Ambiguous | Failed | Abandoned
+            ) | (Failed, Pending | Abandoned)
         );
         if !legal {
-            return Err(TransitionError::Illegal { from: self.status, to });
+            return Err(TransitionError::Illegal {
+                from: self.status,
+                to,
+            });
         }
         if (self.status, to) == (Failed, Pending) {
             self.attempts += 1;
@@ -158,7 +166,10 @@ impl Scan {
             (Pending, Clean | Infected | Failed) | (Failed, Pending)
         );
         if !legal {
-            return Err(ScanTransitionError { from: self.status, to });
+            return Err(ScanTransitionError {
+                from: self.status,
+                to,
+            });
         }
         if (self.status, to) == (Failed, Pending) {
             self.attempts += 1;
@@ -169,7 +180,10 @@ impl Scan {
 }
 
 pub fn pending_scans(scans: &[Scan]) -> Vec<&Scan> {
-    scans.iter().filter(|s| s.status == ScanStatus::Pending).collect()
+    scans
+        .iter()
+        .filter(|s| s.status == ScanStatus::Pending)
+        .collect()
 }
 
 /// A pending resolution a checkpoint expects to land after it.
@@ -224,7 +238,9 @@ pub enum CheckpointViolation {
     /// A post-checkpoint entry wrote into the frozen set and was not an
     /// expected derived write (§2.8). Names the frozen columns and
     /// groups the entry touched.
-    #[error("entry {seq}: write into the frozen set after checkpoint was not an expected derived write")]
+    #[error(
+        "entry {seq}: write into the frozen set after checkpoint was not an expected derived write"
+    )]
     IllegalWrite {
         seq: u64,
         columns: BTreeSet<ColumnId>,
@@ -298,7 +314,9 @@ fn frozen_touched(ops: &[Op], checkpoint: &Checkpoint) -> (BTreeSet<ColumnId>, B
                     columns.insert(column.clone());
                 }
             }
-            Op::AddItem { group, .. } | Op::RemoveItem { group, .. } | Op::Reorder { group, .. } => {
+            Op::AddItem { group, .. }
+            | Op::RemoveItem { group, .. }
+            | Op::Reorder { group, .. } => {
                 if checkpoint.frozen_groups.contains(group) {
                     groups.insert(group.clone());
                 }
@@ -312,8 +330,8 @@ fn frozen_touched(ops: &[Op], checkpoint: &Checkpoint) -> (BTreeSet<ColumnId>, B
 fn ops_within(ops: &[Op], scope: &RowPath) -> bool {
     ops.iter().all(|op| match op {
         Op::Set { path, .. } | Op::Unset { path, .. } => path.starts_with(scope),
-        Op::AddItem { parent, .. }
-        | Op::RemoveItem { parent, .. }
-        | Op::Reorder { parent, .. } => parent.starts_with(scope),
+        Op::AddItem { parent, .. } | Op::RemoveItem { parent, .. } | Op::Reorder { parent, .. } => {
+            parent.starts_with(scope)
+        }
     })
 }

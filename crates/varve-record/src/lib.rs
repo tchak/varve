@@ -15,13 +15,13 @@ pub use entry::{
     Draft, Entry, EntryContent, EntrySalts, Envelope, SaltCountMismatch, genesis_hash,
 };
 pub use log::{
-    AppendError, ChainError, Conflict, FoldError, FoldResult, RecordLog,
-    Snapshot, SnapshotError, Suppressed,
+    AppendError, ChainError, Conflict, FoldError, FoldResult, RecordLog, Snapshot, SnapshotError,
+    Suppressed,
 };
 pub use resolution::{
-    Checkpoint, CheckpointViolation, ExpectedResolution, Resolution,
-    ResolutionStatus, Scan, ScanStatus, ScanTransitionError, TransitionError,
-    pending_resolutions, pending_scans, pending_set, validate_after_checkpoint,
+    Checkpoint, CheckpointViolation, ExpectedResolution, Resolution, ResolutionStatus, Scan,
+    ScanStatus, ScanTransitionError, TransitionError, pending_resolutions, pending_scans,
+    pending_set, validate_after_checkpoint,
 };
 
 use varve_core::ResolverId;
@@ -61,7 +61,9 @@ pub enum Origin {
     /// a pending resolution has not yet been answered — once the late
     /// derived write lands, the fold fills it in; the landed snapshot
     /// also lives on the resolution instance (`Resolution::snapshot`).
-    Overridden { superseded: Option<Derivation> },
+    Overridden {
+        superseded: Option<Derivation>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

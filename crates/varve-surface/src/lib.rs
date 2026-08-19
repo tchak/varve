@@ -91,7 +91,10 @@ pub struct WritePolicy {
 
 impl Default for WritePolicy {
     fn default() -> Self {
-        Self { writable: true, override_derived: false }
+        Self {
+            writable: true,
+            override_derived: false,
+        }
     }
 }
 
@@ -141,11 +144,7 @@ impl<'a> ColumnEntry<'a> {
 }
 
 pub(crate) fn column_entries(surface: &Surface) -> Vec<ColumnEntry<'_>> {
-    fn walk<'a>(
-        nodes: &'a [Node],
-        ancestors: &mut Vec<&'a Expr>,
-        out: &mut Vec<ColumnEntry<'a>>,
-    ) {
+    fn walk<'a>(nodes: &'a [Node], ancestors: &mut Vec<&'a Expr>, out: &mut Vec<ColumnEntry<'a>>) {
         for node in nodes {
             match node {
                 Node::Column(c) => out.push(ColumnEntry {

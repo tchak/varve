@@ -29,13 +29,19 @@ fn set_at(column: &str, path: RowPath, value: &str) -> Op {
 }
 
 fn item(id: &str) -> RowPath {
-    RowPath::root().child(PathSeg { group: GroupId::new("g1"), item: ItemId::new(id) })
+    RowPath::root().child(PathSeg {
+        group: GroupId::new("g1"),
+        item: ItemId::new(id),
+    })
 }
 
 fn draft(minute: u8, base: u64, ops: Vec<Op>) -> Draft {
     let salts = test_salts(minute)(ops.len());
     Draft {
-        actor: Actor { id: "a1".into(), kind: ActorKind::Human },
+        actor: Actor {
+            id: "a1".into(),
+            kind: ActorKind::Human,
+        },
         timestamp: Instant::parse(&format!("2026-08-17T10:{minute:02}:00Z")).unwrap(),
         revision: common::lens(),
         base_version: base,
@@ -55,7 +61,12 @@ fn logs() -> Vec<(RecordId, RecordLog)> {
         0,
         vec![
             set_at("name", RowPath::root(), "Dupont"),
-            Op::AddItem { group: GroupId::new("g1"), parent: RowPath::root(), item: ItemId::new("i1"), at: 0 },
+            Op::AddItem {
+                group: GroupId::new("g1"),
+                parent: RowPath::root(),
+                item: ItemId::new("i1"),
+                at: 0,
+            },
             set_at("col", item("i1"), "x"),
         ],
     ))
@@ -64,13 +75,21 @@ fn logs() -> Vec<(RecordId, RecordLog)> {
         1,
         1,
         vec![
-            Op::AddItem { group: GroupId::new("g1"), parent: RowPath::root(), item: ItemId::new("i2"), at: 1 },
+            Op::AddItem {
+                group: GroupId::new("g1"),
+                parent: RowPath::root(),
+                item: ItemId::new("i2"),
+                at: 1,
+            },
             Op::Reorder {
                 group: GroupId::new("g1"),
                 parent: RowPath::root(),
                 order: vec![ItemId::new("i2"), ItemId::new("i1")],
             },
-            Op::Unset { column: ColumnId::new("col"), path: item("i1") },
+            Op::Unset {
+                column: ColumnId::new("col"),
+                path: item("i1"),
+            },
             set_at("name", RowPath::root(), "Durand"),
         ],
     ))
@@ -78,11 +97,16 @@ fn logs() -> Vec<(RecordId, RecordLog)> {
     r1.append(draft(
         2,
         2,
-        vec![Op::RemoveItem { group: GroupId::new("g1"), parent: RowPath::root(), item: ItemId::new("i1") }],
+        vec![Op::RemoveItem {
+            group: GroupId::new("g1"),
+            parent: RowPath::root(),
+            item: ItemId::new("i1"),
+        }],
     ))
     .unwrap();
     let mut r2 = RecordLog::new(RecordId::new("r2"));
-    r2.append(draft(3, 0, vec![set_at("name", RowPath::root(), "Martin")])).unwrap();
+    r2.append(draft(3, 0, vec![set_at("name", RowPath::root(), "Martin")]))
+        .unwrap();
     vec![(RecordId::new("r1"), r1), (RecordId::new("r2"), r2)]
 }
 
@@ -138,7 +162,11 @@ fn mutation() -> impl Strategy<Value = Mutation> {
 }
 
 fn split_lines(bytes: &[u8]) -> Vec<Vec<u8>> {
-    bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()).map(<[u8]>::to_vec).collect()
+    bytes
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect()
 }
 
 fn join_lines(lines: &[Vec<u8>]) -> Vec<u8> {
@@ -273,7 +301,10 @@ fn history_lines() -> (Vec<String>, usize) {
 }
 
 fn original_entries() -> BTreeMap<RecordId, Vec<Entry>> {
-    logs().into_iter().map(|(r, l)| (r, l.entries().to_vec())).collect()
+    logs()
+        .into_iter()
+        .map(|(r, l)| (r, l.entries().to_vec()))
+        .collect()
 }
 
 /// A mutation is harmless iff the stream is refused at read, refused at
@@ -281,14 +312,22 @@ fn original_entries() -> BTreeMap<RecordId, Vec<Entry>> {
 /// no-op). Returns what happened, for the assertion message.
 fn outcome_of(lines: &[String]) -> &'static str {
     let bytes = lines.join("\n").into_bytes();
-    let Ok(stream) = read_stream(&bytes) else { return "refused at read" };
+    let Ok(stream) = read_stream(&bytes) else {
+        return "refused at read";
+    };
     let mut store = BTreeMap::new();
     if adopt_history(&stream, &mut store).is_err() {
         return "refused at adoption";
     }
-    let adopted: BTreeMap<RecordId, Vec<Entry>> =
-        store.into_iter().map(|(r, l)| (r, l.entries().to_vec())).collect();
-    if adopted == original_entries() { "no-op" } else { "ACCEPTED WITH CHANGED CONTENT" }
+    let adopted: BTreeMap<RecordId, Vec<Entry>> = store
+        .into_iter()
+        .map(|(r, l)| (r, l.entries().to_vec()))
+        .collect();
+    if adopted == original_entries() {
+        "no-op"
+    } else {
+        "ACCEPTED WITH CHANGED CONTENT"
+    }
 }
 
 /// Bump the last hex digit of a hash/salt string, keeping it lowercase
@@ -307,29 +346,67 @@ fn single_field_edits_of_a_non_tail_entry_are_never_accepted() {
     use serde_json::{Value, json};
     let (lines, at) = history_lines();
     let edits: Vec<(&str, Edit)> = vec![
-        ("seq", Box::new(|v| v["seq"] = json!(v["seq"].as_u64().unwrap() + 1))),
-        ("prev", Box::new(|v| v["prev"] = json!(nudge_hex(v["prev"].as_str().unwrap())))),
-        ("content_hash", Box::new(|v| {
-            v["content_hash"] = json!(nudge_hex(v["content_hash"].as_str().unwrap()))
-        })),
-        ("op value", Box::new(|v| v["ops"][0]["state"]["text"] = json!("MALLORY"))),
-        ("op removed", Box::new(|v| {
-            v["ops"].as_array_mut().unwrap().pop();
-        })),
-        ("op salt", Box::new(|v| {
-            v["op_salts"][0] = json!(nudge_hex(v["op_salts"][0].as_str().unwrap()))
-        })),
-        ("meta salt", Box::new(|v| v["meta_salt"] = json!(nudge_hex(v["meta_salt"].as_str().unwrap())))),
+        (
+            "seq",
+            Box::new(|v| v["seq"] = json!(v["seq"].as_u64().unwrap() + 1)),
+        ),
+        (
+            "prev",
+            Box::new(|v| v["prev"] = json!(nudge_hex(v["prev"].as_str().unwrap()))),
+        ),
+        (
+            "content_hash",
+            Box::new(|v| v["content_hash"] = json!(nudge_hex(v["content_hash"].as_str().unwrap()))),
+        ),
+        (
+            "op value",
+            Box::new(|v| v["ops"][0]["state"]["text"] = json!("MALLORY")),
+        ),
+        (
+            "op removed",
+            Box::new(|v| {
+                v["ops"].as_array_mut().unwrap().pop();
+            }),
+        ),
+        (
+            "op salt",
+            Box::new(|v| v["op_salts"][0] = json!(nudge_hex(v["op_salts"][0].as_str().unwrap()))),
+        ),
+        (
+            "meta salt",
+            Box::new(|v| v["meta_salt"] = json!(nudge_hex(v["meta_salt"].as_str().unwrap()))),
+        ),
         ("actor", Box::new(|v| v["actor"] = json!("mallory"))),
-        ("actor_kind", Box::new(|v| v["actor_kind"] = json!("system"))),
-        ("timestamp", Box::new(|v| v["timestamp"] = json!("2026-08-17T10:59:00Z"))),
-        ("revision", Box::new(|v| v["revision"] = json!("sha256:0000000000000000000000000000000000000000000000000000000000000000"))),
-        ("base_version", Box::new(|v| v["base_version"] = json!(v["base_version"].as_u64().unwrap() + 1))),
-        ("origin", Box::new(|v| v["origin"] = json!({"overridden": null}))),
+        (
+            "actor_kind",
+            Box::new(|v| v["actor_kind"] = json!("system")),
+        ),
+        (
+            "timestamp",
+            Box::new(|v| v["timestamp"] = json!("2026-08-17T10:59:00Z")),
+        ),
+        (
+            "revision",
+            Box::new(|v| {
+                v["revision"] =
+                    json!("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+            }),
+        ),
+        (
+            "base_version",
+            Box::new(|v| v["base_version"] = json!(v["base_version"].as_u64().unwrap() + 1)),
+        ),
+        (
+            "origin",
+            Box::new(|v| v["origin"] = json!({"overridden": null})),
+        ),
         ("note edited", Box::new(|v| v["note"] = json!("edited"))),
-        ("note dropped", Box::new(|v| {
-            v.as_object_mut().unwrap().remove("note");
-        })),
+        (
+            "note dropped",
+            Box::new(|v| {
+                v.as_object_mut().unwrap().remove("note");
+            }),
+        ),
         ("note nulled", Box::new(|v| v["note"] = Value::Null)),
         ("unknown key", Box::new(|v| v["x"] = json!(1))),
         ("record", Box::new(|v| v["record"] = json!("r2"))),
@@ -341,7 +418,10 @@ fn single_field_edits_of_a_non_tail_entry_are_never_accepted() {
         lines[at] = serde_json::to_string(&value).unwrap();
         let outcome = outcome_of(&lines);
         assert_ne!(outcome, "ACCEPTED WITH CHANGED CONTENT", "edit `{name}`");
-        assert_ne!(outcome, "no-op", "edit `{name}` should have changed something");
+        assert_ne!(
+            outcome, "no-op",
+            "edit `{name}` should have changed something"
+        );
     }
 }
 
@@ -352,7 +432,9 @@ fn single_field_edits_of_a_non_tail_entry_are_never_accepted() {
 fn a_reserialized_entry_line_is_a_no_op() {
     let (mut lines, at) = history_lines();
     let value: serde_json::Value = serde_json::from_str(&lines[at]).unwrap();
-    lines[at] = serde_json::to_string_pretty(&value).unwrap().replace('\n', " ");
+    lines[at] = serde_json::to_string_pretty(&value)
+        .unwrap()
+        .replace('\n', " ");
     assert_eq!(outcome_of(&lines), "no-op");
 }
 
@@ -378,12 +460,30 @@ fn tail_entry_edits() {
         lines[tail] = serde_json::to_string(&value).unwrap();
         outcome_of(&lines)
     };
-    assert_eq!(apply(&|v| v["ops"][0]["item"] = json!("i9")), "refused at adoption");
-    assert_eq!(apply(&|v| v["op_salts"][0] = json!(nudge_hex(v["op_salts"][0].as_str().unwrap()))), "refused at adoption");
-    assert_eq!(apply(&|v| v["note"] = json!("edited")), "refused at adoption");
+    assert_eq!(
+        apply(&|v| v["ops"][0]["item"] = json!("i9")),
+        "refused at adoption"
+    );
+    assert_eq!(
+        apply(&|v| v["op_salts"][0] = json!(nudge_hex(v["op_salts"][0].as_str().unwrap()))),
+        "refused at adoption"
+    );
+    assert_eq!(
+        apply(&|v| v["note"] = json!("edited")),
+        "refused at adoption"
+    );
     assert_eq!(apply(&|v| v["seq"] = json!(7)), "refused at adoption");
-    assert_eq!(apply(&|v| v["prev"] = json!(nudge_hex(v["prev"].as_str().unwrap()))), "refused at adoption");
+    assert_eq!(
+        apply(&|v| v["prev"] = json!(nudge_hex(v["prev"].as_str().unwrap()))),
+        "refused at adoption"
+    );
     // Unanchored by the chain: the head's actor and timestamp.
-    assert_eq!(apply(&|v| v["actor"] = json!("mallory")), "ACCEPTED WITH CHANGED CONTENT");
-    assert_eq!(apply(&|v| v["timestamp"] = json!("2026-08-17T10:59:00Z")), "ACCEPTED WITH CHANGED CONTENT");
+    assert_eq!(
+        apply(&|v| v["actor"] = json!("mallory")),
+        "ACCEPTED WITH CHANGED CONTENT"
+    );
+    assert_eq!(
+        apply(&|v| v["timestamp"] = json!("2026-08-17T10:59:00Z")),
+        "ACCEPTED WITH CHANGED CONTENT"
+    );
 }

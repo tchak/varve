@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use varve_core::canonical::MAX_SAFE_INTEGER;
 use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId};
 use varve_schema::{
-    Arity, Cardinality, CastError, NomenclatureTable, OptionRow, ScalarType, Schema,
-    SchemaIndex, nomenclature_rows,
+    Arity, Cardinality, CastError, NomenclatureTable, OptionRow, ScalarType, Schema, SchemaIndex,
+    nomenclature_rows,
 };
 
 use crate::{CellState, CellValue, ItemsAddr, RecordValues, Scalar};
@@ -100,7 +100,9 @@ fn scalar_conforms(
                 errors.push(ConformanceError::AttachmentTooLarge(column.clone()));
             }
             if a.byte_size > MAX_SAFE_INTEGER as u64 {
-                errors.push(ConformanceError::AttachmentSizeUnrepresentable(column.clone()));
+                errors.push(ConformanceError::AttachmentSizeUnrepresentable(
+                    column.clone(),
+                ));
             }
         }
         (Scalar::Enum(option), ScalarType::Enum(nref)) => {
@@ -110,7 +112,11 @@ fn scalar_conforms(
             let rows: Option<&[OptionRow]> = match nomenclature_rows(nref, nomenclatures) {
                 Ok(rows) => Some(rows),
                 Err(CastError::UnknownNomenclature(id, version)) => {
-                    errors.push(ConformanceError::UnknownNomenclature(column.clone(), id, version));
+                    errors.push(ConformanceError::UnknownNomenclature(
+                        column.clone(),
+                        id,
+                        version,
+                    ));
                     None
                 }
             };
@@ -161,15 +167,22 @@ pub fn check(
         // segment — a list hanging off a ghost item is misplaced.
         let segments = addr.parent.segments();
         for depth in 0..segments.len() {
-            let parent =
-                segments[..depth].iter().fold(varve_core::RowPath::root(), |p, s| p.child(s.clone()));
+            let parent = segments[..depth]
+                .iter()
+                .fold(varve_core::RowPath::root(), |p, s| p.child(s.clone()));
             let seg = &segments[depth];
             let exists = values
                 .items
-                .get(&ItemsAddr { group: seg.group.clone(), parent })
+                .get(&ItemsAddr {
+                    group: seg.group.clone(),
+                    parent,
+                })
                 .is_some_and(|items| items.contains(&seg.item));
             if !exists {
-                errors.push(ConformanceError::OrphanItemList(addr.group.clone(), seg.group.clone()));
+                errors.push(ConformanceError::OrphanItemList(
+                    addr.group.clone(),
+                    seg.group.clone(),
+                ));
                 break;
             }
         }
@@ -223,19 +236,11 @@ pub fn check(
                 }
                 let mut seen = HashSet::new();
                 for scalar in scalars {
-                    scalar_conforms(
-                        scalar,
-                        &info.ty,
-                        &addr.column,
-                        nomenclatures,
-                        &mut errors,
-                    );
+                    scalar_conforms(scalar, &info.ty, &addr.column, nomenclatures, &mut errors);
                     if let Some(id) = scalar.element_id()
                         && !seen.insert(id.to_string())
                     {
-                        errors.push(ConformanceError::DuplicateElement(
-                            addr.column.clone(),
-                        ));
+                        errors.push(ConformanceError::DuplicateElement(addr.column.clone()));
                     }
                 }
             }

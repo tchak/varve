@@ -16,7 +16,10 @@ pub enum SurfaceError {
     /// authored against something else (§2.6: surfaces compile against
     /// a specific revision).
     #[error("surface is for revision '{surface}', schema is revision '{schema}'")]
-    RevisionMismatch { surface: RevisionId, schema: RevisionId },
+    RevisionMismatch {
+        surface: RevisionId,
+        schema: RevisionId,
+    },
     #[error("unknown column '{0}'")]
     UnknownColumn(ColumnId),
     #[error("unknown group '{0}'")]
@@ -58,7 +61,10 @@ pub fn validate(
     let mut errors = Vec::new();
     let actual = revision_id(schema);
     if surface.revision != actual {
-        errors.push(SurfaceError::RevisionMismatch { surface: surface.revision.clone(), schema: actual });
+        errors.push(SurfaceError::RevisionMismatch {
+            surface: surface.revision.clone(),
+            schema: actual,
+        });
     }
     let mut seen = BTreeSet::new();
     walk(
@@ -110,7 +116,15 @@ fn walk(
                         errors.push(SurfaceError::SectionRule(error));
                     }
                 }
-                walk(&section.children, schema, index, nomenclatures, scope, seen, errors);
+                walk(
+                    &section.children,
+                    schema,
+                    index,
+                    nomenclatures,
+                    scope,
+                    seen,
+                    errors,
+                );
             }
             Node::Group(group_node) => {
                 let Some(info) = index.groups.get(&group_node.group) else {
@@ -124,17 +138,22 @@ fn walk(
                 // typechecks *outside* the group.
                 if let Some(rule) = &group_node.visibility {
                     for error in typecheck(rule, schema, nomenclatures, scope) {
-                        errors.push(SurfaceError::GroupRule(
-                            group_node.group.clone(),
-                            error,
-                        ));
+                        errors.push(SurfaceError::GroupRule(group_node.group.clone(), error));
                     }
                 }
                 let entered = info.cardinality == Cardinality::Many;
                 if entered {
                     scope.push(group_node.group.clone());
                 }
-                walk(&group_node.children, schema, index, nomenclatures, scope, seen, errors);
+                walk(
+                    &group_node.children,
+                    schema,
+                    index,
+                    nomenclatures,
+                    scope,
+                    seen,
+                    errors,
+                );
                 if entered {
                     scope.pop();
                 }
