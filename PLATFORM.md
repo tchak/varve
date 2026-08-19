@@ -139,7 +139,8 @@ Deliberately not kernel data — the log is cells, not chat (DESIGN
   named after a state), submitCaseFile, startReview, acceptCaseFile,
   refuseCaseFile, closeWithoutDecision, returnToApplicant,
   reopenReview, sendMessage, requestExport (returns an artifact URL —
-  wire/CSV, DESIGN §5), createUploadSlot.
+  wire, or tabular CSV/XLSX with surface-scoped columns, DESIGN §5),
+  createUploadSlot.
 - **Attachments bypass GraphQL**: a mutation mints an upload slot
   backed by `varve-files`, the client PUTs bytes, then references the
   blob id in a cell write; the DESIGN §2.15 scan lifecycle gates
@@ -174,7 +175,7 @@ invisible below `platform-app`.
   Q18/Q19 land here, spike first), reviewer table with varve-logic
   filters, the checkpoint state machine, teams + routing.
 - **P2 — collaboration.** Messaging, notifications, webhooks, exports
-  (wire/CSV artifacts), `platform-client` + HTTP-path integration
+  (wire / tabular artifacts, `varve-export`), `platform-client` + HTTP-path integration
   tests, API tokens.
 - **P3 — resolvers.** `varve-resolve`, SIRET/BAN blocks, prefill
   (DESIGN §2.7), attachment scan lifecycle end-to-end.

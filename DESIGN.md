@@ -1445,7 +1445,7 @@ current surface: "hidden never deletes" implies hidden must round-trip.
   instants; JSON numbers carry only JCS-safe structural counts and
   geometry coordinates.
 
-### CSV
+### CSV and tabular views (crate placement settled 2026-08-19)
 
 A pure **downstream renderer** over the same stream. Not importable.
 
@@ -1455,13 +1455,47 @@ the `NEW` sentinel for auto-numbering instances on import. Their users' one
 complaint is analysis ergonomics, not correctness. So:
 
 - **canonical interchange** = JSONL, lossless, round-trippable
-- **convenience views** = CSV/XLSX, denormalized or per-scope, explicitly lossy,
-  never re-importable
+- **convenience views** = CSV/XLSX/ODS, denormalized or per-scope, explicitly
+  lossy, never re-importable
 
-Leading columns for the CSV renderer: `record_id`, `scope` (group id, blank for
-root lines), `item_id`, `item_ordinal`. Two header rows: label (row 1, cosmetic)
-and column ID (row 2, authoritative). Repeat parent values on item lines for
-human usability; `scope` governs ownership.
+Leading columns for the tabular renderer: `record_id`, `scope` (group id,
+blank for root rows), `item_id`, `item_ordinal` — one root row per record
+plus one row per item, parent values repeated on item rows for human
+usability; `scope` governs ownership. Two header rows: label (row 1,
+cosmetic) and column ID (row 2, authoritative).
+
+**Crate placement: the tabulation is kernel, the format is presentation.**
+The row model lives in `varve-projection` — a table is literally records
+viewed through a revision, that crate's charter:
+`tabulate(record, revision/aggregate + AggregateReport, visible columns)
+→ TableSchema + row stream`, rows carrying **typed** scalars plus their
+canonical text rendering per type, so XLSX writes native numbers and
+dates, CSV takes the canonical strings, and the two agree by
+construction. Beside it, a `TableSink` trait (`begin(schema)` / `row` /
+`finish`). Concrete sinks live in **`varve-export` (Tier 5)** — CSV
+(dialect as an input: RFC 4180 default; semicolon + UTF-8 BOM for French
+Excel), XLSX, ODS later — one crate, so the formats stay together and a
+new format is a new impl, not a new architecture. Tier 5 is the right
+shelf even though CSV has no IO: Tier 5 is where strictness (async,
+heavy deps like zip) relaxes, and the CSV path stays internally pure, so
+it keeps golden-file and property tests and the corpus harness can drive
+it. *(Supersedes a one-day-old `varve-csv`-at-Tier-4 sketch: unifying
+the sinks behind one kernel row model was worth CSV leaving the
+below-Tier-5 discipline.)*
+
+**Convenience exports are surface-scoped views.** The §13.3 query rule —
+you cannot filter on a column you cannot see — applies to export columns
+identically, or exports become a bypass around visibility. Mechanically
+the surface never enters the crate: the exporter takes an **ordered
+visible-column set** as a plain input, and the Tier 5 caller computes it
+from the surface — the impact-crate pattern ("surfaces hand them down;
+the crate never looks up"), preserving §7's "nothing depends on
+`varve-surface`". For §5.5 aggregate exports the set filters the
+aggregate's columns by id. Which *records* an export contains is
+platform query territory; the full-fidelity wire migration export is
+deliberately **not** surface-scoped — it is the whole case file changing
+instances — with Q9's chain-preserving redacted entries as the mechanism
+if a filtered history export is ever needed.
 
 ## 5.5 Aggregate revisions (mixed-revision table views and exports)
 
@@ -1618,7 +1652,10 @@ Strict DAG. Everything below Tier 5 is deterministic: no IO, no async, no clock.
   are authored structurally and a syntax would be a tool), type checker
   against a revision, total evaluator, dependency-graph acyclicity.
 - `varve-projection` — records viewed and edited through a revision they
-  weren't written on. Casts applied, lossiness reported.
+  weren't written on. Casts applied, lossiness reported. Also owns the
+  tabular row model and the `TableSink` trait (§5 "CSV and tabular
+  views"): tabulation is projection; format sinks are Tier 5
+  (`varve-export`).
 - `varve-impact` — what does publishing revision N+1 do? Change classification
   (safe / lossy / breaking), the §2.8 resolver questions, broken rule
   references (§4.1), count of records whose cells fail the new cast, records
@@ -1660,7 +1697,8 @@ up.*
   (content-addressed manifest + blob trait), `varve-service` (the
   choreography narrow waist: minting, append sequencing, publication
   gating — §13.2), `varve-resolve` (resolver host + retry driver,
-  deferred until the first resolver-backed field). The platform above
+  deferred until the first resolver-backed field), `varve-export`
+  (tabular `TableSink` impls: CSV, XLSX, ODS later — §5). The platform above
   Tier 5 lives in this workspace under `platform/` (§13.5) and is
   designed in `PLATFORM.md`.
 
@@ -2129,6 +2167,11 @@ make.
   implement (the fetch the kernel refuses, §2.7) and the retry driver
   for §2.8 instances. Deferred until the first resolver-backed field;
   everything about resolution except the fetch already exists below.
+- `varve-export` — the tabular format sinks (CSV with dialect input,
+  XLSX, ODS later) implementing the `TableSink` trait owned by
+  `varve-projection` (§5 "CSV and tabular views"). No IO of its own —
+  it sits at Tier 5 for its dependencies, not for effects; the CSV path
+  stays a pure function under golden-file and property tests.
 
 ### 13.3 `varve-logic` is the query language (RATIFIED)
 
