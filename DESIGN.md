@@ -2181,7 +2181,7 @@ make.
   impl stores ciphertext only: platform-side streaming encryption (age
   format, per-blob envelope keys — settled 2026-08-19, PLATFORM.md
   P.10); blob addresses stay plaintext hashes (§2.15), key custody is
-  Tier 5 (§2.10).
+  Tier 5 (§2.10). Full contract: §13.6.
 - `varve-resolve` — the resolver host: the trait external resolvers
   implement (the fetch the kernel refuses, §2.7) and the retry driver
   for §2.8 instances. Deferred until the first resolver-backed field;
@@ -2258,3 +2258,61 @@ Known cost: workspace builds unify features on shared dependencies, so
 kernel tests may run with platform-activated features — harmless to the
 kernel's own declarations, worth remembering when an isolated build
 (`cargo hack`) behaves differently.
+
+### 13.6 The `varve-files` contract (settled 2026-08-19)
+
+The blob trait is async and **plaintext-streaming on both sides**
+(§13.2); encryption is an implementation's concern behind it.
+
+- `put(stream) → ContentHash` — the store computes the hash while
+  streaming (the gateway tee of P.10/P.11: hash ⊕ scan ⊕ encrypt in
+  one pass) and returns it, so **claim verification is the trait
+  contract, not caller discipline** — the caller compares the returned
+  hash to the cell's claim (§2.15). Idempotent by hash: re-putting
+  existing content stores nothing — that *is* the §2.15 dedup path.
+- `get(hash) → seekable stream` — seek is what serves HTTP Range
+  through age's chunk-aligned ciphertext math (P.10).
+- `has(hash)` / `stat(hash) → BlobInfo`.
+- `delete(hash)` — key row first (shred), object second: the order
+  that fails safe.
+- `sweep(live, grace)` — §2.15 mark-and-sweep given roots: deletes
+  blobs not in `live` and older than `grace`.
+
+**Keyring.** Implementations that encrypt take a `Keyring` trait —
+`identity_for(hash)` (get-or-create the per-blob X25519 identity),
+`shred(hash)` — the same dependency inversion as `TableSink`: the
+platform implements it over its database; `varve-files` never sees a
+database. Policy settled shreddable — sole recipient, uniform across
+blob classes; recoverability owned by database backups; shred
+completes as backups age out (PLATFORM.md P.9 Q7, P.10). The local-fs
+impl shares the age pipeline for parity; only test fixtures go plain.
+
+**Sweep semantics — three decisions.** (1) The **grace window**
+protects young blobs: it closes the put-during-sweep race and is the
+whole orphan story for upload slots — a blob uploaded but never
+referenced simply ages out of grace unreferenced and is collected.
+(2) The routine root set is a **reference index maintained
+transactionally at append** by `varve-service` (a read-model, §10
+Q18's family); the **periodic full mark-and-sweep recomputed from
+`referenced_blobs` over the logs is the audit and repair pass**, not
+the routine collector — drift between index and truth is a bug
+detector, not a data-loss mechanism, because deletion follows the
+audit. (3) Record erasure only drops references: a shared blob
+survives until its last reference goes (§2.10's retention bound), and
+only then is shredded and deleted.
+
+**Manifest — fields pinned.** Per blob: content hash (the address),
+byte size and content type (verified at ingest, §2.15), created-at
+(Tier 5 clock input, as ever), key id (keyring reference), and
+**blob-level scan bookkeeping**: engine + signature version, last
+scanned, cached verdict. Deliberately distinct from the kernel's
+per-element scan status (§2.15): the kernel's is admissibility state
+per record; the manifest's exists so one shared blob is scanned once,
+not once per record — `varve-service` propagates blob verdicts to the
+element scan statuses.
+
+**The Q14 seam, named now.** `varve-wire` owns the manifest and
+`attachment` lines; `varve-files` streams bytes; the bundled **sidecar
+archive** is assembled by a Tier 5 exporter joining the two. Neither
+crate grows the other's half; the sidecar's wire format itself stays
+corpus-gated with Q14.

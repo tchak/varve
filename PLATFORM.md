@@ -210,15 +210,24 @@ everything shipped exists in DN and nothing shipped that doesn't.
 6. **Webhook payload shape.** GraphQL-shaped JSON vs wire lines — the
    one place integrators may want the low-level truth (DESIGN §13.4) —
    plus delivery semantics (at-least-once, signed payloads).
-7. **Blob key policy: shreddable vs recoverable (P.10).** Sole per-blob
-   recipient = deleting the key row crypto-shreds the blob, S3 backups
-   included, but losing the database loses every file; master key as
-   co-recipient = recoverable from the bucket alone, but row deletion
-   no longer shreds. A policy choice, possibly per blob class
-   (attachments vs resolver payload snapshots), and the answer is
-   evidence for DESIGN Q11's deferred intra-record erasure mechanism.
-   Also open: master-key custody (KMS / HSM / injected secret, per
-   environment) and whether the dev local-fs impl encrypts for parity.
+7. ~~Blob key policy: shreddable vs recoverable (P.10).~~ **Resolved
+   (2026-08-19): shreddable — the per-blob identity is the sole
+   recipient; no master co-recipient on blobs.** Settled by design
+   argument: erasure is the guarantee the design cannot compromise on
+   (DESIGN §2.10), while the property traded away — recovering files
+   from the bucket alone — only pays off under total database loss, a
+   scenario already existential for the platform and owned by backup
+   discipline, not by weakening erasure. Key rows are wrapped under
+   the master key, so database backups stay safe to retain; a shred
+   truly completes as those backups age past retention — a stated,
+   bounded window, the same caveat every crypto-shredding scheme
+   carries. Uniform across blob classes: attachments and resolver
+   payload snapshots both shreddable (the snapshots are §2.10's worry
+   case), which is the operational evidence DESIGN Q11 wanted. The dev
+   local-fs impl encrypts identically (parity — keyring and shred
+   paths exercised in tests). Residual, deliberately deployment-level:
+   master-key custody (KMS / injected secret, per environment).
+   Contract: DESIGN §13.6.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
@@ -255,8 +264,16 @@ Master-key rotation re-encrypts small database rows, never object
 storage payloads; deleting the identity row **crypto-shreds** the blob
 including provider-side backups — blob-level erasure for exactly the
 data (third-party resolver payloads) that §2.10 worries about, and
-operational evidence for Q11's deferred mechanism choice. The
-shreddable-vs-recoverable tension is P.9 Q7.
+operational evidence for Q11's deferred mechanism choice.
+**Settled shreddable (P.9 Q7, 2026-08-19)**: the per-blob identity is
+the **sole** recipient — the bucket alone is unreadable by design, and
+recoverability is owned by database backup discipline (key rows are
+wrapped, safe to back up; a shred completes as database backups age
+out — a stated, bounded window). Shredding is the **sweep's deletion
+primitive**: a blob is shredded only when its last reference is gone —
+never while other records still share it, §2.10's retention bound —
+key row first, object second. The dev local-fs impl shares the age
+pipeline, so keyring and shred paths are exercised in dev and tests.
 
 Interactions checked: blob addresses stay plaintext hashes (DESIGN
 §2.15 — dedup happens at the address before bytes are stored, so
