@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","souce":{"column":"a"},"or":[{"op":"is_emptye"}]}]}

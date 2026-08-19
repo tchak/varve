@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly extended fuzzing (see `fuzz-extended`); everything else runs
+    # on every push and PR.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (stable)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  lint:
+    name: fmt, clippy, doc
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo doc --workspace --no-deps --locked
+
+  layering:
+    # DESIGN.md §13.5: no runtime / ORM / web / storage crate in the
+    # dependency closure of any Tier 0–4 crate; serde only where §9 allows.
+    name: layering guard (§13.5)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: scripts/check-layering.sh
+
+  fuzz-regression:
+    # Every tracked seed (fuzz/seeds/<target>/ — the minimized corpora)
+    # still runs clean: -runs=0 executes each input once and exits.
+    name: fuzz regression (seeds)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    env:
+      # Nightly-only lints must not break the fuzz build.
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - name: build fuzz targets
+        working-directory: fuzz
+        run: cargo fuzz build
+      - name: run seeds
+        working-directory: fuzz
+        run: |
+          for target in $(cargo fuzz list); do
+            echo "::group::$target ($(ls "seeds/$target" | wc -l) seeds)"
+            cargo fuzz run "$target" "seeds/$target" -- -runs=0
+            echo "::endgroup::"
+          done
+
+  fuzz-extended:
+    # Weekly (or on demand): fuzz each target for a while, growing a
+    # corpus kept in the Actions cache across runs. A crash fails the job
+    # and uploads fuzz/artifacts/<target>/ for reproduction
+    # (`cargo +nightly fuzz run <target> <artifact>`). New coverage is
+    # merged back into the tracked seeds by hand — see README.
+    name: fuzz extended (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wire_read, logic_canon, value_feature, record_entry]
+    env:
+      # Nightly-only lints must not break the fuzz build.
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - name: restore corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          # Always a fresh key so the grown corpus is saved; restore the
+          # most recent previous one.
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: fuzz
+        working-directory: fuzz
+        run: |
+          mkdir -p "corpus/${{ matrix.target }}"
+          cargo fuzz run "${{ matrix.target }}" \
+            "corpus/${{ matrix.target }}" "seeds/${{ matrix.target }}" \
+            -- -max_total_time=600
+      - name: upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore

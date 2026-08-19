@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"luon":"a"},"rght":{"cption":"oui"}}},{"or":[{"op":"ispending","resolver":"insee"}]}]}

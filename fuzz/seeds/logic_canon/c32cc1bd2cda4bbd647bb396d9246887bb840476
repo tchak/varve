@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"optAion":"oui"}}},{"or":[{"op":"is_esee"}]}]}

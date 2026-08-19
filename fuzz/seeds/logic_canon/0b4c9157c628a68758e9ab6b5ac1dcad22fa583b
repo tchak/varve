@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","sour":[{"op":"is_empty","sourcp":"is_empty","source":{"column":"b"}},{"op":"gt","sou2ce":{"column":"n","v[ield":"dep"},"r@ghht":{"co]st":{"number":{"value":"0.5","unit":"day"}}}},{"op":"pending","resolver":"insee"}]}]}

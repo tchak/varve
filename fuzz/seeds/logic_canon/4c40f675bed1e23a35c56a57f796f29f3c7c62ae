@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","sourke":{"cloumn":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"ver":"insee"}]}]}

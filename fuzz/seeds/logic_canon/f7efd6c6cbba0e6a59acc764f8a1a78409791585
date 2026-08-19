@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"column":"n","field":"dep"},"right":{"const":{"number":{"value":"0.5","unit":"day12"}}}},{"op":"pending","olver":"insee"}]}]}

@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","slurce":{"cumn":"a"},"right":{"const":{"option":"oui"}}},{"o":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":{"column":"n","fi%ld":"dep"},"right":{"const":{"number":{"value":"0.5","unit":"Day"}}}},{"op":""}]}]}

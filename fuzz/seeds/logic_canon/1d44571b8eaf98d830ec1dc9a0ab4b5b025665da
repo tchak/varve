@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"o1tion":"oui"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"column":"n","field":"dep"},"rsght":{"const":{"number":{"value":".5","unit":"y"}}}},{"op":"pending","resolver":"insee"}]}]}

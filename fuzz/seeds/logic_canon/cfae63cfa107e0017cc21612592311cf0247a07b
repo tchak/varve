@@ -1,0 +1,1 @@
+{"and":[{"op":"","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_","resolver":"nisee"}]}]}

@@ -67,7 +67,7 @@ pub struct ColumnImpact {
     /// ids — the records holding them are the ones that will fail.
     pub removed_options: Vec<OptionId>,
     /// For attachment transitions whose constraints changed (§2.15):
-    /// named, so the report can say "accept narrowed to [pdf]; limit
+    /// named, so the report can say "accept narrowed to `[pdf]`; limit
     /// lowered" instead of an anonymous retype.
     pub constraint_change: Option<ConstraintChange>,
     /// For number transitions whose unit changed (§2.14): named

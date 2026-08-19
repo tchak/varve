@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","sour":[{"op":"is_empty","source":{"column":"b"}},{"oop":"pending","resolver":"insee"}]}]}

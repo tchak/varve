@@ -77,22 +77,35 @@ async — timestamps and salts are inputs.
 Version control is [jj](https://github.com/jj-vcs/jj) (colocated git).
 
 ```sh
-cargo test --workspace              # 263 tests, incl. property suites
+cargo test --workspace              # 277 tests, incl. property suites
 cargo clippy --workspace --all-targets
+cargo fmt --all --check
+scripts/check-layering.sh           # DESIGN §13.5: no runtime/web/ORM crate below Tier 5
 scripts/fetch-corpus.sh             # download the DN corpus (~124 MB gz)
 cargo run --release -p m0           # M0 harness over the corpus
 ```
+
+CI (`.github/workflows/ci.yml`) runs the first four plus `cargo doc`
+with warnings denied and a fuzz regression pass on every push and PR,
+and a weekly extended fuzz.
 
 Fuzz targets live in `fuzz/` (excluded from the workspace; needs
 `cargo install cargo-fuzz` and a nightly toolchain):
 
 ```sh
-cd fuzz && cargo +nightly fuzz run wire_read seeds/wire_read   # also: logic_canon, value_feature, record_entry
+cd fuzz
+cargo +nightly fuzz run wire_read corpus/wire_read seeds/wire_read   # also: logic_canon, value_feature, record_entry
+cargo +nightly fuzz run wire_read seeds/wire_read -- -runs=0         # regression only: each seed once
+cargo +nightly fuzz run wire_read seeds/wire_read corpus/wire_read -- -merge=1   # fold new coverage into the seeds
 ```
 
-`fuzz/seeds/<target>/` holds one valid input per target so a run starts
-inside the grammar; the generated corpora under `fuzz/corpus/` are
-gitignored.
+`fuzz/seeds/<target>/` is the tracked regression corpus: a minimized
+(`-merge=1`) set of inputs, each adding coverage, which CI replays with
+`-runs=0` so a decoder change that starts rejecting, accepting or
+crashing on a known input fails the build. The working corpora under
+`fuzz/corpus/` (where a run writes what it finds) are gitignored; after
+a fuzzing session, or after a fix that changes what a decoder accepts,
+merge them back into the seeds with the last command above.
 
 The corpus is public data —
 [Descriptif des démarches publiées](https://www.data.gouv.fr/datasets/descriptif-des-demarches-publiees-sur-demarche-numerique-gouv-fr)

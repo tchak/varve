@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"righq":{"const":{"option":"pui"}}},{"or":[{"op":"is_empty","sourcep":"pefding","resolver":"insee"}]}]}

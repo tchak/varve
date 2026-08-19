@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"kolumld":"dep"},"right":{"const":{"number":{"value":"1.5","uAit":"day"}}}},{"op":"pending","resolver":"insee"}]}]}

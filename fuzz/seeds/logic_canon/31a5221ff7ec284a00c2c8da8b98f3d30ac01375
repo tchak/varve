@@ -1,0 +1,1 @@
+{"and":[{"op":[{"op":"is_empty","source":{"columt":{"number":{"value":"day"}}}},{"op":"pending","resolver":"insee"}]}]}
