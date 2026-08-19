@@ -444,6 +444,20 @@ Kernel contributes one pure function — `pending_resolutions(record)` — so a
 Tier 5 scheduler can drive retries without the kernel knowing about queues or
 clocks.
 
+**Settled (2026-08-19): Tier 5 owns scheduling as steps, never as a
+loop.** The §2.7 move, one layer up: the kernel never fetches, and
+`varve-service` never ticks. "Tier 5 scheduler" throughout this
+document means the *semantics* — callable, transactionally-shaped
+steps (attempt pending resolutions under a policy; run a sweep) plus
+the policy types (backoff, abandonment) — never an event loop, a queue
+schema, a worker runtime, or a clock. The loop, the tick, and the
+tables persisting attempt history belong to the host that drives the
+steps: the platform's background-work infrastructure (PLATFORM.md
+P.13) for integrator #1, and whatever job system other integrators
+already run. This is the embeddability thesis applied to time:
+hardwiring a queue into Tier 5 would make every integrator inherit
+our infrastructure choice, exactly as hardwiring HTTP would (§2.7).
+
 **Settled (2026-08-19): lifecycle transitions are log entries.** A
 resolution instance is not a side structure beside the log — it is the
 fold of **lifecycle ops** carried by ordinary chained entries, next to
@@ -1961,8 +1975,8 @@ up.*
   export bundle: stream ⊕ sidecar and surface ⊕ envelope joins —
   §13.6, built 2026-08-19), `varve-service` (the
   choreography narrow waist: minting, append sequencing, publication
-  gating — §13.2), `varve-resolve` (resolver host + retry driver,
-  deferred until the first resolver-backed field), `varve-export`
+  gating — §13.2), `varve-resolve` (resolver host + per-attempt fetch
+  step, deferred until the first resolver-backed field), `varve-export`
   (tabular `TableSink` impls: CSV, XLSX, ODS later — §5). The platform above
   Tier 5 lives in this workspace under `platform/` (§13.5) and is
   designed in `PLATFORM.md`.
@@ -2454,7 +2468,10 @@ make.
   the `varve-store` traits (never an impl) plus the full deterministic
   stack, and is the only API through which the platform touches kernel
   state — without it every handler re-implements the sequence, and the
-  invariants are only as strong as the sloppiest one.
+  invariants are only as strong as the sloppiest one. **Steps, not
+  loops (settled 2026-08-19, §2.8):** every scheduled duty here is a
+  callable step plus its policy types; the loop, tick, queue, and
+  attempt-history tables belong to the host (PLATFORM.md P.13).
 - `varve-files` — as planned (§2.15): blob trait + content-addressed
   manifest. *Refined in implementation:* one generic impl over
   `object_store` backends — local filesystem and in-memory for dev and
@@ -2467,8 +2484,9 @@ make.
   P.10); blob addresses stay plaintext hashes (§2.15), key custody is
   Tier 5 (§2.10). Full contract: §13.6.
 - `varve-resolve` — the resolver host: the trait external resolvers
-  implement (the fetch the kernel refuses, §2.7) and the retry driver
-  for §2.8 instances. Deferred until the first resolver-backed field;
+  implement (the fetch the kernel refuses, §2.7) and the per-attempt
+  fetch step for §2.8 instances (a step the host loop drives —
+  steps-not-loops, §2.8). Deferred until the first resolver-backed field;
   everything about resolution except the fetch already exists below.
 - `varve-export` — the tabular format sinks (CSV with dialect input,
   XLSX, ODS later) implementing the `TableSink` trait owned by

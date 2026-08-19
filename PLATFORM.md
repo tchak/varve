@@ -72,6 +72,11 @@ their place by existing in DN.
   if the MF2 runtime spike fails — P.9 Q8). Server-rendered topcoat
   means zero client-side i18n runtime. English + French catalogs from
   day one (P.4's built-to-travel stance).
+- **underway** for durable queue jobs (Postgres-native, transactional
+  enqueue — the decisive property). **Settled 2026-08-19**, full
+  rationale and rejected alternatives in P.13; gated on the P.9 Q9
+  spike. Sweeps (resolution retries, scans, blobs, outbox) are
+  hand-rolled — no crate — per P.13.
 
 All of topcoat/toasty are early-stage with breaking changes expected.
 The hedges are structural: the `varve-store` trait (swap the ORM), the
@@ -101,10 +106,16 @@ schema (transport-independent by construction), and thin resolvers
 - `platform-client` — typed client generated from the SDL, for Rust
   integrators and for integration tests that exercise the real HTTP
   path.
+- `platform-jobs` — both shapes of background work (P.13): the
+  hand-rolled sweeps (tick + advisory-lock lease + per-resolver
+  circuit state) driving `varve-service` steps — resolution retries,
+  scan sweep, blob sweep, outbox drain — and the underway queue jobs
+  (webhook delivery, emails, export generation, batch updates) with
+  transactional enqueue from the use-case services.
 - `platform-server` — the binary: the topcoat router (app + `/graphql`
-  and upload/download `#[route]` handlers) + the
-  schedulers (`varve-service` resolution retries, blob sweep, outbox
-  delivery). One process to start with; the seams are already crates.
+  and upload/download `#[route]` handlers) + the `platform-jobs`
+  runners (sweep ticks and queue workers — P.13). One process to start
+  with; the seams are already crates.
 
 ## P.4 Domain model
 
@@ -276,6 +287,15 @@ everything shipped exists in DN and nothing shipped that doesn't.
    before the first UI strings land. Fallback if both fail: Fluent,
    migrating catalogs to MF2 later (mechanical — MF2 descends from
    it).
+9. **Underway beside toasty.** The spike gating P.13's queue half: does
+   underway's sqlx pool coexist cleanly with toasty on the same
+   Postgres, and can the use-case services thread toasty's transaction
+   into underway's enqueue (the transactional-enqueue property is the
+   whole point — losing it demotes the queue to outbox-plus-drain)?
+   Run alongside P.9 Q1 (same genus: early-stage ORM meets raw-sqlx
+   neighbor). Fallbacks, in order: apalis-postgres, then a hand-rolled
+   SKIP LOCKED queue. Sweeps are unaffected — they are hand-rolled
+   regardless (P.13).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
@@ -386,8 +406,9 @@ The kernel records *that* a lookup was requested and *how it ended*
 (DESIGN §2.8: lifecycle ops in the log), and hands the platform one pure
 enumeration, `pending_resolutions(record)`. Everything between — attempt
 timestamps, transient errors, backoff, next try, and the **deadline** —
-is platform state, owned by the `varve-service` scheduler in
-`platform-server` (P.3), never written into the record. DESIGN §2.8
+is platform state, owned by the platform's resolution sweep
+(`platform-jobs`, P.13) — which drives `varve-service` *steps*, per
+DESIGN §2.8 steps-not-loops — never written into the record. DESIGN §2.8
 settled the deadline as policy precisely so a multi-day upstream outage
 (the normal case, per institutional memory) is handled by changing one
 policy, not by rewriting records.
@@ -430,3 +451,56 @@ Obligations this places on the platform:
   once, propagate the verdict to every element naming it — §13.6
   `BlobScan`) is the sweep's optimisation, invisible to the record.
 
+
+## P.13 Background work: sweeps and queue jobs (settled 2026-08-19)
+
+The platform's background work has two shapes, and forcing them into
+one abstraction would break both. The boundary beneath them is DESIGN
+§2.8 steps-not-loops: `varve-service` exposes scheduled duties as
+callable steps plus policy types; everything below runs those steps.
+The platform is integrator #1 bringing its own loop — any other
+integrator drives the same steps from the job system they already run.
+
+**Sweeps** (state-driven, enumeration-based): resolution retries, the
+scan sweep, the blob sweep, outbox drain. A sweep is a periodic tick
+(tokio interval) + a lease so exactly one process runs it (Postgres
+advisory lock) + its own state tables (attempt history, per-resolver
+circuit). P.12 already fixed the key property — backoff is per
+resolver and *shared*, one circuit, not ten thousand timers — which is
+why sweeps are **hand-rolled, no crate**: a job-queue framework's
+per-job retry model actively fights the shared-circuit design. The
+sweep reads kernel enumerations (`pending_resolutions`,
+`referenced_blobs`) and calls `varve-service` steps.
+
+**Queue jobs** (event-driven, per-item, retryable): webhook
+deliveries, emails, export generation, batch record updates. Classic
+durable jobs — enqueue at commit, per-job retry with backoff,
+dead-letter. The decisive requirement falls out of P.3's use-case
+services ("one `varve-service` operation + its platform side effects
+in exactly one place"): **transactional enqueue** — the job row
+commits in the same Postgres transaction as the toasty models and the
+read-model, so handoff is exactly-once by construction and the
+notification outbox collapses into the queue. This rules out external
+brokers (Redis, Faktory) on architectural grounds: same database, or
+the distributed-tx problem the outbox exists to avoid is reinvented.
+
+**Crate: underway** (Postgres-native: `FOR UPDATE SKIP LOCKED`,
+transactional enqueue as a first-class feature, retries, cron,
+multi-step jobs; sqlx-based). Rejected: **apalis** — the most
+established general framework and tower-aligned, but enqueue goes
+through its own storage abstraction, so sharing the commit transaction
+is not its native grain; its pluggable-backend generality costs
+exactly the property needed most (kept as fallback — P.9 Q9);
+**hand-rolled SKIP LOCKED queue** — honest and small, but
+retry/cron/heartbeat/observability is undifferentiated plumbing a
+maintained crate does better (second fallback); **external brokers** —
+above. No backend trait of our own: the platform deploys as one
+binary + Postgres, and a multi-backend job framework here would be
+second-system syndrome. The swap seam is the crate boundary itself
+(the P.2 hedge pattern), and the deeper pluggability — integrators
+bringing their own scheduler — is already guaranteed one level down by
+steps-not-loops.
+
+Home: a `platform-jobs` crate (P.3) owning both shapes — sweep
+runners, circuit state, job definitions — with `platform-server`
+running its runners. The routed unknown is P.9 Q9.
