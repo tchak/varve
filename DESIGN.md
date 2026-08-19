@@ -1493,7 +1493,31 @@ in one file in dependency order.
 {"k":"item", "record":"...", "group":"...", "parent":[...], "id":"...", "ord":0, "cells":{...}}   // one item's cells; follows its record line
 {"k":"entry", "record":"...", "seq":0, "prev":"...", "ops":[...], ...}  // history mode: one log entry (§2.9)
 {"k":"attachment", "hash":"sha256:...", "byte_size":..., "content_type":"..."}   // describes a blob (§2.15); algorithm-tagged (§2.13)
+{"k":"surface", "id":"...", "revision":"...", "surface":{...}}   // surface-side object (§2.1/§2.6): envelope typed by the wire, body opaque canonical JSON typed by varve-surface (settled 2026-08-19, below)
+{"k":"block_defaults", "block":{"id":"...","version":1}, "hash":"sha256:...", "defaults":{...}}   // the surface half of a block (§10 Q13); same treatment
 ```
+
+**Surface-side objects travel as opaque bodies (settled 2026-08-19 —
+§10 Q14 item, see §7).** `varve-wire` types the envelope of a `surface`
+or `block_defaults` line — kind, id, revision or block reference, hash —
+and carries the body as canonical JSON it does not interpret;
+`varve-surface` owns the body's strict, total, round-trip-tested codec
+(`surface_canonical`/`surface_from` and the `BlockDefaults` pair — the
+crate already canonicalises nodes and formats to hash block defaults,
+and `varve-logic`'s canonical JSON is the rule shape); a Tier 5 exporter
+and importer join the two, exactly as they join the manifest and the
+blob sidecar (§2.15). Byte stability holds by construction (a canonical
+value re-emits identically). The alternative — `varve-wire` depending on
+`varve-surface` and `varve-logic`, one typed reader — was considered
+and rejected: the §7 invariant "nothing depends on `varve-surface`" is
+worth having only unconditionally (the moment the wire is the exception,
+the next exception is an argument rather than a rule), and what the
+typed reader would buy is read-time *shape* strictness, recovered with
+identical rigor one call later — "a surface references columns of its
+revision" needs the revision and is an import-time check either way.
+Wire-local mirror structs (two shapes of one object, drift) and
+platform-only surface formats (surfaces are Tier 3 kernel objects and
+must migrate) were rejected too.
 
 Not yet on the wire — **open question 14**: the lifecycle ops inside
 `entry` (resolution transitions and checkpoints, §2.8/§2.9 — settled
@@ -1871,7 +1895,9 @@ up.*
   block defaults (`BlockDefaults`, referencing a schema-side block by
   version). Depends on schema + logic. **Nothing depends on it** — that's
   the proof that "form isn't core" — which is why a block is two objects,
-  not one.
+  not one, and why surfaces reach the wire as opaque bodies whose codec
+  this crate owns (§5, settled 2026-08-19): the invariant holds for the
+  wire too, unconditionally.
 - `varve-revision` — revision DAG, publication, block and nomenclature
   publication (registries: version numbering, validation), three-way
   schema merge, **aggregate revision construction (§5.5)**.
@@ -1881,7 +1907,8 @@ up.*
 
 **Tier 4**
 - `varve-wire` — tagged JSONL. Reader, writer, header/manifest, patch ops,
-  apply.
+  apply. Depends on core, schema, value, record — **not** on surface or
+  logic: surface-side lines carry an opaque canonical body (§5).
 
 **Tier 5 — IO appears here for the first time** *(expanded 2026-08-18 — §13)*
 - `varve-store` (traits, async), a store implementation (substrate —
@@ -2035,8 +2062,9 @@ Only then: `surface`, `store`, service.
    is **two objects along the tier boundary**: the schema-side `Block`
    (`varve-schema`, hashed plain, `block` wire line, published through a
    registry) and `BlockDefaults` (`varve-surface`, referencing the block
-   by `(id, version)`, validated against it, travelling with surfaces —
-   Q14). An earlier implementation put both halves in `varve-surface`,
+   by `(id, version)`, validated against it, travelling as a
+   `block_defaults` line with an opaque body — §5, settled 2026-08-19).
+   An earlier implementation put both halves in `varve-surface`,
    which the wire could not carry without breaking "nothing depends on
    `varve-surface`" (§7); moving surface types down a tier to make one
    wire object was considered and rejected — it would erode "form isn't
@@ -2121,7 +2149,9 @@ Only then: `surface`, `store`, service.
     a procedure's surfaces do not migrate, and "an imported record
     remains fully meaningful on an instance with no access to INSEE"
     (§2.8) is a goal, not a property — the payload bytes do not yet
-    travel. Deliberately routed here rather than built piecemeal:
+    travel. *Surfaces' wire shape settled 2026-08-19 (§5): opaque bodies
+    typed by `varve-surface`, §7 intact; build remains here.*
+    Deliberately routed here rather than built piecemeal:
     payload blobs and attachment blobs share one sidecar, and the
     `snapshot` descriptions should land with it so import restores a
     record whole. Decide with §12.7
@@ -2521,4 +2551,6 @@ element scan statuses.
 `attachment` lines; `varve-files` streams bytes; the bundled **sidecar
 archive** is assembled by a Tier 5 exporter joining the two. Neither
 crate grows the other's half; the sidecar's wire format itself stays
-corpus-gated with Q14.
+corpus-gated with Q14. The same seam carries surfaces (§5, settled
+2026-08-19): `varve-wire` types the envelope, `varve-surface` the body,
+Tier 5 joins.
