@@ -54,6 +54,24 @@ their place by existing in DN.
 - **async-graphql**: schema, resolvers, in-process execution; no
   transport adapter crate (`async-graphql-axum` etc.) — the topcoat
   route handlers above are the transport.
+- **ICU4X + MessageFormat 2.0** for i18n, from the start. **Settled
+  2026-08-19.** Two decisions, kept apart: the formatting/data layer
+  is **ICU4X** (the `icu` crate — Unicode's official pure-Rust
+  implementation: locale negotiation, plural rules, number/date/list
+  formatting, collation; `rust_icu`/ICU4C bindings rejected — a C
+  dependency and version skew for nothing ICU4X lacks). The message
+  syntax is **MF2** (Unicode's successor to classic MessageFormat,
+  final since LDML 47, tracking LDML 48.x): catalogs are spec-standard
+  MF2 text files, so the stable contract is the asset format, not any
+  crate — the same structural hedge as the rest of this stack.
+  Rejected: MF1 (superseded by Unicode itself; Rust support is
+  parser-only anyway, so it shares MF2's runtime cost while betting on
+  the sunset format — its one edge, translation-platform support, is
+  eroding in MF2's favor) and Fluent (the most mature native-Rust
+  runtime, and MF2's chief ancestor, but not ICU; it is the fallback
+  if the MF2 runtime spike fails — P.9 Q8). Server-rendered topcoat
+  means zero client-side i18n runtime. English + French catalogs from
+  day one (P.4's built-to-travel stance).
 
 All of topcoat/toasty are early-stage with breaking changes expected.
 The hedges are structural: the `varve-store` trait (swap the ORM), the
@@ -68,6 +86,14 @@ schema (transport-independent by construction), and thin resolvers
   each use case composes one `varve-service` operation with its
   platform side effects — submit case file = kernel append + system
   message + notification + webhook fan-out — in exactly one place.
+- `platform-i18n` — the MF2 catalogs (English + French) and their
+  runtime over ICU4X: parse with `mf2_parser`, implement the MF2
+  function registry (`:number`, `:datetime`, plural selection) by
+  delegating to ICU4X (P.9 Q8 decides whether an existing runtime
+  crate replaces the hand-rolled interpreter). Locale is a plain
+  argument: resolved in `platform-app` (`Accept-Language`, principal
+  preference), passed as ordinary context — no crate below this one
+  knows what a locale is.
 - `platform-graphql` — schema and resolvers over
   `Context { principal }`; knows nothing of sessions or tokens.
 - `platform-app` — the Topcoat app: sessions, principal resolution,
@@ -238,6 +264,18 @@ everything shipped exists in DN and nothing shipped that doesn't.
    paths exercised in tests). Residual, deliberately deployment-level:
    master-key custody (KMS / injected secret, per environment).
    Contract: DESIGN §13.6.
+8. **MF2 runtime spike.** The MF2 *spec* is settled (P.2); what's
+   young is the Rust runtime. ICU4X does not yet ship an MF2
+   formatter (ICU4J/ICU4C only, as tech preview). Candidates:
+   `mf2-i18n` (claims a full runtime; assess), or a hand-rolled
+   interpreter over the `mf2_parser` AST delegating all hard parts
+   (plural rules, number/date formatting) to ICU4X — bounded code,
+   since MF2's runtime semantics are deliberately small. Either way
+   the catalogs don't change; when ICU4X ships its official MF2
+   formatter, swap the runtime and delete ours. Run the spike at P0
+   before the first UI strings land. Fallback if both fail: Fluent,
+   migrating catalogs to MF2 later (mechanical — MF2 descends from
+   it).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
