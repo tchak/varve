@@ -2120,7 +2120,11 @@ make.
   invariants are only as strong as the sloppiest one.
 - `varve-files` — as planned (§2.15): blob trait + content-addressed
   manifest; local-filesystem impl first, S3 later. Byte storage only —
-  the scan sweep is scheduling and lives in `varve-service`.
+  the scan sweep is scheduling and lives in `varve-service`. The S3
+  impl stores ciphertext only: platform-side streaming encryption (age
+  format, per-blob envelope keys — settled 2026-08-19, PLATFORM.md
+  P.10); blob addresses stay plaintext hashes (§2.15), key custody is
+  Tier 5 (§2.10).
 - `varve-resolve` — the resolver host: the trait external resolvers
   implement (the fetch the kernel refuses, §2.7) and the retry driver
   for §2.8 instances. Deferred until the first resolver-backed field;

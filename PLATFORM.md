@@ -209,3 +209,61 @@ everything shipped exists in DN and nothing shipped that doesn't.
 6. **Webhook payload shape.** GraphQL-shaped JSON vs wire lines — the
    one place integrators may want the low-level truth (DESIGN §13.4) —
    plus delivery semantics (at-least-once, signed payloads).
+7. **Blob key policy: shreddable vs recoverable (P.10).** Sole per-blob
+   recipient = deleting the key row crypto-shreds the blob, S3 backups
+   included, but losing the database loses every file; master key as
+   co-recipient = recoverable from the bucket alone, but row deletion
+   no longer shreds. A policy choice, possibly per blob class
+   (attachments vs resolver payload snapshots), and the answer is
+   evidence for DESIGN Q11's deferred intra-record erasure mechanism.
+   Also open: master-key custody (KMS / HSM / injected secret, per
+   environment) and whether the dev local-fs impl encrypts for parity.
+
+## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
+
+Attachments and resolver payload snapshots (one blob machinery, DESIGN
+§2.15) are stored in object storage as **ciphertext only**, encrypted
+by the platform — the DN pattern (ds_proxy, a Rust streaming
+encryption proxy in front of object storage), absorbed into the
+platform instead of deployed beside it. The absorption is nearly free
+because the design already forces the platform into the byte path:
+the store verifies claimed content hashes against actual bytes and the
+scan lifecycle needs the bytes (DESIGN §2.15), so presigned
+direct-to-provider URLs were never fully available. Consequence,
+accepted: upload/download URLs are platform URLs, download
+authorization is checked per request (surface assignment, not bearer
+presigned links), and all file traffic transits the platform. The
+byte-plane endpoints stay a distinct component behind a seam so they
+can scale out independently of the app; an external proxy remains a
+deployment option, not a separate codebase.
+
+**Format: age** (via the maintained Rust implementation, `age`/rage).
+The payload is ChaCha20-Poly1305 in the STREAM construction — 64 KiB
+authenticated chunks, constant memory, seekable decryption, which is
+what serves HTTP Range requests by mapping plaintext offsets to
+chunk-aligned ciphertext ranges. Over a hand-rolled stream cipher
+(the ds_proxy approach), age buys: a standard header with
+**multi-recipient key wrapping** (later: §2.15 wire sidecars exported
+encrypted to a receiving administration's key, same format), and
+standard tooling — the rage CLI decrypts anything the platform wrote,
+which is the disaster-recovery story.
+
+**Envelope: one ephemeral X25519 identity per blob**, stored in the
+database encrypted under a master key, used as the blob's recipient.
+Master-key rotation re-encrypts small database rows, never object
+storage payloads; deleting the identity row **crypto-shreds** the blob
+including provider-side backups — blob-level erasure for exactly the
+data (third-party resolver payloads) that §2.10 worries about, and
+operational evidence for Q11's deferred mechanism choice. The
+shreddable-vs-recoverable tension is P.9 Q7.
+
+Interactions checked: blob addresses stay plaintext hashes (DESIGN
+§2.15 — dedup happens at the address before bytes are stored, so
+random per-blob file keys cost nothing); ciphertext substitution in
+the bucket is caught by the existing verify-claims-against-bytes rule.
+Threat model, honestly: this protects against the storage provider,
+leaky buckets, and backup exposure — not against platform compromise,
+where the keys live. Crate placement: the `varve-files` trait stays
+plaintext-in/plaintext-out streaming; encryption is the S3
+implementation's concern; key custody is Tier 5 platform
+configuration (DESIGN §2.10: "key management at Tier 5").
