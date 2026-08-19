@@ -91,8 +91,10 @@ cargo run --release -p m0           # M0 harness over the corpus
 ```
 
 CI (`.github/workflows/ci.yml`) runs the first four plus `cargo doc`
-with warnings denied and a fuzz regression pass on every push and PR,
-and a weekly extended fuzz.
+with warnings denied and a fuzz regression pass on every push and PR.
+A second workflow (`fuzz.yml`) fuzzes each target for ten minutes
+weekly (or on demand, with a chosen duration), merges new coverage
+into the seeds and opens a pull request with them.
 
 Fuzz targets live in `fuzz/` (excluded from the workspace; needs
 `cargo install cargo-fuzz` and a nightly toolchain):
@@ -109,8 +111,9 @@ cargo +nightly fuzz run wire_read seeds/wire_read corpus/wire_read -- -merge=1  
 `-runs=0` so a decoder change that starts rejecting, accepting or
 crashing on a known input fails the build. The working corpora under
 `fuzz/corpus/` (where a run writes what it finds) are gitignored; after
-a fuzzing session, or after a fix that changes what a decoder accepts,
-merge them back into the seeds with the last command above.
+a local fuzzing session, or after a fix that changes what a decoder
+accepts, merge them back into the seeds with the last command above —
+the weekly workflow does the same and proposes the result as a PR.
 
 The corpus is public data —
 [Descriptif des démarches publiées](https://www.data.gouv.fr/datasets/descriptif-des-demarches-publiees-sur-demarche-numerique-gouv-fr)

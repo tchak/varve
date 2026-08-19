@@ -4,19 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    # Weekly extended fuzzing (see `fuzz-extended`); everything else runs
-    # on every push and PR.
-    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 concurrency:
-  # Pushes supersede earlier pushes on the same ref; the scheduled /
-  # dispatched extended fuzz is its own group and is never cancelled by
-  # a push (it runs for 10 minutes per target and saves a corpus cache
-  # only on completion).
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,7 +19,6 @@ jobs:
   test:
     name: test (stable)
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -37,7 +28,6 @@ jobs:
   lint:
     name: fmt, clippy, doc
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -53,7 +43,6 @@ jobs:
     # dependency closure of any Tier 0–4 crate; serde only where §9 allows.
     name: layering guard (§13.5)
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,9 +51,9 @@ jobs:
   fuzz-regression:
     # Every tracked seed (fuzz/seeds/<target>/ — the minimized corpora)
     # still runs clean: -runs=0 executes each input once and exits.
+    # Extended fuzzing and seed growth live in fuzz.yml.
     name: fuzz regression (seeds)
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule'
     env:
       # Nightly-only lints must not break the fuzz build.
       RUSTFLAGS: ""
@@ -91,54 +80,3 @@ jobs:
             cargo fuzz run $CARGO_FUZZ_TARGET "$target" "seeds/$target" -- -runs=0
             echo "::endgroup::"
           done
-
-  fuzz-extended:
-    # Weekly (or on demand): fuzz each target for a while, growing a
-    # corpus kept in the Actions cache across runs. A crash fails the job
-    # and uploads fuzz/artifacts/<target>/ for reproduction
-    # (`cargo +nightly fuzz run <target> <artifact>`). New coverage is
-    # merged back into the tracked seeds by hand — see README.
-    name: fuzz extended (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [wire_read, logic_canon, value_feature, record_entry]
-    env:
-      # Nightly-only lints must not break the fuzz build.
-      RUSTFLAGS: ""
-      # install-action ships a musl-built cargo-fuzz, whose default
-      # target is its own build triple; ASan needs the gnu one.
-      CARGO_FUZZ_TARGET: --target x86_64-unknown-linux-gnu
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: fuzz -> target
-      - name: restore corpus
-        uses: actions/cache@v4
-        with:
-          path: fuzz/corpus/${{ matrix.target }}
-          # Always a fresh key so the grown corpus is saved; restore the
-          # most recent previous one.
-          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: fuzz-corpus-${{ matrix.target }}-
-      - name: fuzz
-        working-directory: fuzz
-        run: |
-          mkdir -p "corpus/${{ matrix.target }}"
-          cargo fuzz run $CARGO_FUZZ_TARGET "${{ matrix.target }}" \
-            "corpus/${{ matrix.target }}" "seeds/${{ matrix.target }}" \
-            -- -max_total_time=600
-      - name: upload crash artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-artifacts-${{ matrix.target }}
-          path: fuzz/artifacts/${{ matrix.target }}
-          if-no-files-found: ignore

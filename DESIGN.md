@@ -1054,7 +1054,8 @@ every crate that has laws to state, and cargo-fuzz targets under `fuzz/`
 (wire reader totality and write∘read fixpoint, logic canonical decode,
 GeoJSON parsing, entry decode) — see README. Each target keeps a
 tracked, minimized regression corpus under `fuzz/seeds/` that CI
-replays on every push; extended fuzzing runs weekly.
+replays on every push; extended fuzzing runs weekly and proposes
+new-coverage seeds as a pull request.
 
 ### 4.1 First design pass, from the DN implementation
 

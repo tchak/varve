@@ -32,8 +32,9 @@ incl. property suites), `cargo clippy --workspace --all-targets`,
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM
 crate in any Tier 0–4 closure, serde direct only in `-wire`/`-value`);
 CI also denies rustdoc warnings and replays the tracked fuzz seeds
-(`fuzz/seeds/`, minimized corpora — fold new coverage in with the
-`-merge=1` command in README).
+(`fuzz/seeds/`, minimized corpora; `fuzz.yml` fuzzes weekly and opens
+a PR with new-coverage seeds — locally, the `-merge=1` command in
+README).
 
 ## Version control: jj, not git
 

@@ -1,0 +1,145 @@
+name: Fuzz
+
+# Weekly extended fuzzing (or on demand): each target fuzzes for a while
+# on a corpus kept in the Actions cache, new coverage is merged into the
+# tracked seeds (fuzz/seeds/<target>/, the regression corpus CI replays),
+# and the merged seeds are proposed as a pull request. A crash fails that
+# target's job and uploads fuzz/artifacts/<target>/ for reproduction
+# (`cargo +nightly fuzz run <target> <artifact>`).
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: minutes to fuzz each target
+        default: "10"
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # install-action ships a musl-built cargo-fuzz, whose default target is
+  # its own build triple; ASan needs the gnu one.
+  CARGO_FUZZ_TARGET: --target x86_64-unknown-linux-gnu
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wire_read, logic_canon, value_feature, record_entry]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - name: restore corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          # Always a fresh key so the grown corpus is saved; restore the
+          # most recent previous one.
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: fuzz
+        working-directory: fuzz
+        run: |
+          mkdir -p "corpus/${{ matrix.target }}"
+          minutes="${{ inputs.minutes || '10' }}"
+          cargo fuzz run $CARGO_FUZZ_TARGET "${{ matrix.target }}" \
+            "corpus/${{ matrix.target }}" "seeds/${{ matrix.target }}" \
+            -- -max_total_time=$((minutes * 60))
+      - name: merge new coverage into seeds
+        # Runs even after a crash: the crashing input went to artifacts/,
+        # not the corpus, and the rest of the session is still worth keeping.
+        if: always()
+        working-directory: fuzz
+        run: |
+          before=$(ls "seeds/${{ matrix.target }}" | wc -l)
+          cargo fuzz run $CARGO_FUZZ_TARGET "${{ matrix.target }}" \
+            "seeds/${{ matrix.target }}" "corpus/${{ matrix.target }}" \
+            -- -merge=1
+          after=$(ls "seeds/${{ matrix.target }}" | wc -l)
+          echo "${{ matrix.target }}: $before → $after seeds (+$((after - before)))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: upload merged seeds
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seeds-${{ matrix.target }}
+          path: fuzz/seeds/${{ matrix.target }}
+          retention-days: 7
+      - name: upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+
+  propose-seeds:
+    name: open seeds PR
+    needs: fuzz
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: seeds-*
+          path: seeds-dl
+      - name: place merged seeds
+        id: seeds
+        run: |
+          for dir in seeds-dl/seeds-*; do
+            [ -d "$dir" ] || continue
+            target="${dir#seeds-dl/seeds-}"
+            mkdir -p "fuzz/seeds/$target"
+            cp -n "$dir"/* "fuzz/seeds/$target"/ 2>/dev/null || true
+          done
+          rm -rf seeds-dl
+          {
+            echo "summary<<EOF"
+            for target in wire_read logic_canon value_feature record_entry; do
+              n=$(git status --porcelain "fuzz/seeds/$target" | wc -l | tr -d ' ')
+              echo "- \`$target\`: +$n seeds"
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "changed=$(git status --porcelain fuzz/seeds | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+      - name: open or update pull request
+        if: steps.seeds.outputs.changed != '0'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # A PR opened with the default GITHUB_TOKEN does not trigger CI;
+          # set a FUZZ_PR_TOKEN secret (fine-grained PAT: contents +
+          # pull-requests write) to get CI on the PR, or close/reopen it.
+          token: ${{ secrets.FUZZ_PR_TOKEN || github.token }}
+          branch: fuzz/seeds
+          delete-branch: true
+          add-paths: fuzz/seeds
+          commit-message: |
+            fuzz: merge new coverage into the tracked seeds
+
+            From the ${{ github.workflow }} run ${{ github.run_id }}.
+          title: "fuzz: new coverage from the weekly run"
+          body: |
+            New-coverage inputs found by [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}), merged into the tracked regression seeds (`-merge=1`, additions only):
+
+            ${{ steps.seeds.outputs.summary }}
+
+            Fuzz job conclusion: `${{ needs.fuzz.result }}` — if not `success`, a target crashed: see the `fuzz-crash-*` artifacts on the run before merging.
+          labels: fuzz
