@@ -369,7 +369,9 @@ pending → resolved | not_found | ambiguous | failed | abandoned
 ```
 
 plus, on each terminal transition, a summary of how it was reached
-(attempt count, last error) — and a deadline.
+(attempt count, last error; for `abandon`, a reason: `deadline` ·
+`operator` · `resolver_unavailable`). There is **no deadline on the
+record** (settled below).
 
 **Settled (2026-08-19): transient failures are not record state;
 outcomes are.** Institutional memory decides this one: the upstream
@@ -401,6 +403,25 @@ normal case); a mutable counter beside the log (today's
 `attempts`/`last_error` fields) was rejected with decision A — unchained
 state is not a record. Code follows: those fields move from the
 `Resolution` struct to the terminal ops' content.
+
+**Settled (2026-08-19): the deadline is policy, not record data.**
+"Abandon after N days" is a property of an instance's relationship with
+a resolver — a scheduler policy, like rate limits — not a fact about the
+record. An absolute deadline stamped at request time would bake that
+policy into chained data: extending it under a multi-day outage means
+rewriting records (the afterthought smell again), and an importing
+instance would inherit a number computed under someone else's policy.
+The record carries what is meaningful — *when* the lookup was requested
+(the `request` entry's envelope timestamp) and *why* it was abandoned
+(the `abandon` op's reason). Rule 1's bindings are untouched: versions
+are *meaning* (which mapping resolves) and travel; deadlines are
+*policy* and do not. The kernel has no clock and cannot guarantee
+termination; "pending-forever is a leak" therefore becomes an explicit
+**platform obligation** (PLATFORM.md P.12): every instance runs an
+abandonment policy, whose parameters — and whether a long outage should
+abandon at all rather than wait — are what §12.7 fixes. `deadline`
+leaves the `Resolution` struct; the Tier 5 scheduler owns it, together
+with backoff (decision above).
 
 **Abandonment must be an explicit recorded event.** Pending-forever is a leak;
 silent give-up is unauditable.

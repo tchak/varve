@@ -326,3 +326,45 @@ honestly: ClamAV is a known-signature compliance layer, not protection
 against novel malware — reviewer safety leans at least as much on
 serving attachments with `Content-Disposition: attachment` and
 sandboxed, no-inline-HTML preview rendering.
+
+## P.12 Resolution scheduling and abandonment (settled 2026-08-19)
+
+The kernel records *that* a lookup was requested and *how it ended*
+(DESIGN §2.8: lifecycle ops in the log), and hands the platform one pure
+enumeration, `pending_resolutions(record)`. Everything between — attempt
+timestamps, transient errors, backoff, next try, and the **deadline** —
+is platform state, owned by the `varve-service` scheduler in
+`platform-server` (P.3), never written into the record. DESIGN §2.8
+settled the deadline as policy precisely so a multi-day upstream outage
+(the normal case, per institutional memory) is handled by changing one
+policy, not by rewriting records.
+
+Obligations this places on the platform:
+
+- **Termination.** The kernel cannot guarantee it (no clock); the
+  platform must: every pending resolution is either landed, answered,
+  or explicitly abandoned by policy — pending-forever is the leak DESIGN
+  forbids. The abandonment policy runs per resolver, with a reason
+  (`deadline` · `operator` · `resolver_unavailable`) written into the
+  `abandon` op, and its summary (`attempts`, `last_error`) taken from
+  the scheduler's own attempt history at that moment.
+- **Outage posture is a policy choice, not a code path.** Whether a
+  resolver's pending lookups should be abandoned after N days or simply
+  wait out the outage is a per-resolver parameter. DESIGN §12.7
+  (deferred-resolution frequency) sizes N and decides the default; until
+  then the default leans to *waiting* — abandonment exists for
+  never-resolving lookups and removed resolvers, not for weathering an
+  outage.
+- **Re-request in bulk** (DESIGN §2.8): an operator action, per
+  procedure and resolver, that reopens `abandoned`/`failed` instances as
+  a reported act — the "API is back" morning-after operation. Surfaces
+  in the back office expose it next to bulk re-map.
+- **Backoff is per resolver and shared**, not per record: when a
+  référentiel is down, every pending lookup against it should back off
+  together (one circuit, not ten thousand timers), and resume together.
+- **Import** (DESIGN §2.8, §5): pending instances arriving by history
+  import are picked up by the same scheduler through the same
+  enumeration, with no import-specific path; instances the platform
+  cannot serve stay pending until an operator decides (re-request once
+  the resolver exists, or abandon with `resolver_unavailable`).
+
