@@ -372,6 +372,14 @@ plus attempt count, last error, deadline.
 **Abandonment must be an explicit recorded event.** Pending-forever is a leak;
 silent give-up is unauditable.
 
+The lifecycle is first-class from day one rather than an optimistic
+"fetch, and retry if it fails". Institutional memory (2026-08-19): the
+upstream institutional APIs go down for hours and sometimes days, and
+DN grew its deferral mechanisms as afterthoughts, each layered on the
+previous one. That is the cautionary tale behind treating attempt
+count, deadline and explicit abandonment as part of the record's
+meaning (and of its wire form — §10 Q14, held whole for this reason).
+
 Kernel contributes one pure function — `pending_resolutions(record)` — so a
 Tier 5 scheduler can drive retries without the kernel knowing about queues or
 clocks.
@@ -1954,7 +1962,17 @@ Only then: `surface`, `store`, service.
     routed here rather than built piecemeal: payload blobs and attachment
     blobs share one sidecar, and `resolution`/`checkpoint` lines should
     land with it so import restores a record whole. Decide with §12.7
-    (deferred-resolution frequency) in hand.
+    (deferred-resolution frequency) in hand. **Held whole, by
+    institutional memory (2026-08-19):** a split was proposed — land the
+    already-specified members (surfaces, `checkpoint`, `snapshot`, the
+    sidecar) now and leave only the `resolution` status vocabulary
+    gated — and refused. DN's institutional APIs are flaky for hours and
+    sometimes days, and DN's deferral machinery was built as a series of
+    afterthoughts, each more complicated than the last; the wire shape
+    of `resolution` is the one place where that history must not repeat.
+    Landing the rest first would recreate the afterthought: a record
+    format that is "complete except for the part that breaks". No
+    shortcuts; the bundle waits for §12.7.
 15. **The §4.3 solver — absurdity detection and statically unreachable
     required columns.** Promised by §7 for the impact report and by
     §4.3 as the algorithm behind it; not built (found by audit,
@@ -2086,7 +2104,12 @@ With access to open DN schema statistics:
    scope?).
 7. **Deferred-resolution frequency** — how often were records submitted with
    unresolved lookups, and how long did they stay pending? Sizes the retry and
-   abandonment machinery.
+   abandonment machinery. *Institutional memory already bounds the tail
+   (2026-08-19): outages of the upstream institutional APIs last hours and
+   sometimes days, not minutes. What the census must add is the
+   distribution — typical pending duration, share that never resolves,
+   share resolved after the record moved on — which fixes deadlines,
+   backoff and the abandonment policy on the `resolution` line (Q14).*
 8. **Post-submission edit profile** — how many distinct actors touch a record
    after submission, how many entries per record, over what elapsed time, and
    how often do two actors touch the same cell? Validates per-cell LWW +
