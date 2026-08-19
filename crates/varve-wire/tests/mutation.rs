@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RecordId, RowPath};
-use varve_record::{Actor, ActorKind, Draft, Entry, Origin, RecordLog};
+use varve_record::{Actor, ActorKind, Draft, Entry, EntryOp, Origin, RecordLog};
 use varve_value::{CellState, CellValue, Op, Scalar};
 use varve_wire::{
     Intent, Mode, SnapshotImportRequest, SnapshotRecord, adopt_history, import_snapshot,
@@ -47,7 +47,7 @@ fn draft(minute: u8, base: u64, ops: Vec<Op>) -> Draft {
         base_version: base,
         origin: Origin::Entered,
         note: Some("n".into()),
-        ops,
+        ops: ops.into_iter().map(EntryOp::Cell).collect(),
         salts,
     }
 }

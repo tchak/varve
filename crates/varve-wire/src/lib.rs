@@ -7,8 +7,10 @@
 //! lossless for the log, chain-preserving; the migration format) and
 //! **snapshot** (`record`/`item` cell lines through a reading lens).
 //! They never mix in one stream. Import modes are stream kinds, never
-//! flags (§5). Not yet on the wire (§10 Q14): resolution instances,
-//! checkpoints, payload snapshots and the bundled blob sidecar.
+//! flags (§5). Resolution lifecycle transitions and checkpoints ride
+//! `entry` lines as ops (§2.8/§2.9, settled 2026-08-19). Not yet on
+//! the wire (§10 Q14): payload `snapshot` descriptions, the bundled
+//! blob sidecar, and surfaces.
 //!
 //! The reader takes a whole buffer; a streaming reader over the same
 //! line grammar is Tier 5 work.

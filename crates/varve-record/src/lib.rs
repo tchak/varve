@@ -1,5 +1,6 @@
 //! Tier 3 (§7): the record log (§2.9) — entries, fold, snapshots,
-//! checkpoints, concurrency detection, resolution instances (§2.8).
+//! concurrency detection — and, as folds of lifecycle ops in that same
+//! log, resolution instances (§2.8) and checkpoints (§2.9).
 //!
 //! Still deterministic: no clock, no IO. Timestamps and salts are
 //! inputs, generated at Tier 5 and passed in.
@@ -10,19 +11,21 @@ pub mod canon;
 mod entry;
 mod log;
 mod resolution;
+mod scan;
 
 pub use entry::{
-    Draft, Entry, EntryContent, EntrySalts, Envelope, SaltCountMismatch, genesis_hash,
+    Draft, Entry, EntryContent, EntryOp, EntrySalts, Envelope, SaltCountMismatch, genesis_hash,
 };
 pub use log::{
     AppendError, ChainError, Conflict, FoldError, FoldResult, RecordLog, Snapshot, SnapshotError,
     Suppressed,
 };
 pub use resolution::{
-    Checkpoint, CheckpointViolation, ExpectedResolution, Resolution, ResolutionStatus, Scan,
-    ScanStatus, ScanTransitionError, TransitionError, pending_resolutions, pending_scans,
-    pending_set, validate_after_checkpoint,
+    AbandonReason, Checkpoint, CheckpointAt, CheckpointViolation, ExpectedResolution,
+    LifecycleError, Outcome, Resolution, ResolutionKey, ResolutionStatus, Transition,
+    validate_after_checkpoint,
 };
+pub use scan::{Scan, ScanStatus, ScanTransitionError, pending_scans};
 
 use varve_core::ResolverId;
 use varve_core::canonical::ContentHash;

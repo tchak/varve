@@ -1,8 +1,10 @@
 //! The history-mode wire law (§5, M3) over the **full** op / origin /
-//! scalar space: logs built from generated record states — every op
-//! kind reached through `diff` — under every actor kind, every origin
-//! shape and notes, written as `entry` lines, read back identical, byte
-//! stable, and adopted as the same chain (§6).
+//! scalar space: logs built from generated record states — every cell
+//! op kind reached through `diff`, every lifecycle op kind (§2.8
+//! resolution transitions, §2.9 checkpoints) appended legally against
+//! the fold — under every actor kind, every origin shape and notes,
+//! written as `entry` lines, read back identical, byte stable, and
+//! adopted as the same chain (§6).
 
 mod common;
 
@@ -11,8 +13,11 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 use varve_core::canonical::{CanonicalValue, hash_plain};
 use varve_core::primitives::Instant;
-use varve_core::{RecordId, ResolverId};
-use varve_record::{Actor, ActorKind, Derivation, Draft, Origin, RecordLog};
+use varve_core::{GroupId, ItemId, PathSeg, RecordId, ResolverId, RowPath};
+use varve_record::{
+    AbandonReason, Actor, ActorKind, Checkpoint, Derivation, Draft, EntryOp, ExpectedResolution,
+    Origin, Outcome, RecordLog, Transition,
+};
 use varve_value::{RecordValues, diff};
 use varve_wire::{
     Intent, Line, Mode, adopt_history, read_stream, test_salts, write_history, write_lines,
@@ -77,10 +82,79 @@ fn meta() -> impl Strategy<Value = Meta> {
         })
 }
 
+/// One lifecycle step to append after the cell history: an instance
+/// (anchor, scope), a transition, and whether a checkpoint follows in
+/// the same entry. `build_log` makes each step legal against the fold.
+#[derive(Debug, Clone)]
+struct LifecycleStep {
+    anchor: GroupId,
+    scope: RowPath,
+    transition: Transition,
+    checkpoint: bool,
+}
+
+fn outcome() -> impl Strategy<Value = Outcome> {
+    (any::<u32>(), proptest::option::of("\\PC{0,12}")).prop_map(|(attempts, last_error)| Outcome {
+        attempts,
+        last_error,
+    })
+}
+
+fn transition() -> impl Strategy<Value = Transition> {
+    prop_oneof![
+        ("[a-z-]{1,8}", any::<u32>(), any::<u32>()).prop_map(|(r, rv, mv)| Transition::Request {
+            resolver: ResolverId::new(r),
+            resolver_version: rv,
+            mapping_version: mv,
+        }),
+        ("[a-z]{0,6}", outcome()).prop_map(|(payload, outcome)| Transition::Land {
+            snapshot: hash_plain(&CanonicalValue::String(payload)).unwrap(),
+            outcome,
+        }),
+        outcome().prop_map(|outcome| Transition::NotFound { outcome }),
+        outcome().prop_map(|outcome| Transition::Ambiguous { outcome }),
+        outcome().prop_map(|outcome| Transition::Failed { outcome }),
+        (
+            prop_oneof![
+                Just(AbandonReason::Deadline),
+                Just(AbandonReason::Operator),
+                Just(AbandonReason::ResolverUnavailable),
+                Just(AbandonReason::Superseded),
+            ],
+            outcome()
+        )
+            .prop_map(|(reason, outcome)| Transition::Abandon { reason, outcome }),
+    ]
+}
+
+fn lifecycle_step() -> impl Strategy<Value = LifecycleStep> {
+    (
+        "[a-c]",
+        prop_oneof![
+            Just(RowPath::root()),
+            "[a-z0-9]{1,3}".prop_map(|i| RowPath::root().child(PathSeg {
+                group: GroupId::new("rep"),
+                item: ItemId::new(i),
+            })),
+        ],
+        transition(),
+        any::<bool>(),
+    )
+        .prop_map(|(anchor, scope, transition, checkpoint)| LifecycleStep {
+            anchor: GroupId::new(anchor),
+            scope,
+            transition,
+            checkpoint,
+        })
+}
+
 /// One record's history: successive target states, each with the
-/// metadata of the entry that reaches it.
-fn record_history() -> impl Strategy<Value = Vec<(RecordValues, Meta)>> {
-    proptest::collection::vec((common::shared_universe_values(), meta()), 1..=4)
+/// metadata of the entry that reaches it, then lifecycle steps.
+fn record_history() -> impl Strategy<Value = (Vec<(RecordValues, Meta)>, Vec<LifecycleStep>)> {
+    (
+        proptest::collection::vec((common::shared_universe_values(), meta()), 1..=4),
+        proptest::collection::vec(lifecycle_step(), 0..=3),
+    )
 }
 
 /// Build the log: `diff(previous, next)` is the entry's op list, so
@@ -88,7 +162,10 @@ fn record_history() -> impl Strategy<Value = Vec<(RecordValues, Meta)>> {
 /// a human-authored cell is *suppressed* by the fold (§2.8 rule 2) —
 /// the append still succeeds and the chain is what the wire carries, so
 /// the fold is not asserted against the generated targets here.
-fn build_log(record: &RecordId, history: &[(RecordValues, Meta)]) -> RecordLog {
+fn build_log(
+    record: &RecordId,
+    (history, steps): &(Vec<(RecordValues, Meta)>, Vec<LifecycleStep>),
+) -> RecordLog {
     let mut log = RecordLog::new(record.clone());
     let mut previous = RecordValues::new();
     for (i, (target, meta)) in history.iter().enumerate() {
@@ -101,11 +178,96 @@ fn build_log(record: &RecordId, history: &[(RecordValues, Meta)]) -> RecordLog {
             base_version: log.version(),
             origin: meta.origin.clone(),
             note: meta.note.clone(),
-            ops,
+            ops: ops.into_iter().map(EntryOp::Cell).collect(),
             salts,
         })
         .expect("diff ops apply by construction");
         previous = target.clone();
+    }
+    // Lifecycle steps, made legal against the fold (§2.8 table): a
+    // request while pending is preceded by `abandon(superseded)`; a
+    // terminal transition on a non-pending instance is preceded by a
+    // request. A checkpoint expects exactly what is pending after them.
+    let meta = &history.last().expect("at least one state").1;
+    for (i, step) in steps.iter().enumerate() {
+        let state = log.fold().expect("the log folds");
+        let key = (step.anchor.clone(), step.scope.clone());
+        let pending = state
+            .resolutions
+            .get(&key)
+            .is_some_and(|r| r.status.is_pending());
+        let lifecycle = |t: Transition| EntryOp::Resolution {
+            anchor: step.anchor.clone(),
+            scope: step.scope.clone(),
+            transition: t,
+        };
+        let mut ops = Vec::new();
+        match (&step.transition, pending) {
+            (Transition::Request { .. }, true) => ops.push(lifecycle(Transition::Abandon {
+                reason: AbandonReason::Superseded,
+                outcome: Outcome::default(),
+            })),
+            (Transition::Request { .. }, false) => {}
+            (_, true) => {}
+            (_, false) => ops.push(lifecycle(Transition::Request {
+                resolver: ResolverId::new("insee-sirene"),
+                resolver_version: 1,
+                mapping_version: 1,
+            })),
+        }
+        ops.push(lifecycle(step.transition.clone()));
+        if step.checkpoint {
+            // What will be pending once these ops fold: re-fold a
+            // scratch copy rather than second-guess the table.
+            let mut scratch = log.clone();
+            let n = ops.len();
+            scratch
+                .append(Draft {
+                    actor: meta.actor.clone(),
+                    timestamp: meta.timestamp,
+                    revision: common::lens(),
+                    base_version: scratch.version(),
+                    origin: Origin::Entered,
+                    note: None,
+                    ops: ops.clone(),
+                    salts: test_salts(200 + i as u8)(n),
+                })
+                .expect("made legal above");
+            let expected = scratch
+                .fold()
+                .unwrap()
+                .pending_resolutions()
+                .map(|r| ExpectedResolution {
+                    anchor: r.anchor.clone(),
+                    scope: r.scope.clone(),
+                    resolver: r.resolver.clone(),
+                    resolver_version: r.resolver_version,
+                    mapping_version: r.mapping_version,
+                })
+                .collect();
+            ops.push(EntryOp::Checkpoint(Checkpoint {
+                name: format!("cp{i}"),
+                reading_revision: common::lens(),
+                expected,
+                frozen_columns: ["a", "b"]
+                    .into_iter()
+                    .map(varve_core::ColumnId::new)
+                    .collect(),
+                frozen_groups: [GroupId::new("rep")].into_iter().collect(),
+            }));
+        }
+        let n = ops.len();
+        log.append(Draft {
+            actor: meta.actor.clone(),
+            timestamp: meta.timestamp,
+            revision: common::lens(),
+            base_version: log.version(),
+            origin: Origin::Entered,
+            note: None,
+            ops,
+            salts: test_salts(200 + i as u8)(n),
+        })
+        .expect("lifecycle steps are made legal");
     }
     log
 }
@@ -200,26 +362,35 @@ proptest! {
     }
 }
 
-/// The generator does reach every op kind — otherwise the law above
-/// would be weaker than it claims.
+/// The generator does reach every op kind — cell and lifecycle —
+/// otherwise the law above would be weaker than it claims.
 #[test]
 fn generated_histories_cover_every_op_kind() {
     use proptest::strategy::ValueTree;
     use proptest::test_runner::TestRunner;
     use varve_value::Op;
     let mut runner = TestRunner::deterministic();
-    let mut seen = [false; 5];
+    let mut seen = [false; 12];
     for _ in 0..200 {
         let history = record_history().new_tree(&mut runner).unwrap().current();
         let log = build_log(&RecordId::new("r"), &history);
         for entry in log.entries() {
             for op in &entry.content.ops {
                 seen[match op {
-                    Op::Set { .. } => 0,
-                    Op::Unset { .. } => 1,
-                    Op::AddItem { .. } => 2,
-                    Op::RemoveItem { .. } => 3,
-                    Op::Reorder { .. } => 4,
+                    EntryOp::Cell(Op::Set { .. }) => 0,
+                    EntryOp::Cell(Op::Unset { .. }) => 1,
+                    EntryOp::Cell(Op::AddItem { .. }) => 2,
+                    EntryOp::Cell(Op::RemoveItem { .. }) => 3,
+                    EntryOp::Cell(Op::Reorder { .. }) => 4,
+                    EntryOp::Resolution { transition, .. } => match transition {
+                        Transition::Request { .. } => 5,
+                        Transition::Land { .. } => 6,
+                        Transition::NotFound { .. } => 7,
+                        Transition::Ambiguous { .. } => 8,
+                        Transition::Failed { .. } => 9,
+                        Transition::Abandon { .. } => 10,
+                    },
+                    EntryOp::Checkpoint(_) => 11,
                 }] = true;
             }
         }

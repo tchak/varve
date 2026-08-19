@@ -1,13 +1,17 @@
 //! The append-only record log: current state is `fold(log)` (§2.9).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use varve_core::RecordId;
 use varve_core::canonical::ContentHash;
+use varve_core::{GroupId, RecordId, RowPath};
 use varve_value::{ApplyError, CellAddr, Op, RecordValues, apply, diff};
 
 use crate::Origin;
-use crate::entry::{Draft, Entry, Envelope, SaltCountMismatch, genesis_hash};
+use crate::entry::{Draft, Entry, EntryOp, Envelope, SaltCountMismatch, genesis_hash};
+use crate::resolution::{
+    CheckpointAt, LifecycleError, Resolution, ResolutionKey, Transition, checkpoint_op,
+    fold_transition,
+};
 
 #[derive(Debug, Clone)]
 pub struct RecordLog {
@@ -32,6 +36,12 @@ pub enum AppendError {
     /// the platform reports the conflict and lets the actor retry.
     #[error("ops do not apply to the current state: {0}")]
     DoesNotApply(ApplyError),
+    /// A lifecycle op the §2.8 table does not allow from the current
+    /// state (a request while pending, a landing on a closed instance,
+    /// a checkpoint expecting what is not pending). Refused for the
+    /// same reason: the log must fold.
+    #[error("illegal lifecycle transition: {0}")]
+    IllegalTransition(LifecycleError),
     /// The log as loaded does not fold (a poisoned or tampered log);
     /// nothing can be appended until it is repaired.
     #[error("the log does not fold: {0}")]
@@ -60,6 +70,10 @@ pub enum FoldError {
     /// Entry `seq`'s ops do not apply — a poisoned or tampered log.
     #[error("entry {seq}: {error}")]
     Apply { seq: u64, error: ApplyError },
+    /// Entry `seq` carries a lifecycle op illegal from the state before
+    /// it — a poisoned or tampered log.
+    #[error("entry {seq}: {error}")]
+    Lifecycle { seq: u64, error: LifecycleError },
     /// A log point past the end: `upto` entries were asked for, the log
     /// has `version`. Never clamped silently — "the state at entry 40"
     /// of a 30-entry log is a caller error, not the head.
@@ -81,6 +95,30 @@ pub struct FoldResult {
     /// Late machine writes the fold refused to apply (§2.8 rule 2):
     /// visible, never silent.
     pub suppressed: Vec<Suppressed>,
+    /// Resolution instances (§2.8): the fold of the log's lifecycle
+    /// ops, keyed by anchor-group instance.
+    pub resolutions: BTreeMap<ResolutionKey, Resolution>,
+}
+
+impl FoldResult {
+    /// The one pure enumeration a Tier 5 scheduler needs (§2.8): every
+    /// instance still pending, whatever its age — the kernel has no
+    /// clock and no deadline; policy is the platform's (P.12).
+    pub fn pending_resolutions(&self) -> impl Iterator<Item = &Resolution> {
+        self.resolutions.values().filter(|r| r.status.is_pending())
+    }
+
+    /// What the logic language reads (§2.8 rule 3): pending resolutions
+    /// as `(scope, anchor group)` pairs — per group instance, so
+    /// "required unless pending" in one item does not leak into
+    /// another, and two blocks fed by one resolver do not leak into
+    /// each other (§10 Q17). Feed this to
+    /// `varve_logic::EvalContext::pending`.
+    pub fn pending_set(&self) -> BTreeSet<(RowPath, GroupId)> {
+        self.pending_resolutions()
+            .map(|r| (r.scope.clone(), r.anchor.clone()))
+            .collect()
+    }
 }
 
 /// A resolver's derived write that landed on a human-authored cell and
@@ -162,7 +200,44 @@ fn fold_entry(result: &mut FoldResult, entry: &Entry) -> Result<(), FoldError> {
     let origin = &entry.content.origin;
     let late_machine_write = entry.envelope.actor.kind == crate::ActorKind::Resolver
         && matches!(origin, Origin::Derived(_));
+    let mut checkpoints = 0;
     for op in &entry.content.ops {
+        let op = match op {
+            EntryOp::Cell(op) => op,
+            EntryOp::Resolution {
+                anchor,
+                scope,
+                transition,
+            } => {
+                fold_transition(&mut result.resolutions, seq, anchor, scope, transition)
+                    .map_err(|error| FoldError::Lifecycle { seq, error })?;
+                continue;
+            }
+            EntryOp::Checkpoint(checkpoint) => {
+                checkpoints += 1;
+                if checkpoints > 1 {
+                    return Err(FoldError::Lifecycle {
+                        seq,
+                        error: LifecycleError::MultipleCheckpoints,
+                    });
+                }
+                // A checkpoint expects only what is pending at its
+                // position, under the versions it was requested with.
+                for exp in &checkpoint.expected {
+                    let pending = result
+                        .resolutions
+                        .get(&(exp.anchor.clone(), exp.scope.clone()))
+                        .is_some_and(|r| r.status.is_pending() && exp.matches(r));
+                    if !pending {
+                        return Err(FoldError::Lifecycle {
+                            seq,
+                            error: LifecycleError::ExpectedNotPending(exp.clone()),
+                        });
+                    }
+                }
+                continue;
+            }
+        };
         // §2.8 rule 2, enforced where provenance is derived: a
         // resolver's derived write onto a human-authored cell is not
         // applied; the cell keeps its value and gains the late
@@ -255,6 +330,22 @@ impl RecordLog {
         &self.entries
     }
 
+    /// The checkpoints in this log (§2.9), in order — each an entry
+    /// whose position pins what it freezes. The last one is the
+    /// regime in force.
+    pub fn checkpoints(&self) -> Vec<CheckpointAt> {
+        self.entries
+            .iter()
+            .filter_map(|e| {
+                checkpoint_op(&e.content.ops).map(|c| CheckpointAt {
+                    seq: e.envelope.seq,
+                    entry_hash: e.hash(),
+                    checkpoint: c.clone(),
+                })
+            })
+            .collect()
+    }
+
     /// The log's current version: the seq the next entry will get.
     pub fn version(&self) -> u64 {
         self.entries.len() as u64
@@ -295,6 +386,7 @@ impl RecordLog {
         let mut state = self.fold().map_err(AppendError::Unfoldable)?;
         fold_entry(&mut state, &entry).map_err(|e| match e {
             FoldError::Apply { error, .. } => AppendError::DoesNotApply(error),
+            FoldError::Lifecycle { error, .. } => AppendError::IllegalTransition(error),
             FoldError::OutOfRange { .. } => unreachable!("fold_entry never ranges"),
         })?;
         self.entries.push(entry);
@@ -366,7 +458,8 @@ impl RecordLog {
             let base = later.envelope.base_version;
             let mut touched: Vec<CellAddr> = Vec::new();
             for op in &later.content.ops {
-                let (Op::Set { column, path, .. } | Op::Unset { column, path }) = op else {
+                let Some(Op::Set { column, path, .. } | Op::Unset { column, path }) = op.cell()
+                else {
                     continue;
                 };
                 let addr = CellAddr {
@@ -402,20 +495,15 @@ impl RecordLog {
     }
 
     /// §2.15 GC roots: every blob this record's *entire log* references —
-    /// attachment cells in every entry (including superseded values) and
-    /// resolver-payload snapshots in origins. The kernel enumerates
-    /// roots; the Tier 5 store sweeps. Erasure must cover history, so
-    /// this walks the log, not the fold.
-    pub fn referenced_blobs(
-        &self,
-        resolutions: &[crate::Resolution],
-    ) -> std::collections::BTreeSet<varve_core::canonical::ContentHash> {
+    /// attachment cells in every entry (including superseded values),
+    /// resolver-payload snapshots in origins, and the payloads landed by
+    /// `land` ops (a snapshot that landed while its targets were
+    /// overridden may be referenced from nowhere else, §2.8 rule 2).
+    /// The kernel enumerates roots; the Tier 5 store sweeps. Erasure
+    /// must cover history, so this walks the log, not the fold.
+    pub fn referenced_blobs(&self) -> BTreeSet<ContentHash> {
         use varve_value::{CellValue as V, Scalar};
-        let mut blobs = std::collections::BTreeSet::new();
-        // Landed payloads live on the resolution instance too (§2.7):
-        // a snapshot that landed while its targets were overridden may
-        // be referenced from nowhere else.
-        blobs.extend(resolutions.iter().filter_map(|r| r.snapshot));
+        let mut blobs = BTreeSet::new();
         for entry in &self.entries {
             match &entry.content.origin {
                 crate::Origin::Derived(d)
@@ -427,7 +515,14 @@ impl RecordLog {
                 _ => {}
             }
             for op in &entry.content.ops {
-                if let Op::Set { state, .. } = op
+                if let EntryOp::Resolution {
+                    transition: Transition::Land { snapshot, .. },
+                    ..
+                } = op
+                {
+                    blobs.insert(*snapshot);
+                }
+                if let Some(Op::Set { state, .. }) = op.cell()
                     && let varve_value::CellState::Value(value) = state
                 {
                     let scalars: Vec<&Scalar> = match value {

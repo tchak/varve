@@ -34,7 +34,7 @@ pub struct EvalContext<'a> {
 }
 
 /// Pending resolutions keyed by anchor-group instance (§2.8): what
-/// `varve_record::pending_set` produces.
+/// `varve_record::FoldResult::pending_set` produces.
 pub type PendingSet = BTreeSet<(RowPath, GroupId)>;
 
 fn is_pending(ctx: &EvalContext, group: &GroupId) -> bool {

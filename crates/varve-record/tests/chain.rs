@@ -6,8 +6,8 @@ use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, RecordId, RevisionId, RowPath};
 use varve_record::{
-    Actor, ActorKind, AppendError, ChainError, Draft, Entry, EntrySalts, Origin, RecordLog,
-    SnapshotError, genesis_hash,
+    Actor, ActorKind, AppendError, ChainError, Draft, Entry, EntryOp, EntrySalts, Origin,
+    RecordLog, SnapshotError, genesis_hash,
 };
 use varve_value::{CellState, CellValue, Op, Scalar};
 
@@ -46,7 +46,7 @@ fn draft(actor: Actor, minute: u8, base: u64, origin: Origin, ops: Vec<Op>) -> D
         base_version: base,
         origin,
         note: None,
-        ops,
+        ops: ops.into_iter().map(EntryOp::Cell).collect(),
         salts: salts(n),
     }
 }
@@ -214,7 +214,7 @@ fn content_tampers_break_the_commitment_even_on_the_tail() {
     let cases: Vec<Tamper> = vec![
         (
             "op edit",
-            Box::new(|e: &mut Entry| e.content.ops[0] = set("name", "MALLORY")),
+            Box::new(|e: &mut Entry| e.content.ops[0] = set("name", "MALLORY").into()),
         ),
         (
             "origin edit",

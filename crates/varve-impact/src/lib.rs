@@ -185,7 +185,7 @@ pub struct BrokenRule {
 /// One record as `assess` sees it: its folded values and the
 /// declarations with a pending resolution on it — `(anchor, resolver)`
 /// pairs, a declaration's identity (§10 Q17); project them from the
-/// record's `Resolution` instances.
+/// fold's pending resolutions (`varve_record::FoldResult`).
 #[derive(Debug, Clone, Copy)]
 pub struct RecordUnderAssessment<'a> {
     pub values: &'a RecordValues,

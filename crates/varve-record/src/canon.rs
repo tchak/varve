@@ -13,7 +13,8 @@ use varve_core::RowPath;
 use varve_core::canonical::CanonicalValue;
 use varve_value::{CellState, CellValue, Op, Scalar};
 
-use crate::{Derivation, Origin};
+use crate::resolution::{AbandonReason, Checkpoint, ExpectedResolution, Outcome, Transition};
+use crate::{Derivation, EntryOp, Origin};
 
 fn obj(pairs: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
     CanonicalValue::Object(
@@ -74,7 +75,125 @@ fn state(s: &CellState) -> CanonicalValue {
     }
 }
 
-pub fn op(op: &Op) -> CanonicalValue {
+/// One entry op: a cell op (`set` … `reorder`, the §5 ops) or a
+/// lifecycle op (`resolution`, `checkpoint` — §2.8/§2.9, settled
+/// 2026-08-19). Lifecycle ops are committed exactly like cell ops.
+pub fn op(op: &EntryOp) -> CanonicalValue {
+    match op {
+        EntryOp::Cell(op) => cell_op(op),
+        EntryOp::Resolution {
+            anchor,
+            scope,
+            transition,
+        } => {
+            let mut pairs = vec![
+                ("op", string("resolution")),
+                ("anchor", string(anchor)),
+                ("scope", path(scope)),
+            ];
+            let outcome_pairs = |o: &Outcome| {
+                vec![
+                    ("attempts", CanonicalValue::Int(o.attempts as i64)),
+                    (
+                        "last_error",
+                        match &o.last_error {
+                            None => CanonicalValue::Null,
+                            Some(e) => string(e),
+                        },
+                    ),
+                ]
+            };
+            match transition {
+                Transition::Request {
+                    resolver,
+                    resolver_version,
+                    mapping_version,
+                } => pairs.extend([
+                    ("transition", string("request")),
+                    ("resolver", string(resolver)),
+                    (
+                        "resolver_version",
+                        CanonicalValue::Int(*resolver_version as i64),
+                    ),
+                    (
+                        "mapping_version",
+                        CanonicalValue::Int(*mapping_version as i64),
+                    ),
+                ]),
+                Transition::Land { snapshot, outcome } => {
+                    pairs.push(("transition", string("land")));
+                    pairs.push(("snapshot", string(snapshot)));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                Transition::NotFound { outcome } => {
+                    pairs.push(("transition", string("not_found")));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                Transition::Ambiguous { outcome } => {
+                    pairs.push(("transition", string("ambiguous")));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                Transition::Failed { outcome } => {
+                    pairs.push(("transition", string("failed")));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+                Transition::Abandon { reason, outcome } => {
+                    pairs.push(("transition", string("abandon")));
+                    pairs.push(("reason", string(abandon_reason(*reason))));
+                    pairs.extend(outcome_pairs(outcome));
+                }
+            }
+            obj(pairs)
+        }
+        EntryOp::Checkpoint(c) => obj(vec![
+            ("op", string("checkpoint")),
+            ("name", string(&c.name)),
+            ("reading_revision", string(&c.reading_revision)),
+            (
+                "expected",
+                CanonicalValue::Array(
+                    c.expected
+                        .iter()
+                        .map(|e| {
+                            obj(vec![
+                                ("anchor", string(&e.anchor)),
+                                ("scope", path(&e.scope)),
+                                ("resolver", string(&e.resolver)),
+                                (
+                                    "resolver_version",
+                                    CanonicalValue::Int(e.resolver_version as i64),
+                                ),
+                                (
+                                    "mapping_version",
+                                    CanonicalValue::Int(e.mapping_version as i64),
+                                ),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+            (
+                "frozen_columns",
+                CanonicalValue::Array(c.frozen_columns.iter().map(string).collect()),
+            ),
+            (
+                "frozen_groups",
+                CanonicalValue::Array(c.frozen_groups.iter().map(string).collect()),
+            ),
+        ]),
+    }
+}
+
+fn abandon_reason(r: AbandonReason) -> &'static str {
+    match r {
+        AbandonReason::Deadline => "deadline",
+        AbandonReason::Operator => "operator",
+        AbandonReason::ResolverUnavailable => "resolver_unavailable",
+        AbandonReason::Superseded => "superseded",
+    }
+}
+
+fn cell_op(op: &Op) -> CanonicalValue {
     match op {
         Op::Set {
             column,
@@ -365,13 +484,158 @@ pub fn state_from(v: &CanonicalValue) -> Result<CellState, RecordDecodeError> {
     }
 }
 
-pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
+fn version(m: &Obj, key: &str) -> Result<u32, RecordDecodeError> {
+    u32::try_from(get_int(m, key)?).map_err(|_| RecordDecodeError("bad version".into()))
+}
+
+fn outcome_from(m: &Obj) -> Result<Outcome, RecordDecodeError> {
+    Ok(Outcome {
+        attempts: u32::try_from(get_int(m, "attempts")?)
+            .map_err(|_| RecordDecodeError("bad attempt count".into()))?,
+        last_error: match get(m, "last_error")? {
+            CanonicalValue::Null => None,
+            CanonicalValue::String(s) => Some(s.clone()),
+            _ => return err("last_error must be a string or null"),
+        },
+    })
+}
+
+fn expected_from(v: &CanonicalValue) -> Result<ExpectedResolution, RecordDecodeError> {
     let m = as_obj(v)?;
+    only_keys(
+        m,
+        &[
+            "anchor",
+            "scope",
+            "resolver",
+            "resolver_version",
+            "mapping_version",
+        ],
+    )?;
+    Ok(ExpectedResolution {
+        anchor: GroupId::new(get_str(m, "anchor")?),
+        scope: path_from(get(m, "scope")?)?,
+        resolver: ResolverId::new(get_str(m, "resolver")?),
+        resolver_version: version(m, "resolver_version")?,
+        mapping_version: version(m, "mapping_version")?,
+    })
+}
+
+fn ids<T>(v: &CanonicalValue, make: fn(String) -> T) -> Result<Vec<T>, RecordDecodeError> {
+    as_arr(v)?
+        .iter()
+        .map(|i| match i {
+            CanonicalValue::String(s) => Ok(make(s.clone())),
+            _ => err("ids must be strings"),
+        })
+        .collect()
+}
+
+/// A sorted, duplicate-free id list — the canonical form of a set.
+fn id_set<T: Ord + Clone>(
+    v: &CanonicalValue,
+    make: fn(String) -> T,
+    what: &str,
+) -> Result<std::collections::BTreeSet<T>, RecordDecodeError> {
+    let list = ids(v, make)?;
+    let set: std::collections::BTreeSet<T> = list.iter().cloned().collect();
+    if set.len() != list.len() || !list.windows(2).all(|w| w[0] < w[1]) {
+        return err(format!("{what} must be sorted and duplicate-free"));
+    }
+    Ok(set)
+}
+
+pub fn op_from(v: &CanonicalValue) -> Result<EntryOp, RecordDecodeError> {
+    let m = as_obj(v)?;
+    let op = get_str(m, "op")?;
+    Ok(match op.as_str() {
+        "resolution" => {
+            let base = ["op", "anchor", "scope", "transition"];
+            let outcome = ["attempts", "last_error"];
+            let transition = get_str(m, "transition")?;
+            let allowed: Vec<&str> = match transition.as_str() {
+                "request" => [
+                    &base[..],
+                    &["resolver", "resolver_version", "mapping_version"],
+                ]
+                .concat(),
+                "land" => [&base[..], &["snapshot"], &outcome[..]].concat(),
+                "not_found" | "ambiguous" | "failed" => [&base[..], &outcome[..]].concat(),
+                "abandon" => [&base[..], &["reason"], &outcome[..]].concat(),
+                other => return err(format!("unknown transition '{other}'")),
+            };
+            only_keys(m, &allowed)?;
+            let transition = match transition.as_str() {
+                "request" => Transition::Request {
+                    resolver: ResolverId::new(get_str(m, "resolver")?),
+                    resolver_version: version(m, "resolver_version")?,
+                    mapping_version: version(m, "mapping_version")?,
+                },
+                "land" => Transition::Land {
+                    snapshot: get_str(m, "snapshot")?
+                        .parse::<ContentHash>()
+                        .map_err(|_| RecordDecodeError("bad snapshot ref".into()))?,
+                    outcome: outcome_from(m)?,
+                },
+                "not_found" => Transition::NotFound {
+                    outcome: outcome_from(m)?,
+                },
+                "ambiguous" => Transition::Ambiguous {
+                    outcome: outcome_from(m)?,
+                },
+                "failed" => Transition::Failed {
+                    outcome: outcome_from(m)?,
+                },
+                "abandon" => Transition::Abandon {
+                    reason: match get_str(m, "reason")?.as_str() {
+                        "deadline" => AbandonReason::Deadline,
+                        "operator" => AbandonReason::Operator,
+                        "resolver_unavailable" => AbandonReason::ResolverUnavailable,
+                        "superseded" => AbandonReason::Superseded,
+                        other => return err(format!("unknown abandon reason '{other}'")),
+                    },
+                    outcome: outcome_from(m)?,
+                },
+                _ => unreachable!("filtered above"),
+            };
+            EntryOp::Resolution {
+                anchor: GroupId::new(get_str(m, "anchor")?),
+                scope: path_from(get(m, "scope")?)?,
+                transition,
+            }
+        }
+        "checkpoint" => {
+            only_keys(
+                m,
+                &[
+                    "op",
+                    "name",
+                    "reading_revision",
+                    "expected",
+                    "frozen_columns",
+                    "frozen_groups",
+                ],
+            )?;
+            EntryOp::Checkpoint(Checkpoint {
+                name: get_str(m, "name")?,
+                reading_revision: RevisionId::new(get_str(m, "reading_revision")?),
+                expected: as_arr(get(m, "expected")?)?
+                    .iter()
+                    .map(expected_from)
+                    .collect::<Result<_, _>>()?,
+                frozen_columns: id_set(get(m, "frozen_columns")?, ColumnId::new, "frozen_columns")?,
+                frozen_groups: id_set(get(m, "frozen_groups")?, GroupId::new, "frozen_groups")?,
+            })
+        }
+        _ => EntryOp::Cell(cell_op_from(m, &op)?),
+    })
+}
+
+fn cell_op_from(m: &Obj, op: &str) -> Result<Op, RecordDecodeError> {
     let column = || Ok::<_, RecordDecodeError>(ColumnId::new(get_str(m, "column")?));
     let group = || Ok::<_, RecordDecodeError>(GroupId::new(get_str(m, "group")?));
     let item = || Ok::<_, RecordDecodeError>(ItemId::new(get_str(m, "item")?));
-    let op = get_str(m, "op")?;
-    match op.as_str() {
+    match op {
         "set" => only_keys(m, &["op", "column", "path", "state"])?,
         "unset" => only_keys(m, &["op", "column", "path"])?,
         "add_item" => only_keys(m, &["op", "group", "parent", "item", "at"])?,
@@ -379,7 +643,7 @@ pub fn op_from(v: &CanonicalValue) -> Result<Op, RecordDecodeError> {
         "reorder" => only_keys(m, &["op", "group", "parent", "order"])?,
         _ => {}
     }
-    Ok(match op.as_str() {
+    Ok(match op {
         "set" => Op::Set {
             column: column()?,
             path: path_from(get(m, "path")?)?,
@@ -716,7 +980,7 @@ mod tests {
         })
     }
 
-    fn any_op() -> impl Strategy<Value = Op> {
+    fn any_cell_op() -> impl Strategy<Value = Op> {
         let column = || "[a-z_]{1,6}".prop_map(ColumnId::new);
         let group = || "[a-z]{1,4}".prop_map(GroupId::new);
         let item = || "[a-z0-9]{1,4}".prop_map(ItemId::new);
@@ -747,6 +1011,89 @@ mod tests {
                     order
                 }
             ),
+        ]
+    }
+
+    fn any_outcome() -> impl Strategy<Value = Outcome> {
+        (any::<u32>(), proptest::option::of("\\PC{0,12}")).prop_map(|(attempts, last_error)| {
+            Outcome {
+                attempts,
+                last_error,
+            }
+        })
+    }
+
+    fn any_transition() -> impl Strategy<Value = Transition> {
+        let reason = prop_oneof![
+            Just(AbandonReason::Deadline),
+            Just(AbandonReason::Operator),
+            Just(AbandonReason::ResolverUnavailable),
+            Just(AbandonReason::Superseded),
+        ];
+        prop_oneof![
+            ("[a-z-]{1,8}", any::<u32>(), any::<u32>()).prop_map(
+                |(resolver, resolver_version, mapping_version)| Transition::Request {
+                    resolver: ResolverId::new(resolver),
+                    resolver_version,
+                    mapping_version,
+                }
+            ),
+            (content_hash(), any_outcome())
+                .prop_map(|(snapshot, outcome)| Transition::Land { snapshot, outcome }),
+            any_outcome().prop_map(|outcome| Transition::NotFound { outcome }),
+            any_outcome().prop_map(|outcome| Transition::Ambiguous { outcome }),
+            any_outcome().prop_map(|outcome| Transition::Failed { outcome }),
+            (reason, any_outcome())
+                .prop_map(|(reason, outcome)| Transition::Abandon { reason, outcome }),
+        ]
+    }
+
+    fn any_checkpoint() -> impl Strategy<Value = Checkpoint> {
+        (
+            "\\PC{0,12}",
+            "[a-z0-9:]{1,12}",
+            proptest::collection::vec(
+                (
+                    "[a-z]{1,4}",
+                    row_path(),
+                    "[a-z-]{1,8}",
+                    any::<u32>(),
+                    any::<u32>(),
+                ),
+                0..3,
+            ),
+            proptest::collection::btree_set("[a-z_]{1,6}", 0..4),
+            proptest::collection::btree_set("[a-z]{1,4}", 0..3),
+        )
+            .prop_map(|(name, revision, expected, columns, groups)| Checkpoint {
+                name,
+                reading_revision: RevisionId::new(revision),
+                expected: expected
+                    .into_iter()
+                    .map(|(anchor, scope, resolver, rv, mv)| ExpectedResolution {
+                        anchor: GroupId::new(anchor),
+                        scope,
+                        resolver: ResolverId::new(resolver),
+                        resolver_version: rv,
+                        mapping_version: mv,
+                    })
+                    .collect(),
+                frozen_columns: columns.into_iter().map(ColumnId::new).collect(),
+                frozen_groups: groups.into_iter().map(GroupId::new).collect(),
+            })
+    }
+
+    fn any_op() -> impl Strategy<Value = EntryOp> {
+        prop_oneof![
+            4 => any_cell_op().prop_map(EntryOp::Cell),
+            2 => ("[a-z]{1,4}", row_path(), any_transition()).prop_map(
+                |(anchor, scope, transition)| EntryOp::Resolution {
+                    anchor: GroupId::new(anchor),
+                    scope,
+                    transition,
+                }
+            ),
+            1 => any_checkpoint().prop_map(EntryOp::Checkpoint),
         ]
     }
 
@@ -1136,11 +1483,11 @@ mod tests {
         assert!(entry_from(&with(vec![("meta_salt", s(&"zz".repeat(32)))])).is_err());
         assert!(entry_from(&with(vec![("meta_salt", CanonicalValue::Int(1))])).is_err());
         // One salt per op, both ways.
-        let set_op = op(&Op::Set {
+        let set_op = op(&EntryOp::Cell(Op::Set {
             column: ColumnId::new("c"),
             path: RowPath::root(),
             state: CellState::Empty,
-        });
+        }));
         assert!(
             entry_from(&with(vec![(
                 "ops",
@@ -1175,5 +1522,84 @@ mod tests {
         let mut pairs = base();
         pairs.retain(|(k, _)| *k != "revision");
         assert!(entry_from(&obj(pairs)).is_err());
+    }
+
+    /// Lifecycle ops (§2.8/§2.9) are as strict as cell ops: one
+    /// spelling per transition, no stray keys, sets sorted.
+    #[test]
+    fn lifecycle_ops_have_one_text_each() {
+        let hash = hash_plain(&s("payload")).unwrap().to_string();
+        let resolution = |pairs: Vec<(&str, CanonicalValue)>| {
+            let mut all = vec![
+                ("op", s("resolution")),
+                ("anchor", s("entreprise")),
+                ("scope", CanonicalValue::Array(vec![])),
+            ];
+            all.extend(pairs);
+            obj(all)
+        };
+        let outcome = || {
+            vec![
+                ("attempts", CanonicalValue::Int(3)),
+                ("last_error", CanonicalValue::Null),
+            ]
+        };
+        let request = || {
+            vec![
+                ("transition", s("request")),
+                ("resolver", s("insee")),
+                ("resolver_version", CanonicalValue::Int(1)),
+                ("mapping_version", CanonicalValue::Int(1)),
+            ]
+        };
+        assert!(op_from(&resolution(request())).is_ok());
+        // A request carries no outcome; a landing carries no versions.
+        let mut r = request();
+        r.extend(outcome());
+        assert!(op_from(&resolution(r)).is_err());
+        let mut land = vec![("transition", s("land")), ("snapshot", s(&hash))];
+        land.extend(outcome());
+        assert!(op_from(&resolution(land.clone())).is_ok());
+        land.push(("resolver", s("insee")));
+        assert!(op_from(&resolution(land)).is_err());
+        // A landing without its snapshot is not a landing (§2.7).
+        let mut no_snapshot = vec![("transition", s("land"))];
+        no_snapshot.extend(outcome());
+        assert!(op_from(&resolution(no_snapshot)).is_err());
+        // Outcomes: last_error is a string or null, attempts a safe int.
+        let mut failed = vec![("transition", s("failed"))];
+        failed.extend(outcome());
+        assert!(op_from(&resolution(failed.clone())).is_ok());
+        failed.retain(|(k, _)| *k != "last_error");
+        assert!(op_from(&resolution(failed.clone())).is_err());
+        failed.push(("last_error", CanonicalValue::Int(503)));
+        assert!(op_from(&resolution(failed)).is_err());
+        // Abandon needs a known reason.
+        let mut abandon = vec![("transition", s("abandon")), ("reason", s("deadline"))];
+        abandon.extend(outcome());
+        assert!(op_from(&resolution(abandon.clone())).is_ok());
+        abandon.retain(|(k, _)| *k != "reason");
+        assert!(op_from(&resolution(abandon.clone())).is_err());
+        abandon.push(("reason", s("bored")));
+        assert!(op_from(&resolution(abandon)).is_err());
+        assert!(op_from(&resolution(vec![("transition", s("retry"))])).is_err());
+
+        // Checkpoints: frozen sets are sorted and duplicate-free.
+        let checkpoint = |columns: Vec<&str>| {
+            obj(vec![
+                ("op", s("checkpoint")),
+                ("name", s("submission")),
+                ("reading_revision", s("rev-1")),
+                ("expected", CanonicalValue::Array(vec![])),
+                (
+                    "frozen_columns",
+                    CanonicalValue::Array(columns.into_iter().map(s).collect()),
+                ),
+                ("frozen_groups", CanonicalValue::Array(vec![])),
+            ])
+        };
+        assert!(op_from(&checkpoint(vec!["a", "b"])).is_ok());
+        assert!(op_from(&checkpoint(vec!["b", "a"])).is_err());
+        assert!(op_from(&checkpoint(vec!["a", "a"])).is_err());
     }
 }

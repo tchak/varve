@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RecordId, RevisionId, RowPath};
-use varve_record::{Actor, ActorKind, Draft, EntrySalts, Origin, RecordLog};
+use varve_record::{Actor, ActorKind, Draft, EntryOp, EntrySalts, Origin, RecordLog};
 use varve_schema::{
     Arity, Column, Element, NomenclatureRef, OptionRow, ScalarType, Schema, revision_id,
 };
@@ -58,7 +58,7 @@ fn draft(minute: u8, base: u64, ops: Vec<Op>) -> Draft {
         base_version: base,
         origin: Origin::Entered,
         note: None,
-        ops,
+        ops: ops.into_iter().map(EntryOp::Cell).collect(),
         salts: EntrySalts {
             meta: Salt([9; 32]),
             ops: (0..n).map(|i| Salt([i as u8 + 1; 32])).collect(),
@@ -699,7 +699,7 @@ fn history_with_an_unsalted_op_is_rejected_at_the_reader() {
     // reader refuses it before `verify_chain` ever sees it.
     let record = RecordId::new("r1");
     let mut entries = sample_log().entries().to_vec();
-    entries[0].content.ops.push(set("name", "MALLORY"));
+    entries[0].content.ops.push(set("name", "MALLORY").into());
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     let bytes = write_history(
         manifest(Mode::History, Intent::CreateOnly, 1),

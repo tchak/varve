@@ -2,9 +2,9 @@ use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RecordId, ResolverId, RevisionId, RowPath};
 use varve_record::{
-    Actor, ActorKind, AppendError, ChainError, Checkpoint, CheckpointViolation, Derivation, Draft,
-    EntrySalts, ExpectedResolution, Origin, RecordLog, Resolution, ResolutionStatus,
-    SaltCountMismatch, pending_resolutions, validate_after_checkpoint,
+    AbandonReason, Actor, ActorKind, AppendError, ChainError, Checkpoint, CheckpointViolation,
+    Derivation, Draft, EntryOp, EntrySalts, ExpectedResolution, LifecycleError, Origin, Outcome,
+    RecordLog, ResolutionStatus, SaltCountMismatch, Transition, validate_after_checkpoint,
 };
 use varve_value::{CellAddr, CellState, CellValue, Op, Scalar};
 
@@ -50,8 +50,49 @@ fn draft(actor: Actor, minute: u8, base: u64, origin: Origin, ops: Vec<Op>) -> D
         base_version: base,
         origin,
         note: None,
+        ops: ops.into_iter().map(EntryOp::Cell).collect(),
+        salts: salts(n),
+    }
+}
+
+/// Like `draft`, over entry ops (cell and lifecycle alike).
+fn entry_draft(actor: Actor, minute: u8, base: u64, origin: Origin, ops: Vec<EntryOp>) -> Draft {
+    let n = ops.len();
+    Draft {
+        actor,
+        timestamp: ts(minute),
+        revision: RevisionId::new("rev-1"),
+        base_version: base,
+        origin,
+        note: None,
         ops,
         salts: salts(n),
+    }
+}
+
+fn resolution(transition: Transition) -> EntryOp {
+    EntryOp::Resolution {
+        anchor: GroupId::new("entreprise"),
+        scope: RowPath::root(),
+        transition,
+    }
+}
+
+fn request() -> EntryOp {
+    resolution(Transition::Request {
+        resolver: ResolverId::new("insee-sirene"),
+        resolver_version: 1,
+        mapping_version: 1,
+    })
+}
+
+fn expected() -> ExpectedResolution {
+    ExpectedResolution {
+        anchor: GroupId::new("entreprise"),
+        scope: RowPath::root(),
+        resolver: ResolverId::new("insee-sirene"),
+        resolver_version: 1,
+        mapping_version: 1,
     }
 }
 
@@ -150,7 +191,7 @@ fn tampering_breaks_the_chain() {
     // stored entry, then rehydrate — as an attacker with storage access
     // would.
     let mut entries = log.entries().to_vec();
-    if let Op::Set { state, .. } = &mut entries[0].content.ops[0] {
+    if let EntryOp::Cell(Op::Set { state, .. }) = &mut entries[0].content.ops[0] {
         *state = CellState::Value(CellValue::One(Scalar::Text("Martin".into())));
     }
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
@@ -211,11 +252,11 @@ fn append_refuses_ops_that_do_not_apply() {
     // A poisoned log (rehydrated with an entry that does not apply)
     // refuses appends until repaired, instead of growing the damage.
     let mut entries = log.entries().to_vec();
-    entries[1].content.ops.push(Op::RemoveItem {
+    entries[1].content.ops.push(EntryOp::Cell(Op::RemoveItem {
         group: GroupId::new("g1"),
         parent: RowPath::root(),
         item: ItemId::new("ghost"),
-    });
+    }));
     let mut poisoned = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert!(matches!(
         poisoned.append(draft(
@@ -277,7 +318,7 @@ fn injected_op_without_a_salt_is_detected() {
     .unwrap();
 
     let mut entries = log.entries().to_vec();
-    entries[0].content.ops.push(set("name", "MALLORY"));
+    entries[0].content.ops.push(set("name", "MALLORY").into());
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert_eq!(
         tampered.verify_chain(),
@@ -289,7 +330,7 @@ fn injected_op_without_a_salt_is_detected() {
 
     // Same for a tail entry — the last entry is otherwise unanchored.
     let mut entries = log.entries().to_vec();
-    entries[1].content.ops.push(set("name", "MALLORY"));
+    entries[1].content.ops.push(set("name", "MALLORY").into());
     let tampered = RecordLog::from_entries(RecordId::new("r1"), entries);
     assert!(matches!(
         tampered.verify_chain(),
@@ -554,34 +595,37 @@ fn referenced_blobs_cover_history_and_snapshots() {
     ))
     .unwrap();
 
-    let blobs = log.referenced_blobs(&[]);
+    let blobs = log.referenced_blobs();
     assert!(blobs.contains(&blob("v1")));
     assert!(blobs.contains(&blob("v2")));
     assert!(blobs.contains(&derivation().snapshot_ref));
     assert_eq!(blobs.len(), 3);
 
-    // A payload that landed on a resolution instance is a root too —
-    // it may be referenced from nowhere else (§2.8 rule 2).
-    let mut resolution = pending_resolution();
-    resolution.land(blob("payload")).unwrap();
-    let blobs = log.referenced_blobs(&[resolution]);
+    // A payload landed by a `land` op is a root too — it may be
+    // referenced from nowhere else (§2.8 rule 2: the targets were
+    // overridden, so no origin carries it).
+    log.append(entry_draft(
+        human("a1"),
+        3,
+        3,
+        Origin::Entered,
+        vec![request()],
+    ))
+    .unwrap();
+    log.append(entry_draft(
+        resolver_actor(),
+        4,
+        4,
+        Origin::Entered,
+        vec![resolution(Transition::Land {
+            snapshot: blob("payload"),
+            outcome: Outcome::default(),
+        })],
+    ))
+    .unwrap();
+    let blobs = log.referenced_blobs();
     assert!(blobs.contains(&blob("payload")));
     assert_eq!(blobs.len(), 4);
-}
-
-fn pending_resolution() -> Resolution {
-    Resolution {
-        anchor: GroupId::new("entreprise"),
-        resolver: ResolverId::new("insee-sirene"),
-        resolver_version: 1,
-        mapping_version: 1,
-        scope: RowPath::root(),
-        status: ResolutionStatus::Pending,
-        attempts: 0,
-        last_error: None,
-        deadline: None,
-        snapshot: None,
-    }
 }
 
 #[test]
@@ -604,37 +648,134 @@ fn scan_lifecycle() {
 }
 
 #[test]
-fn resolution_lifecycle() {
-    use varve_record::{TransitionError, pending_set};
-    let mut resolution = pending_resolution();
-    let list = [resolution.clone()];
-    assert_eq!(pending_resolutions(&list).len(), 1);
+fn resolution_lifecycle_is_a_fold_of_the_log() {
+    // §2.8 (settled 2026-08-19): the instance is the fold of lifecycle
+    // ops in chained entries — requested at submit, landed by the
+    // resolver in the same entry as its derived writes.
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    log.append(entry_draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![set("siret", "123").into(), request()],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    let r = &state.resolutions[&(GroupId::new("entreprise"), RowPath::root())];
+    assert_eq!(r.status, ResolutionStatus::Pending);
+    assert_eq!(r.requested_at, 0);
+    assert_eq!(r.closed_at, None);
+    assert_eq!(state.pending_resolutions().count(), 1);
     // What the logic language reads: (scope, anchor group) pairs.
     assert_eq!(
-        pending_set(&list),
+        state.pending_set(),
         [(RowPath::root(), GroupId::new("entreprise"))]
             .into_iter()
             .collect()
     );
 
-    resolution.transition(ResolutionStatus::Failed).unwrap();
-    resolution.transition(ResolutionStatus::Pending).unwrap();
-    assert_eq!(resolution.attempts, 1);
-    // A resolution never resolves without its payload (§2.7).
-    assert_eq!(
-        resolution.transition(ResolutionStatus::Resolved),
-        Err(TransitionError::ResolvedWithoutSnapshot)
-    );
+    // Transient failures never reach the record (§2.8): the scheduler
+    // retried for three days, and the record sees one landing carrying
+    // the summary.
     let payload = derivation().snapshot_ref;
-    resolution.land(payload).unwrap();
-    assert_eq!(resolution.status, ResolutionStatus::Resolved);
-    assert_eq!(resolution.snapshot, Some(payload));
-    assert!(pending_set(&[resolution.clone()]).is_empty());
-    // Terminal: no way back, and abandonment of a resolved instance is
-    // meaningless.
-    assert!(resolution.transition(ResolutionStatus::Pending).is_err());
-    assert!(resolution.transition(ResolutionStatus::Abandoned).is_err());
-    assert!(resolution.land(payload).is_err());
+    log.append(entry_draft(
+        resolver_actor(),
+        1,
+        1,
+        Origin::Derived(derivation()),
+        vec![
+            resolution(Transition::Land {
+                snapshot: payload,
+                outcome: Outcome {
+                    attempts: 212,
+                    last_error: Some("503".into()),
+                },
+            }),
+            set("raison_sociale", "ACME").into(),
+        ],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    let r = &state.resolutions[&(GroupId::new("entreprise"), RowPath::root())];
+    assert_eq!(r.status, ResolutionStatus::Resolved);
+    assert_eq!(r.snapshot, Some(payload));
+    assert_eq!(r.closed_at, Some(1));
+    assert_eq!(r.outcome.as_ref().unwrap().attempts, 212);
+    assert!(state.pending_set().is_empty());
+
+    // Terminal: a second landing, or an abandonment, is refused at
+    // append — the log never holds an illegal transition.
+    for t in [
+        Transition::Land {
+            snapshot: payload,
+            outcome: Outcome::default(),
+        },
+        Transition::Abandon {
+            reason: AbandonReason::Operator,
+            outcome: Outcome::default(),
+        },
+    ] {
+        assert!(matches!(
+            log.append(entry_draft(
+                resolver_actor(),
+                2,
+                2,
+                Origin::Entered,
+                vec![resolution(t)]
+            )),
+            Err(AppendError::IllegalTransition(
+                LifecycleError::NotPending { .. }
+            ))
+        ));
+    }
+    assert_eq!(log.version(), 2, "refused appends leave the log alone");
+
+    // Re-request is deliberate and recorded (§2.8): the SIRET changed,
+    // a fresh request follows; the earlier outcome stays in the log.
+    log.append(entry_draft(
+        human("a1"),
+        3,
+        2,
+        Origin::Entered,
+        vec![set("siret", "456").into(), request()],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    let r = &state.resolutions[&(GroupId::new("entreprise"), RowPath::root())];
+    assert_eq!(r.status, ResolutionStatus::Pending);
+    assert_eq!(r.requested_at, 2);
+    assert_eq!((r.closed_at, r.snapshot, &r.outcome), (None, None, &None));
+    // But not while pending: end it first (`superseded`).
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            4,
+            3,
+            Origin::Entered,
+            vec![request()]
+        )),
+        Err(AppendError::IllegalTransition(
+            LifecycleError::AlreadyPending { .. }
+        ))
+    ));
+    log.append(entry_draft(
+        human("a1"),
+        4,
+        3,
+        Origin::Entered,
+        vec![
+            resolution(Transition::Abandon {
+                reason: AbandonReason::Superseded,
+                outcome: Outcome::default(),
+            }),
+            request(),
+        ],
+    ))
+    .unwrap();
+    let state = log.fold().unwrap();
+    let r = &state.resolutions[&(GroupId::new("entreprise"), RowPath::root())];
+    assert_eq!((r.status, r.requested_at), (ResolutionStatus::Pending, 3));
 }
 
 #[test]
@@ -761,69 +902,82 @@ fn override_wins_over_late_resolution() {
 fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
     use std::collections::BTreeSet;
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(
+    log.append(entry_draft(
         human("a1"),
         0,
         0,
         Origin::Entered,
-        vec![set("name", "Dupont")],
+        vec![set("name", "Dupont").into(), request()],
     ))
     .unwrap();
     // Taken through the applicant form: `name`, `raison_sociale`,
     // `adresse` and the repetition `g1` are frozen; the instructor's
-    // `annotation` column is not on that surface.
+    // `annotation` column is not on that surface. The checkpoint is an
+    // entry (§2.9, settled 2026-08-19): its position pins the content.
     let checkpoint = Checkpoint {
         name: "submission".into(),
-        entry: log.entries()[0].hash(),
         reading_revision: RevisionId::new("rev-1"),
-        expected: vec![ExpectedResolution {
-            resolver: ResolverId::new("insee-sirene"),
-            scope: RowPath::root(),
-            resolver_version: 1,
-            mapping_version: 1,
-        }],
+        expected: vec![expected()],
         frozen_columns: ["name", "raison_sociale", "adresse"]
             .into_iter()
             .map(ColumnId::new)
             .collect(),
         frozen_groups: [GroupId::new("g1")].into_iter().collect(),
     };
+    log.append(entry_draft(
+        human("a1"),
+        1,
+        1,
+        Origin::Entered,
+        vec![EntryOp::Checkpoint(checkpoint.clone())],
+    ))
+    .unwrap();
+    let found = log.checkpoints();
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].seq, &found[0].checkpoint), (1, &checkpoint));
+    assert_eq!(found[0].entry_hash, log.entries()[1].hash());
 
     // Expected late derived write into the frozen set: legal.
-    log.append(draft(
+    log.append(entry_draft(
         resolver_actor(),
-        1,
-        1,
+        2,
+        2,
         Origin::Derived(derivation()),
-        vec![set("raison_sociale", "ACME SARL")],
+        vec![
+            resolution(Transition::Land {
+                snapshot: derivation().snapshot_ref,
+                outcome: Outcome::default(),
+            }),
+            set("raison_sociale", "ACME SARL").into(),
+        ],
     ))
     .unwrap();
     // An instructor annotating: outside the frozen set, not the
     // checkpoint's business (§2.9 — the record stays a case file).
     log.append(draft(
         human("instructor"),
-        2,
-        2,
+        3,
+        3,
         Origin::Entered,
         vec![set("annotation", "ok")],
     ))
     .unwrap();
-    assert_eq!(validate_after_checkpoint(&log, &checkpoint, None), vec![]);
+    assert_eq!(validate_after_checkpoint(&log, 1), vec![]);
 
     // A human edit into the frozen set — even mixed with a legal
     // annotation write: reported, naming the frozen columns touched.
     log.append(draft(
         human("a1"),
-        3,
-        3,
+        4,
+        4,
         Origin::Entered,
         vec![set("name", "X"), set("annotation", "still fine")],
     ))
     .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &checkpoint, None),
+        validate_after_checkpoint(&log, 1),
         vec![CheckpointViolation::IllegalWrite {
-            seq: 3,
+            seq: 4,
             columns: [ColumnId::new("name")].into_iter().collect(),
             groups: BTreeSet::new(),
         }]
@@ -835,16 +989,16 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
     other.source = ResolverId::new("ban-address");
     log.append(draft(
         resolver_actor(),
-        4,
-        4,
+        5,
+        5,
         Origin::Derived(other),
         vec![set("adresse", "1 rue de la Paix")],
     ))
     .unwrap();
     log.append(draft(
         human("a1"),
-        5,
-        5,
+        6,
+        6,
         Origin::Entered,
         vec![Op::AddItem {
             group: GroupId::new("g1"),
@@ -854,79 +1008,170 @@ fn checkpoint_freezes_its_surface_and_reports_writes_into_it() {
         }],
     ))
     .unwrap();
-    let violations = validate_after_checkpoint(&log, &checkpoint, None);
+    let violations = validate_after_checkpoint(&log, 1);
     assert_eq!(violations.len(), 3);
     assert!(matches!(
         &violations[2],
-        CheckpointViolation::IllegalWrite { seq: 5, groups, .. } if groups.contains(&GroupId::new("g1"))
+        CheckpointViolation::IllegalWrite { seq: 6, groups, .. } if groups.contains(&GroupId::new("g1"))
     ));
-
-    // A derived write under other versions than the ones bound at
-    // request time (§2.8 rule 1) is not the expected resolution.
-    let rebound = Checkpoint {
-        expected: vec![ExpectedResolution {
-            resolver: ResolverId::new("insee-sirene"),
-            scope: RowPath::root(),
-            resolver_version: 2,
-            mapping_version: 1,
-        }],
-        ..checkpoint.clone()
-    };
-    assert!(
-        validate_after_checkpoint(&log, &rebound, None)
-            .iter()
-            .any(|v| matches!(v, CheckpointViolation::IllegalWrite { seq: 1, .. }))
-    );
-
-    // Out-of-scope derived write (targets outside the expected scope).
-    let scoped = Checkpoint {
-        expected: vec![ExpectedResolution {
-            resolver: ResolverId::new("insee-sirene"),
-            scope: RowPath::root().child(PathSeg {
-                group: GroupId::new("g1"),
-                item: ItemId::new("i1"),
-            }),
-            resolver_version: 1,
-            mapping_version: 1,
-        }],
-        ..checkpoint.clone()
-    };
-    assert!(
-        validate_after_checkpoint(&log, &scoped, None)
-            .iter()
-            .any(|v| matches!(v, CheckpointViolation::IllegalWrite { seq: 1, .. }))
-    );
 
     // A superseding checkpoint (back to construction) ends this one's
     // regime: entries after it are its business, not ours.
-    let reopened = Checkpoint {
-        name: "reopened".into(),
-        entry: log.entries()[2].hash(),
-        expected: vec![],
-        frozen_columns: BTreeSet::new(),
-        frozen_groups: BTreeSet::new(),
-        ..checkpoint.clone()
-    };
+    log.append(entry_draft(
+        human("a1"),
+        7,
+        7,
+        Origin::Entered,
+        vec![EntryOp::Checkpoint(Checkpoint {
+            name: "reopened".into(),
+            reading_revision: RevisionId::new("rev-1"),
+            expected: vec![],
+            frozen_columns: BTreeSet::new(),
+            frozen_groups: BTreeSet::new(),
+        })],
+    ))
+    .unwrap();
+    log.append(draft(
+        human("a1"),
+        8,
+        8,
+        Origin::Entered,
+        vec![set("name", "after reopening")],
+    ))
+    .unwrap();
+    assert_eq!(validate_after_checkpoint(&log, 1).len(), 3);
+    assert_eq!(validate_after_checkpoint(&log, 7), vec![]);
+    assert_eq!(log.checkpoints().len(), 2);
+    // Not a checkpoint entry: reported as such, nothing else.
     assert_eq!(
-        validate_after_checkpoint(&log, &checkpoint, Some(&reopened)),
-        vec![]
+        validate_after_checkpoint(&log, 0),
+        vec![CheckpointViolation::UnknownCheckpoint { seq: 0 }]
     );
-    assert_eq!(validate_after_checkpoint(&log, &reopened, None), vec![]);
-    // A superseding checkpoint must come after this one.
-    let earlier = Checkpoint {
-        entry: varve_record::genesis_hash(&RecordId::new("r1")),
-        ..reopened.clone()
-    };
     assert_eq!(
-        validate_after_checkpoint(&log, &checkpoint, Some(&earlier)),
-        vec![CheckpointViolation::UnknownSupersedingEntry]
+        validate_after_checkpoint(&log, 99),
+        vec![CheckpointViolation::UnknownCheckpoint { seq: 99 }]
     );
-    let unknown = Checkpoint {
-        entry: varve_record::genesis_hash(&RecordId::new("r1")),
-        ..checkpoint.clone()
+}
+
+#[test]
+fn a_checkpoint_may_only_expect_what_is_pending() {
+    // §2.8 rule 1 meets §2.9: the expectation names the versions bound
+    // at request time; expecting other versions, or a lookup never
+    // requested, is refused at append — a checkpoint cannot lie about
+    // the lookups outstanding under it.
+    let mut log = RecordLog::new(RecordId::new("r1"));
+    log.append(entry_draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![request()],
+    ))
+    .unwrap();
+    let checkpoint = |expected: Vec<ExpectedResolution>| {
+        EntryOp::Checkpoint(Checkpoint {
+            name: "submission".into(),
+            reading_revision: RevisionId::new("rev-1"),
+            expected,
+            frozen_columns: Default::default(),
+            frozen_groups: Default::default(),
+        })
     };
-    assert_eq!(
-        validate_after_checkpoint(&log, &unknown, None),
-        vec![CheckpointViolation::UnknownEntry]
+    let rebound = ExpectedResolution {
+        resolver_version: 2,
+        ..expected()
+    };
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            1,
+            1,
+            Origin::Entered,
+            vec![checkpoint(vec![rebound.clone()])]
+        )),
+        Err(AppendError::IllegalTransition(LifecycleError::ExpectedNotPending(e))) if e == rebound
+    ));
+    let elsewhere = ExpectedResolution {
+        scope: RowPath::root().child(PathSeg {
+            group: GroupId::new("g1"),
+            item: ItemId::new("i1"),
+        }),
+        ..expected()
+    };
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            1,
+            1,
+            Origin::Entered,
+            vec![checkpoint(vec![elsewhere])]
+        )),
+        Err(AppendError::IllegalTransition(
+            LifecycleError::ExpectedNotPending(_)
+        ))
+    ));
+    // Two checkpoints in one entry: a checkpoint pins one position.
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            1,
+            1,
+            Origin::Entered,
+            vec![checkpoint(vec![]), checkpoint(vec![])]
+        )),
+        Err(AppendError::IllegalTransition(
+            LifecycleError::MultipleCheckpoints
+        ))
+    ));
+    // The request and the checkpoint may share an entry — submit —
+    // as long as the request comes first.
+    let mut log2 = RecordLog::new(RecordId::new("r2"));
+    log2.append(entry_draft(
+        human("a1"),
+        0,
+        0,
+        Origin::Entered,
+        vec![request(), checkpoint(vec![expected()])],
+    ))
+    .unwrap();
+    assert!(
+        log2.append(entry_draft(
+            human("a1"),
+            1,
+            1,
+            Origin::Entered,
+            vec![
+                resolution(Transition::Abandon {
+                    reason: AbandonReason::Operator,
+                    outcome: Outcome::default()
+                }),
+                request(),
+                checkpoint(vec![expected()]),
+            ],
+        ))
+        .is_ok()
     );
+    // Once landed it is not pending: a later checkpoint cannot expect it.
+    log.append(entry_draft(
+        resolver_actor(),
+        2,
+        1,
+        Origin::Entered,
+        vec![resolution(Transition::NotFound {
+            outcome: Outcome::default(),
+        })],
+    ))
+    .unwrap();
+    assert!(matches!(
+        log.append(entry_draft(
+            human("a1"),
+            3,
+            2,
+            Origin::Entered,
+            vec![checkpoint(vec![expected()])]
+        )),
+        Err(AppendError::IllegalTransition(
+            LifecycleError::ExpectedNotPending(_)
+        ))
+    ));
 }

@@ -370,8 +370,10 @@ pending → resolved | not_found | ambiguous | failed | abandoned
 
 plus, on each terminal transition, a summary of how it was reached
 (attempt count, last error; for `abandon`, a reason: `deadline` ·
-`operator` · `resolver_unavailable`). There is **no deadline on the
-record** (settled below).
+`operator` · `resolver_unavailable` · `superseded` — the last when the
+lookup's input changed while it was pending, so the fresh `request` is
+preceded by an explicit end rather than silently replacing it). There
+is **no deadline on the record** (settled below).
 
 **Settled (2026-08-19): transient failures are not record state;
 outcomes are.** Institutional memory decides this one: the upstream
@@ -401,8 +403,10 @@ had to bolt on after the fact; here it is designed in. Per-attempt
 history as record state was considered and rejected (bloat under the
 normal case); a mutable counter beside the log (today's
 `attempts`/`last_error` fields) was rejected with decision A — unchained
-state is not a record. Code follows: those fields move from the
-`Resolution` struct to the terminal ops' content.
+state is not a record. *Built (2026-08-19):* `varve-record`'s
+`Transition::{Land, NotFound, Ambiguous, Failed, Abandon}` carry an
+`Outcome {attempts, last_error}`; the `Resolution` struct keeps only
+`requested_at`/`closed_at` (entry seqs), `snapshot` and that outcome.
 
 **Settled (2026-08-19): the deadline is policy, not record data.**
 "Abandon after N days" is a property of an instance's relationship with
@@ -420,8 +424,8 @@ termination; "pending-forever is a leak" therefore becomes an explicit
 **platform obligation** (PLATFORM.md P.12): every instance runs an
 abandonment policy, whose parameters — and whether a long outage should
 abandon at all rather than wait — are what §12.7 fixes. `deadline`
-leaves the `Resolution` struct; the Tier 5 scheduler owns it, together
-with backoff (decision above).
+leaves the `Resolution` struct (done); the Tier 5 scheduler owns it,
+together with backoff (decision above).
 
 **Abandonment must be an explicit recorded event.** Pending-forever is a leak;
 silent give-up is unauditable.
@@ -463,8 +467,13 @@ on the wire cannot honour "abandonment is an explicit recorded event".
 The same argument makes **checkpoints entries too** (§2.9): a named
 hash kept outside the chain can be dropped or forged without detection,
 and the frozen set is the legal story. The `checkpoint` and `resolution`
-wire line kinds therefore dissolve into `entry` (§10 Q14). Code follows
-(`varve-record` holds `Resolution`/`Checkpoint` beside the log today).
+wire line kinds therefore dissolve into `entry` (§10 Q14). *Built
+(2026-08-19):* `varve-record::EntryOp` is `Cell(op) | Resolution {anchor,
+scope, transition} | Checkpoint {…}`; the fold yields `resolutions`
+keyed by anchor-group instance and refuses an illegal transition at
+append exactly as it refuses an op that does not apply (the log must
+fold); lifecycle ops are committed, salted and canonicalised like cell
+ops, so `varve-wire` carries them in `entry` lines by construction.
 
 ### Three rules (RATIFIED)
 
@@ -771,7 +780,11 @@ log; a structure outside the chain can be dropped or forged without
 detection, and the frozen set is precisely the legal story ("this is
 what the applicant declared") that tamper-evidence exists for. As an
 entry, supersession order is log order, `validate_after_checkpoint`
-reads its inputs from the log itself, and a checkpoint needs no wire
+reads its inputs from the log itself (one checkpoint per entry — it
+pins one position — and it may expect only resolutions pending at that
+position under their bound versions, refused at append otherwise: a
+checkpoint cannot lie about the lookups outstanding under it), and a
+checkpoint needs no wire
 line of its own (§10 Q14). Same argument as resolution lifecycle ops
 (§2.8): one chain, one representation.
 
@@ -2081,18 +2094,19 @@ Only then: `surface`, `store`, service.
     Collapsing to two states was considered and rejected — it would
     erase the "left blank by whom" fact that audit and diff rely on.
 14. **Record-side (and surface) wire completeness.** Not yet on the wire
-    (found by audit, 2026-08-17): resolution lifecycle and checkpoints
-    — since 2026-08-19 **ops inside `entry`**, not line kinds (§2.8,
-    §2.9) — payload `snapshot` descriptions (hash/size/type, like
-    `attachment`), the bundled blob **sidecar** (§2.15), and
-    **surfaces** — including block defaults,
-    which travel with them — so today a history export is lossless for
-    the log only, a procedure's surfaces do not migrate, and
-    "an imported record remains fully meaningful on an instance with no
-    access to INSEE" (§2.8) is a goal, not a property. Deliberately
-    routed here rather than built piecemeal: payload blobs and attachment
-    blobs share one sidecar, and `resolution`/`checkpoint` lines should
-    land with it so import restores a record whole. Decide with §12.7
+    (found by audit, 2026-08-17): payload `snapshot` descriptions
+    (hash/size/type, like `attachment`), the bundled blob **sidecar**
+    (§2.15), and **surfaces** — including block defaults, which travel
+    with them — so today a history export is lossless for the log
+    (cells *and* lifecycle: resolution transitions and checkpoints are
+    ops inside `entry` since 2026-08-19, §2.8/§2.9, built the same day),
+    a procedure's surfaces do not migrate, and "an imported record
+    remains fully meaningful on an instance with no access to INSEE"
+    (§2.8) is a goal, not a property — the payload bytes do not yet
+    travel. Deliberately routed here rather than built piecemeal:
+    payload blobs and attachment blobs share one sidecar, and the
+    `snapshot` descriptions should land with it so import restores a
+    record whole. Decide with §12.7
     (deferred-resolution frequency) in hand. **Held whole, by
     institutional memory (2026-08-19):** a split was proposed — land the
     already-specified members (surfaces, `checkpoint`, `snapshot`, the

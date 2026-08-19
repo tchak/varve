@@ -345,7 +345,8 @@ Obligations this places on the platform:
   platform must: every pending resolution is either landed, answered,
   or explicitly abandoned by policy — pending-forever is the leak DESIGN
   forbids. The abandonment policy runs per resolver, with a reason
-  (`deadline` · `operator` · `resolver_unavailable`) written into the
+  (`deadline` · `operator` · `resolver_unavailable` · `superseded`, the
+  last when the applicant changed the input mid-lookup) written into the
   `abandon` op, and its summary (`attempts`, `last_error`) taken from
   the scheduler's own attempt history at that moment.
 - **Outage posture is a policy choice, not a code path.** Whether a

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use varve_core::RecordId;
 use varve_core::RevisionId;
 use varve_core::primitives::Instant;
-use varve_record::{Actor, Draft, Entry, EntrySalts, Origin, RecordLog};
+use varve_record::{Actor, Draft, Entry, EntryOp, EntrySalts, Origin, RecordLog};
 use varve_value::diff;
 
 use crate::line::{Intent, Line, Mode};
@@ -177,7 +177,7 @@ pub fn import_snapshot(
             base_version,
             origin: Origin::Entered,
             note: request.note.clone(),
-            ops,
+            ops: ops.into_iter().map(EntryOp::Cell).collect(),
             salts,
         })
         .map_err(|e| ImportError::Append(r.record.clone(), e))?;

@@ -1,13 +1,14 @@
-//! Checkpoint negatives (§2.8, §2.9): the entries a checkpoint cannot
-//! locate, the superseding regime, and every way a write into the
-//! frozen set fails to be "the expected derived write".
+//! Checkpoint negatives (§2.8, §2.9): a checkpoint is an entry in the
+//! log (settled 2026-08-19) — the superseding regime is log order, and
+//! every way a write into the frozen set fails to be "the expected
+//! derived write" is reported.
 
 use varve_core::canonical::Salt;
 use varve_core::primitives::Instant;
 use varve_core::{ColumnId, GroupId, ItemId, PathSeg, RecordId, ResolverId, RevisionId, RowPath};
 use varve_record::{
-    Actor, ActorKind, Checkpoint, CheckpointViolation, Derivation, Draft, EntrySalts,
-    ExpectedResolution, Origin, RecordLog, validate_after_checkpoint,
+    Actor, ActorKind, Checkpoint, CheckpointViolation, Derivation, Draft, EntryOp, EntrySalts,
+    ExpectedResolution, Origin, RecordLog, Transition, validate_after_checkpoint,
 };
 use varve_value::{CellState, CellValue, Op, Scalar};
 
@@ -57,7 +58,7 @@ fn draft(actor: Actor, minute: u8, base: u64, origin: Origin, ops: Vec<Op>) -> D
         base_version: base,
         origin,
         note: None,
-        ops,
+        ops: ops.into_iter().map(EntryOp::Cell).collect(),
         salts: salts(n),
     }
 }
@@ -78,16 +79,30 @@ fn item(i: &str) -> RowPath {
     })
 }
 
-/// A checkpoint on entry `at`, freezing `name`/`raison_sociale`/`adresse`
-/// and the repetition `g1`, expecting insee-sirene@1/1 at `scope`.
-fn checkpoint(log: &RecordLog, at: usize, scope: RowPath) -> Checkpoint {
-    Checkpoint {
+/// The request every checkpoint here expects: insee-sirene@1/1 on the
+/// `entreprise` anchor at `scope`.
+fn request(scope: RowPath) -> EntryOp {
+    EntryOp::Resolution {
+        anchor: GroupId::new("entreprise"),
+        scope,
+        transition: Transition::Request {
+            resolver: ResolverId::new("insee-sirene"),
+            resolver_version: 1,
+            mapping_version: 1,
+        },
+    }
+}
+
+/// A checkpoint freezing `name`/`raison_sociale`/`adresse` and the
+/// repetition `g1`, expecting insee-sirene@1/1 at `scope`.
+fn checkpoint(scope: RowPath) -> EntryOp {
+    EntryOp::Checkpoint(Checkpoint {
         name: "submission".into(),
-        entry: log.entries()[at].hash(),
         reading_revision: RevisionId::new("rev-1"),
         expected: vec![ExpectedResolution {
-            resolver: ResolverId::new("insee-sirene"),
+            anchor: GroupId::new("entreprise"),
             scope,
+            resolver: ResolverId::new("insee-sirene"),
             resolver_version: 1,
             mapping_version: 1,
         }],
@@ -96,22 +111,43 @@ fn checkpoint(log: &RecordLog, at: usize, scope: RowPath) -> Checkpoint {
             .map(ColumnId::new)
             .collect(),
         frozen_groups: [GroupId::new("g1")].into_iter().collect(),
-    }
+    })
 }
 
-/// One entry: name=Dupont, then the checkpoint on it.
-fn base() -> (RecordLog, Checkpoint) {
+/// Append `ops` as one entry by `actor` at minute `minute`, against
+/// the log's current version.
+fn append(log: &mut RecordLog, actor: Actor, minute: u8, origin: Origin, ops: Vec<EntryOp>) {
+    let n = ops.len();
+    log.append(Draft {
+        actor,
+        timestamp: ts(minute),
+        revision: RevisionId::new("rev-1"),
+        base_version: log.version(),
+        origin,
+        note: None,
+        ops,
+        salts: salts(n),
+    })
+    .unwrap();
+}
+
+/// Entry 0: name=Dupont with the lookup requested and the checkpoint
+/// taken in the same entry (submit). Returns the log; the checkpoint
+/// is at seq 0.
+fn base() -> RecordLog {
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(
+    append(
+        &mut log,
         human("a1"),
         0,
-        0,
         Origin::Entered,
-        vec![set("name", "Dupont")],
-    ))
-    .unwrap();
-    let cp = checkpoint(&log, 0, RowPath::root());
-    (log, cp)
+        vec![
+            set("name", "Dupont").into(),
+            request(RowPath::root()),
+            checkpoint(RowPath::root()),
+        ],
+    );
+    log
 }
 
 fn illegal(seq: u64, columns: &[&str], groups: &[&str]) -> CheckpointViolation {
@@ -123,56 +159,25 @@ fn illegal(seq: u64, columns: &[&str], groups: &[&str]) -> CheckpointViolation {
 }
 
 #[test]
-fn a_checkpoint_naming_an_unknown_entry_reports_only_that() {
-    let (log, mut cp) = base();
-    cp.entry = varve_record::genesis_hash(&RecordId::new("elsewhere"));
-    assert_eq!(
-        validate_after_checkpoint(&log, &cp, None),
-        vec![CheckpointViolation::UnknownEntry]
-    );
-}
-
-#[test]
-fn a_superseding_checkpoint_must_name_a_later_entry_of_this_log() {
-    let (mut log, cp) = base();
+fn only_a_checkpoint_entry_can_be_validated() {
+    let mut log = base();
     log.append(draft(
         human("a1"),
         1,
         1,
-        Origin::Entered,
-        vec![set("name", "X")],
-    ))
-    .unwrap();
-    log.append(draft(
-        human("a1"),
-        2,
-        2,
         Origin::Entered,
         vec![set("annotation", "ok")],
     ))
     .unwrap();
-
-    // Not in the log at all.
-    let mut ghost = checkpoint(&log, 2, RowPath::root());
-    ghost.entry = varve_record::genesis_hash(&RecordId::new("elsewhere"));
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, Some(&ghost)),
-        vec![CheckpointViolation::UnknownSupersedingEntry]
+        validate_after_checkpoint(&log, 1),
+        vec![CheckpointViolation::UnknownCheckpoint { seq: 1 }]
     );
-    // The same entry as the checkpoint itself: not *after* it.
-    let same = checkpoint(&log, 0, RowPath::root());
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, Some(&same)),
-        vec![CheckpointViolation::UnknownSupersedingEntry]
+        validate_after_checkpoint(&log, 7),
+        vec![CheckpointViolation::UnknownCheckpoint { seq: 7 }]
     );
-    // Before it: a superseding checkpoint cannot precede what it
-    // supersedes.
-    let later = checkpoint(&log, 2, RowPath::root());
-    let earlier = checkpoint(&log, 0, RowPath::root());
-    assert_eq!(
-        validate_after_checkpoint(&log, &later, Some(&earlier)),
-        vec![CheckpointViolation::UnknownSupersedingEntry]
-    );
+    assert_eq!(validate_after_checkpoint(&log, 0), vec![]);
 }
 
 #[test]
@@ -182,7 +187,7 @@ fn the_superseding_entry_is_judged_under_the_old_regime_and_nothing_after_it_is(
     // entry 2, which the second checkpoint names. Entry 2's own frozen
     // write is the last one the first checkpoint sees; entry 3 belongs
     // to the second regime only.
-    let (mut log, first) = base();
+    let mut log = base();
     log.append(draft(
         human("a1"),
         1,
@@ -191,15 +196,16 @@ fn the_superseding_entry_is_judged_under_the_old_regime_and_nothing_after_it_is(
         vec![set("name", "edited")],
     ))
     .unwrap();
-    log.append(draft(
+    append(
+        &mut log,
         human("a1"),
         2,
-        2,
         Origin::Entered,
-        vec![set("adresse", "resubmitted")],
-    ))
-    .unwrap();
-    let second = checkpoint(&log, 2, RowPath::root());
+        vec![
+            set("adresse", "resubmitted").into(),
+            checkpoint(RowPath::root()),
+        ],
+    );
     log.append(draft(
         human("a1"),
         3,
@@ -210,21 +216,16 @@ fn the_superseding_entry_is_judged_under_the_old_regime_and_nothing_after_it_is(
     .unwrap();
 
     assert_eq!(
-        validate_after_checkpoint(&log, &first, Some(&second)),
+        validate_after_checkpoint(&log, 0),
         vec![illegal(1, &["name"], &[]), illegal(2, &["adresse"], &[])]
     );
     assert_eq!(
-        validate_after_checkpoint(&log, &second, None),
+        validate_after_checkpoint(&log, 2),
         vec![illegal(3, &["name"], &[])]
     );
-    // Without the superseder, the first checkpoint sees everything.
     assert_eq!(
-        validate_after_checkpoint(&log, &first, None),
-        vec![
-            illegal(1, &["name"], &[]),
-            illegal(2, &["adresse"], &[]),
-            illegal(3, &["name"], &[])
-        ]
+        log.checkpoints().iter().map(|c| c.seq).collect::<Vec<_>>(),
+        vec![0, 2]
     );
 }
 
@@ -233,7 +234,7 @@ fn an_expected_write_must_match_the_bound_versions_exactly() {
     // §2.8 rule 1: versions bind at request time. A derived write under
     // another resolver or mapping version is a re-map, not the expected
     // resolution — reported.
-    let (mut log, cp) = base();
+    let mut log = base();
     let mut other_resolver = derivation();
     other_resolver.source_version = 2;
     let mut other_mapping = derivation();
@@ -264,7 +265,7 @@ fn an_expected_write_must_match_the_bound_versions_exactly() {
     ))
     .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, None),
+        validate_after_checkpoint(&log, 0),
         vec![illegal(1, &["adresse"], &[]), illegal(2, &["adresse"], &[])]
     );
 }
@@ -275,9 +276,9 @@ fn an_expected_write_must_stay_within_the_expected_scope() {
     // expected on item i1 does not license a root-level write, nor a
     // write into item i2.
     let mut log = RecordLog::new(RecordId::new("r1"));
-    log.append(draft(
+    append(
+        &mut log,
         human("a1"),
-        0,
         0,
         Origin::Entered,
         vec![
@@ -286,17 +287,19 @@ fn an_expected_write_must_stay_within_the_expected_scope() {
                 parent: RowPath::root(),
                 item: ItemId::new("i1"),
                 at: 0,
-            },
+            }
+            .into(),
             Op::AddItem {
                 group: GroupId::new("g1"),
                 parent: RowPath::root(),
                 item: ItemId::new("i2"),
                 at: 1,
-            },
+            }
+            .into(),
+            request(item("i1")),
+            checkpoint(item("i1")),
         ],
-    ))
-    .unwrap();
-    let cp = checkpoint(&log, 0, item("i1"));
+    );
     log.append(draft(
         resolver_actor(),
         1,
@@ -332,7 +335,7 @@ fn an_expected_write_must_stay_within_the_expected_scope() {
     ))
     .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, None),
+        validate_after_checkpoint(&log, 0),
         vec![
             illegal(1, &["adresse"], &[]),
             illegal(2, &["adresse"], &[]),
@@ -346,7 +349,7 @@ fn only_a_resolver_actor_with_a_derived_origin_can_be_expected() {
     // A human re-deriving from a snapshot (§2.7 restore) is a deliberate
     // human act, not the expected late resolution; a resolver writing
     // as `entered` is not a derived write at all. Both are reported.
-    let (mut log, cp) = base();
+    let mut log = base();
     log.append(draft(
         human("a1"),
         1,
@@ -375,7 +378,7 @@ fn only_a_resolver_actor_with_a_derived_origin_can_be_expected() {
     ))
     .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, None),
+        validate_after_checkpoint(&log, 0),
         vec![
             illegal(1, &["adresse"], &[]),
             illegal(2, &["adresse"], &[]),
@@ -386,7 +389,7 @@ fn only_a_resolver_actor_with_a_derived_origin_can_be_expected() {
 
 #[test]
 fn a_mixed_write_names_every_frozen_column_and_group_it_touched() {
-    let (mut log, cp) = base();
+    let mut log = base();
     log.append(draft(
         human("a1"),
         1,
@@ -443,7 +446,7 @@ fn a_mixed_write_names_every_frozen_column_and_group_it_touched() {
     ))
     .unwrap();
     assert_eq!(
-        validate_after_checkpoint(&log, &cp, None),
+        validate_after_checkpoint(&log, 0),
         vec![
             illegal(1, &["adresse", "name"], &["g1"]),
             illegal(2, &["name"], &["g1"]),

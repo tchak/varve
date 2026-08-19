@@ -6,11 +6,46 @@ use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash, Salt, commit, commit_vector, hash_plain};
 use varve_core::primitives::Instant;
-use varve_core::{RecordId, RevisionId};
+use varve_core::{GroupId, RecordId, RevisionId, RowPath};
 use varve_value::Op;
 
 use crate::canon;
+use crate::resolution::{Checkpoint, Transition};
 use crate::{Actor, Origin};
+
+/// One op of an entry (§2.9): a cell op — the §5 wire ops — or a
+/// **lifecycle op** (settled 2026-08-19): a resolution transition
+/// (§2.8) or a checkpoint (§2.9). Lifecycle ops ride the same chained,
+/// salted, committed list as cell ops — one representation for log,
+/// export, migration and diff.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntryOp {
+    Cell(Op),
+    /// A transition of the resolution instance keyed by
+    /// `(anchor, scope)` — the anchor-group instance (§2.7, Q17).
+    Resolution {
+        anchor: GroupId,
+        scope: RowPath,
+        transition: Transition,
+    },
+    Checkpoint(Checkpoint),
+}
+
+impl From<Op> for EntryOp {
+    fn from(op: Op) -> Self {
+        EntryOp::Cell(op)
+    }
+}
+
+impl EntryOp {
+    /// The cell op, if this is one.
+    pub fn cell(&self) -> Option<&Op> {
+        match self {
+            EntryOp::Cell(op) => Some(op),
+            _ => None,
+        }
+    }
+}
 
 /// Chain anchor: `prev` of the entry at seq 0, committing to the
 /// record's id — so a log verifies only under the record it belongs to
@@ -40,7 +75,7 @@ pub struct Envelope {
 /// Redactable, erasable (§2.13 decision 8).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntryContent {
-    pub ops: Vec<Op>,
+    pub ops: Vec<EntryOp>,
     pub origin: Origin,
     pub note: Option<String>,
 }
@@ -69,7 +104,7 @@ pub struct Draft {
     pub base_version: u64,
     pub origin: Origin,
     pub note: Option<String>,
-    pub ops: Vec<Op>,
+    pub ops: Vec<EntryOp>,
     pub salts: EntrySalts,
 }
 
@@ -108,7 +143,7 @@ impl Entry {
 
     /// The entry hash: plain hash over the envelope, which includes the
     /// content commitment. This is the chain link (`prev` of the next
-    /// entry) and what checkpoints name.
+    /// entry) and what a checkpoint entry's position pins.
     pub fn hash(&self) -> ContentHash {
         let e = &self.envelope;
         let fields: BTreeMap<String, CanonicalValue> = [
