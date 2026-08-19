@@ -11,8 +11,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pushes supersede earlier pushes on the same ref; the scheduled /
+  # dispatched extended fuzz is its own group and is never cancelled by
+  # a push (it runs for 10 minutes per target and saves a corpus cache
+  # only on completion).
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
