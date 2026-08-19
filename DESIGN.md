@@ -1467,12 +1467,17 @@ cosmetic) and column ID (row 2, authoritative).
 **Crate placement: the tabulation is kernel, the format is presentation.**
 The row model lives in `varve-projection` — a table is literally records
 viewed through a revision, that crate's charter:
-`tabulate(record, revision/aggregate + AggregateReport, visible columns)
-→ TableSchema + row stream`, rows carrying **typed** scalars plus their
-canonical text rendering per type, so XLSX writes native numbers and
-dates, CSV takes the canonical strings, and the two agree by
-construction. Beside it, a `TableSink` trait (`begin(schema)` / `row` /
-`finish`). Concrete sinks live in **`varve-export` (Tier 5)** — CSV
+`tabulate(record, values, TableSchema) → rows`, rows carrying **typed**
+scalars plus their canonical text rendering per type, so XLSX writes
+native numbers and dates, CSV takes the canonical strings, and the two
+agree by construction. *Correction, found in implementation:*
+`AggregateRevision`/`AggregateReport` are Tier 3 types a Tier 2 crate
+cannot name — so the `TableSchema` input is **plain column descriptors**
+(id, label, type, arity, scope, pre-rendered header note), built by the
+Tier 5 caller from a `Schema` or an aggregate + report; the same input
+carries the surface-derived order and visibility, collapsing two
+hand-downs into one. Beside it, a `TableSink` trait (`begin(schema)` /
+`row` / `finish`). Concrete sinks live in **`varve-export` (Tier 5)** — CSV
 (dialect as an input: RFC 4180 default; semicolon + UTF-8 BOM for French
 Excel), XLSX, ODS later — one crate, so the formats stay together and a
 new format is a new impl, not a new architecture. Tier 5 is the right
@@ -1496,6 +1501,20 @@ platform query territory; the full-fidelity wire migration export is
 deliberately **not** surface-scoped — it is the whole case file changing
 instances — with Q9's chain-preserving redacted entries as the mechanism
 if a filtered history export is ever needed.
+
+**Rendering defaults (settled 2026-08-19, shipped with the row model).**
+Enums render their **label** through the writer's nomenclature lens
+(§2.11), option ids on opt-in; a missing option falls back to the id.
+`Many` cells pack into one field with a dialect-configurable separator,
+default `" | "` — commas break naive split-on-comma consumers and are
+ambiguous against free text, semicolons collide with the French-Excel
+field delimiter, and exploding list values into rows was rejected as
+conflating the two multiplicities (§2.2). Attachments render as their
+filename; geometry as its JCS text. Units go in the header label
+("poids (kg)"), never in cells — cells stay machine-parseable numbers
+(§2.14). `empty` and `absent` both render as the blank cell: the Q13
+provenance distinction is deliberately part of what this lossy view
+loses.
 
 ## 5.5 Aggregate revisions (mixed-revision table views and exports)
 

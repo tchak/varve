@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod table;
+
 use std::collections::BTreeMap;
 
 use varve_core::primitives::Decimal;
