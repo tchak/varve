@@ -25,9 +25,15 @@ workspace holds the deterministic kernel crates (`varve-core`,
 `corpus/` holds the analyses (M0: all 42,723 published DN procedures
 express with zero residue; M3: they round-trip byte-stably through the
 wire). M1 and M2 machinery is built and awaits DN-internal data
-(revision history, rule extraction). Run `cargo test --workspace`
-(277 tests incl. property suites) and
-`cargo clippy --workspace --all-targets` before committing.
+(revision history, rule extraction). Before committing run what CI
+runs (`.github/workflows/ci.yml`): `cargo test --workspace` (277 tests
+incl. property suites), `cargo clippy --workspace --all-targets`,
+`cargo fmt --all --check` (rustfmt defaults are the style authority),
+and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM
+crate in any Tier 0–4 closure, serde direct only in `-wire`/`-value`);
+CI also denies rustdoc warnings and replays the tracked fuzz seeds
+(`fuzz/seeds/`, minimized corpora — fold new coverage in with the
+`-merge=1` command in README).
 
 ## Version control: jj, not git
 
@@ -56,11 +62,17 @@ finalizes it and opens a new one.
 
 Nothing is published (`publish = false` everywhere, gated on M3). Until
 then there is no API stability contract and no backward-compatibility
-concern between crates: **refactor ruthlessly**. Move types to their right
-crate, rename freely, and update all callers in the same change. Never add
-re-exports, aliases, or deprecation shims "for compatibility" — there are
-no external consumers to be compatible with, and shims at this stage only
-obscure where things live.
+concern between crates: **refactor ruthlessly**. Move types to their
+right crate, rename freely, and update all callers in the same change.
+Never add re-exports, aliases, or deprecation shims "for compatibility"
+— there are no external consumers to be compatible with, and shims at
+this stage only obscure where things live.
+
+The repository being public on GitHub changes nothing here —
+visibility is not publication. All crates carry `0.1.0`, a placeholder,
+not a release; the stability contract begins only when a crate is
+published to crates.io at a version above 0.1.0. Until that day this
+rule holds in full.
 
 ## Design invariants already decided (do not re-litigate casually)
 
