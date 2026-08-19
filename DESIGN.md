@@ -539,8 +539,9 @@ previous one's regime. Consequences: a human override of a derived cell
 inside the frozen set (§2.7 back-office rule) after the checkpoint is a
 *reported* violation — a real legal act the platform must take a new
 checkpoint for, not something the kernel silently permits or forbids; and
-`validate_after_checkpoint(log, checkpoint, superseded_by)` stays a pure
-function that append never consults — the kernel has no permission model
+`validate_after_checkpoint` stays a pure function over the log (the
+checkpoint and its successor are entries in it, §2.9) that append never
+consults — the kernel has no permission model
 (§2.9), Tier 5 decides what a violation means. The kernel cannot see
 surfaces, so the platform fills the frozen set from the surface
 (`varve-surface` exposes the writable column and group sets).
@@ -2238,8 +2239,9 @@ With access to open DN schema statistics:
    (2026-08-19): outages of the upstream institutional APIs last hours and
    sometimes days, not minutes. What the census must add is the
    distribution — typical pending duration, share that never resolves,
-   share resolved after the record moved on — which fixes deadlines,
-   backoff and the abandonment policy on the `resolution` line (Q14).*
+   share resolved after the record moved on — which fixes the
+   scheduler's deadlines, backoff and abandonment policy (P.12) and the
+   outcome summary carried by the lifecycle ops (§2.8, Q14).*
 8. **Post-submission edit profile** — how many distinct actors touch a record
    after submission, how many entries per record, over what elapsed time, and
    how often do two actors touch the same cell? Validates per-cell LWW +
