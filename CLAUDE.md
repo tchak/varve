@@ -13,15 +13,21 @@ as long-lived case files, a pure typed logic language, impact reports),
 not the form builder. (A varve is an annual sediment layer — history read
 back layer by layer.)
 
-`DESIGN.md` is the design document and single source of truth. The
-workspace holds every crate below the IO tier (`varve-core`, `-schema`,
-`-value`, `-logic`, `-projection`, `-impact`, `-record`, `-surface`,
-`-revision`, `-wire`) plus `tools/m0`, the corpus harness; `corpus/`
-holds the analyses (M0: all 42,723 published DN procedures express with
-zero residue; M3: they round-trip byte-stably through the wire). M1 and
-M2 machinery is built and awaits DN-internal data (revision history,
-rule extraction). Run `cargo test --workspace` (263 tests incl. property
-suites) and `cargo clippy --workspace --all-targets` before committing.
+`DESIGN.md` is the design document and single source of truth for the
+kernel; `PLATFORM.md` (same conventions, P.x numbering) designs the
+platform above it — the DN-successor web app and GraphQL API (§13
+fixes the boundary; platform crates will live in `platform/`). The
+workspace holds the deterministic kernel crates (`varve-core`,
+`-schema`, `-value`, `-logic`, `-projection`, `-impact`, `-record`,
+`-surface`, `-revision`, `-wire`), the first Tier 5 crate
+(`varve-files`: encrypted content-addressed blob store over
+`object_store` backends), and `tools/m0`, the corpus harness;
+`corpus/` holds the analyses (M0: all 42,723 published DN procedures
+express with zero residue; M3: they round-trip byte-stably through the
+wire). M1 and M2 machinery is built and awaits DN-internal data
+(revision history, rule extraction). Run `cargo test --workspace`
+(277 tests incl. property suites) and
+`cargo clippy --workspace --all-targets` before committing.
 
 ## Version control: jj, not git
 
