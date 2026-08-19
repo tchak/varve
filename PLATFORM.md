@@ -253,8 +253,11 @@ authenticated chunks, constant memory, seekable decryption, which is
 what serves HTTP Range requests by mapping plaintext offsets to
 chunk-aligned ciphertext ranges. Over a hand-rolled stream cipher
 (the ds_proxy approach), age buys: a standard header with
-**multi-recipient key wrapping** (later: §2.15 wire sidecars exported
-encrypted to a receiving administration's key, same format), and
+**multi-recipient key wrapping** (later: §2.15 export bundles — the
+JSONL stream and its blob sidecar alike — encrypted to a receiving
+administration's key, same format; settled 2026-08-19 that the sidecar
+itself holds plaintext entries and confidentiality is a bundle-level
+option), and
 standard tooling — the rage CLI decrypts anything the platform wrote,
 which is the disaster-recovery story.
 

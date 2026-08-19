@@ -1122,6 +1122,52 @@ further metadata lives platform-side, keyed by hash.
   text, blobs stay binary). A single self-contained file with chunked
   base64 blob lines was considered and rejected — ~33% overhead and
   chunk-assembly machinery for a need DN does not have.
+  **Sidecar format (settled 2026-08-19, §10 Q14 item):**
+  - **POSIX tar** (pax headers where an entry needs them), **no
+    archive-level compression** — attachments are already-compressed
+    media, and compression would cost the one-pass, constant-memory
+    streaming on both sides. `tar -t` lists it: the same standard-
+    tooling disaster-recovery story as `rage` for P.10.
+  - **Entry name = the algorithm-tagged hash as a path**,
+    `sha256/<hex>`; one entry per hash, entry size = the description's
+    `byte_size`; entries **in hash order** with fixed header fields
+    (mode 0644, uid/gid 0, mtime = epoch) — the same blob set yields
+    the same bytes, M3's byte stability extended to the sidecar.
+  - **Entries are plaintext blobs.** The format is addressing and
+    integrity; **confidentiality belongs to the bundle** — the JSONL
+    *stream* carries the personal cell data, so encrypting only the
+    sidecar would be theatre. A Tier 5 export option age-encrypts each
+    bundle file (stream and sidecar) to the receiving instance's
+    recipient(s) — the "same format" P.10 names, applied uniformly.
+    Per-entry encryption inside the tar was considered and rejected:
+    the receiver must re-wrap every blob under its own per-blob
+    identity anyway (keys never travel, P.10), and the stream would
+    stay exposed.
+  - **Completeness is exact-set equality**: `bundled` means the sidecar
+    holds *exactly* the hashes described by the stream's `attachment`
+    and `snapshot` lines — a missing entry or an extra one rejects the
+    import (an undescribed blob is a smuggling vector, not a
+    convenience); `referenced` means no sidecar; never mixed. The
+    manifest field is `blobs` (`referenced` | `bundled`) — payloads
+    travel in it too (today's `attachments` key; renamed with the Q14
+    build).
+  - **Integrity needs nothing new**: each entry verifies itself on
+    import through `put(stream) → hash` against its name (§13.6's
+    trait contract), and completeness is checked against the stream —
+    no sidecar-level digest, nothing in the manifest hashes the
+    sidecar.
+  - **Import is one pass and fail-safe by existing machinery**: the
+    importer `put`s each entry as it streams (idempotent by hash),
+    *then* adopts the stream; if adoption fails, the blobs are merely
+    unreferenced and the §13.6 grace window and sweep collect them —
+    no bundle transaction.
+  - **Association by convention**: same basename, `.blobs.tar` beside
+    the `.jsonl`.
+  - Considered and rejected: **zip/zip64** (random access by central
+    directory that a sequential import never needs, default
+    compression we do not want, and reading requires the end of the
+    file); a **directory of hashes** (the right *exploded* form
+    locally, but not one object to hand over); per-entry age (above).
 - **Scan lifecycle is kernel-modeled, mirroring resolutions (§2.8)**:
   per attachment element, `pending → clean | infected | failed |
   abandoned`, driven by a Tier 5 scanner; the kernel provides the pure
@@ -1485,7 +1531,7 @@ be **heterogeneous**, carrying schema, records, items, attachments and history
 in one file in dependency order.
 
 ```
-{"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, attachments mode)
+{"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, blobs: referenced | bundled — §2.15)
 {"k":"revision", "id":"...", "schema":{...}}   // writer schema travels with the data (Avro property); resolver declarations ride inside it
 {"k":"block", "id":"...", "version":1, "group":{...}, "resolvers":[...]}   // schema-side block (§2.1); travels like a nomenclature. Its surface defaults travel with surfaces (§10 Q14)
 {"k":"nomenclature", "id":"...", "version":1, "rows":[...]}   // versioned (id, label, ...fields) table (§2.12); travels like a block
@@ -2150,7 +2196,11 @@ Only then: `surface`, `store`, service.
     remains fully meaningful on an instance with no access to INSEE"
     (§2.8) is a goal, not a property — the payload bytes do not yet
     travel. *Surfaces' wire shape settled 2026-08-19 (§5): opaque bodies
-    typed by `varve-surface`, §7 intact; build remains here.*
+    typed by `varve-surface`, §7 intact; the sidecar format settled the
+    same day (§2.15: plain tar keyed by hash, plaintext entries,
+    exact-set completeness, bundle-level confidentiality as a Tier 5
+    option); the `snapshot` line is specified like `attachment`. Every
+    member is now designed; what remains here is the build, together.*
     Deliberately routed here rather than built piecemeal:
     payload blobs and attachment blobs share one sidecar, and the
     `snapshot` descriptions should land with it so import restores a
@@ -2550,7 +2600,8 @@ element scan statuses.
 **The Q14 seam, named now.** `varve-wire` owns the manifest and
 `attachment` lines; `varve-files` streams bytes; the bundled **sidecar
 archive** is assembled by a Tier 5 exporter joining the two. Neither
-crate grows the other's half; the sidecar's wire format itself stays
-corpus-gated with Q14. The same seam carries surfaces (§5, settled
-2026-08-19): `varve-wire` types the envelope, `varve-surface` the body,
-Tier 5 joins.
+crate grows the other's half. The sidecar's format is settled (§2.15,
+2026-08-19: plain tar keyed by hash, plaintext entries, exact-set
+completeness); its build stays with Q14. The same seam carries surfaces
+(§5, settled 2026-08-19): `varve-wire` types the envelope,
+`varve-surface` the body, Tier 5 joins.
