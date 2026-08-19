@@ -10,39 +10,50 @@
 //! inversion as `TableSink`: the platform implements it over its
 //! database; this crate never sees one.
 //!
-//! [`FsBlobStore`] is the local-filesystem implementation, running the
-//! same chunked age pipeline as the future S3 impl (P.9 Q7: parity).
-//! `put` is a single streaming pass — hash ⊕ encrypt, constant memory
-//! (the P.10 gateway tee, minus the scan leg which lives at the
-//! gateway) — into a temp file renamed on completion. Because the
+//! [`ObjectBlobStore`] is the implementation — one impl, generic over
+//! any [`object_store`] backend: local filesystem and in-memory for
+//! dev and tests, S3-compatible providers (AWS, OVH, Scaleway, MinIO…)
+//! in production. Swapping providers is a constructor, not code — and
+//! dev runs the exact pipeline production runs (P.9 Q7: parity).
+//!
+//! `put` is a single streaming pass — hash ⊕ age-encrypt, 64 KiB
+//! chunks, constant memory (the P.10 gateway tee, minus the scan leg
+//! which lives at the gateway) — multipart-uploaded to a staging key,
+//! then server-side copied to its content address. Because the
 //! per-blob key is addressed by a hash only known once the bytes have
 //! passed, the identity is generated ephemerally at put-start and
 //! **registered** afterward: hence [`Keyring::register`] is
 //! first-write-wins, not get-or-create. Range access is a first-class
 //! operation (`get_range`), not client-side seek: age implements seek
-//! only on its sync reader, and the S3 impl serves a range as a ranged
-//! GET plus chunk-aligned decryption anyway (P.10) — decryption runs
-//! on a blocking thread, streamed through a duplex pipe, constant
-//! memory.
+//! only on its sync reader, and remote backends serve ranges as ranged
+//! GETs anyway (P.10) — decryption runs on a blocking thread over a
+//! lazy ranged reader, streamed out through a duplex pipe.
 
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;
+use std::io::Read;
+use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use age::secrecy::ExposeSecret;
 use age::x25519;
+use bytes::Bytes;
+use futures::StreamExt;
 use futures::io::AsyncWriteExt as FuturesWriteExt;
+use object_store::{ObjectStore, ObjectStoreExt};
+use object_store::buffered::BufWriter;
+use object_store::path::Path as ObjPath;
 use sha2::{Digest, Sha256};
-use std::io::Read;
-use std::ops::Range;
-
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use tokio_util::io::SyncIoBridge;
 use varve_core::canonical::{ContentHash, HashAlg};
+
+pub use object_store;
 
 /// Blob-level scan bookkeeping (§13.6): distinct from the kernel's
 /// per-element scan status — this exists so one shared blob is scanned
@@ -89,7 +100,7 @@ pub struct SweepReport {
     /// Younger than the grace window (§13.6: the put-during-sweep race
     /// and the upload-slot orphan story are both this counter).
     pub kept_young: u64,
-    /// Abandoned temp files removed (a `put` that never completed).
+    /// Abandoned staging objects removed (a `put` that never completed).
     pub tmp_removed: u64,
 }
 
@@ -109,6 +120,8 @@ pub enum FilesError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
+    Storage(#[from] object_store::Error),
+    #[error(transparent)]
     Keyring(#[from] KeyringError),
     #[error("blob not found: {0}")]
     NotFound(ContentHash),
@@ -118,6 +131,13 @@ pub enum FilesError {
     Decrypt(String),
     #[error("corrupt store: {0}")]
     Corrupt(String),
+}
+
+fn map_storage(e: object_store::Error, hash: &ContentHash) -> FilesError {
+    match e {
+        object_store::Error::NotFound { .. } => FilesError::NotFound(*hash),
+        e => FilesError::Storage(e),
+    }
 }
 
 /// Per-blob key custody (P.10): one X25519 identity per blob, sole
@@ -187,8 +207,8 @@ pub trait BlobStore: Send + Sync {
     fn delete(&self, hash: &ContentHash) -> impl Future<Output = Result<(), FilesError>> + Send;
 
     /// §2.15 mark-and-sweep given roots: deletes blobs not in `live`
-    /// and older than `grace`, plus abandoned temp files. `now` is an
-    /// input, like every timestamp.
+    /// and older than `grace`, plus abandoned staging objects. `now` is
+    /// an input, like every timestamp.
     fn sweep(
         &self,
         live: &BTreeSet<ContentHash>,
@@ -253,14 +273,6 @@ struct ManifestRecord {
     scan: Option<BlobScan>,
 }
 
-/// Local-filesystem store: `<root>/blobs/<alg>-<hex>` (age ciphertext),
-/// `<root>/manifest/<alg>-<hex>.json`, `<root>/tmp` for in-flight puts.
-pub struct FsBlobStore<K> {
-    root: PathBuf,
-    keyring: K,
-    tmp_counter: AtomicU64,
-}
-
 fn stem(hash: &ContentHash) -> String {
     hash.to_string().replace(':', "-")
 }
@@ -269,32 +281,110 @@ fn unix(t: SystemTime) -> u64 {
     t.duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs()
 }
 
-impl<K: Keyring> FsBlobStore<K> {
-    pub async fn open(root: impl Into<PathBuf>, keyring: K) -> Result<Self, FilesError> {
-        let root = root.into();
-        for dir in ["blobs", "manifest", "tmp"] {
-            tokio::fs::create_dir_all(root.join(dir)).await?;
+/// Sync `Read + Seek` over an object via ranged GETs, for age's
+/// seekable decryption. Runs on a blocking thread; fetches lazily in
+/// spans, so the access pattern age produces (header, one seek, then
+/// sequential) costs a handful of requests, not one per chunk.
+struct RangedObjectReader {
+    store: Arc<dyn ObjectStore>,
+    path: ObjPath,
+    len: u64,
+    pos: u64,
+    handle: tokio::runtime::Handle,
+    buf: Bytes,
+    buf_start: u64,
+}
+
+const FETCH_SPAN: u64 = 4 * 1024 * 1024;
+
+impl Read for RangedObjectReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos >= self.len || out.is_empty() {
+            return Ok(0);
         }
-        Ok(Self { root, keyring, tmp_counter: AtomicU64::new(0) })
+        let buf_end = self.buf_start + self.buf.len() as u64;
+        if self.pos < self.buf_start || self.pos >= buf_end {
+            let end = (self.pos + FETCH_SPAN).min(self.len);
+            let range = self.pos..end;
+            let fetched = self
+                .handle
+                .block_on(self.store.get_range(&self.path, range))
+                .map_err(std::io::Error::other)?;
+            self.buf_start = self.pos;
+            self.buf = fetched;
+        }
+        let offset = (self.pos - self.buf_start) as usize;
+        let n = out.len().min(self.buf.len() - offset);
+        out[..n].copy_from_slice(&self.buf[offset..offset + n]);
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl std::io::Seek for RangedObjectReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        use std::io::SeekFrom::*;
+        let target = match pos {
+            Start(n) => n as i128,
+            End(n) => self.len as i128 + n as i128,
+            Current(n) => self.pos as i128 + n as i128,
+        };
+        if target < 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "seek before start",
+            ));
+        }
+        self.pos = target as u64;
+        Ok(self.pos)
+    }
+}
+
+/// The blob store, generic over any `object_store` backend. Layout:
+/// `blobs/<alg>-<hex>` (age ciphertext), `manifest/<alg>-<hex>.json`,
+/// `tmp/` for in-flight staging.
+pub struct ObjectBlobStore<K> {
+    store: Arc<dyn ObjectStore>,
+    keyring: K,
+    tmp_counter: AtomicU64,
+}
+
+impl<K: Keyring> ObjectBlobStore<K> {
+    pub fn new(store: Arc<dyn ObjectStore>, keyring: K) -> Self {
+        Self { store, keyring, tmp_counter: AtomicU64::new(0) }
     }
 
-    fn blob_path(&self, hash: &ContentHash) -> PathBuf {
-        self.root.join("blobs").join(stem(hash))
+    /// Local-filesystem backend (dev, tests): same pipeline, same
+    /// layout, different constructor — that is the provider swap.
+    pub fn local(root: impl Into<PathBuf>, keyring: K) -> Result<Self, FilesError> {
+        let root = root.into();
+        std::fs::create_dir_all(&root)?;
+        let store = object_store::local::LocalFileSystem::new_with_prefix(root)?;
+        Ok(Self::new(Arc::new(store), keyring))
     }
 
-    fn manifest_path(&self, hash: &ContentHash) -> PathBuf {
-        self.root.join("manifest").join(format!("{}.json", stem(hash)))
+    /// In-memory backend (tests).
+    pub fn memory(keyring: K) -> Self {
+        Self::new(Arc::new(object_store::memory::InMemory::new()), keyring)
+    }
+
+    fn blob_path(hash: &ContentHash) -> ObjPath {
+        ObjPath::from(format!("blobs/{}", stem(hash)))
+    }
+
+    fn manifest_path(hash: &ContentHash) -> ObjPath {
+        ObjPath::from(format!("manifest/{}.json", stem(hash)))
     }
 
     async fn read_manifest(&self, hash: &ContentHash) -> Result<ManifestRecord, FilesError> {
-        match tokio::fs::read(self.manifest_path(hash)).await {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| FilesError::Corrupt(format!("manifest for {hash}: {e}"))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                Err(FilesError::NotFound(*hash))
-            }
-            Err(e) => Err(e.into()),
-        }
+        let result = self
+            .store
+            .get(&Self::manifest_path(hash))
+            .await
+            .map_err(|e| map_storage(e, hash))?;
+        let bytes = result.bytes().await.map_err(|e| map_storage(e, hash))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|e| FilesError::Corrupt(format!("manifest for {hash}: {e}")))
     }
 
     async fn write_manifest(
@@ -303,14 +393,16 @@ impl<K: Keyring> FsBlobStore<K> {
         record: &ManifestRecord,
     ) -> Result<(), FilesError> {
         let bytes = serde_json::to_vec(record).expect("manifest serializes");
-        tokio::fs::write(self.manifest_path(hash), bytes).await?;
+        self.store
+            .put(&Self::manifest_path(hash), Bytes::from(bytes).into())
+            .await?;
         Ok(())
     }
 
     /// Sync age decryption (the only seekable reader age offers) on a
-    /// blocking thread, streamed out through a duplex pipe: constant
-    /// memory, setup errors surfaced before the stream is returned;
-    /// mid-stream corruption surfaces as truncation.
+    /// blocking thread over ranged GETs, streamed out through a duplex
+    /// pipe: constant memory, setup errors surfaced before the stream
+    /// is returned; mid-stream corruption surfaces as truncation.
     async fn decrypt_stream(
         &self,
         hash: &ContentHash,
@@ -318,21 +410,23 @@ impl<K: Keyring> FsBlobStore<K> {
     ) -> Result<tokio::io::DuplexStream, FilesError> {
         self.read_manifest(hash).await?;
         let identity = self.keyring.existing_identity(hash).await?;
-        let path = self.blob_path(hash);
-        let hash = *hash;
+        let path = Self::blob_path(hash);
+        let meta = self.store.head(&path).await.map_err(|e| map_storage(e, hash))?;
+        let reader = RangedObjectReader {
+            store: self.store.clone(),
+            path,
+            len: meta.size,
+            pos: 0,
+            handle: tokio::runtime::Handle::current(),
+            buf: Bytes::new(),
+            buf_start: 0,
+        };
         let (read_half, write_half) = tokio::io::duplex(64 * 1024);
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         tokio::task::spawn_blocking(move || {
             let setup = (|| {
-                let file = std::fs::File::open(&path).map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::NotFound {
-                        FilesError::NotFound(hash)
-                    } else {
-                        FilesError::Io(e)
-                    }
-                })?;
-                let decryptor = age::Decryptor::new(file)
-                    .map_err(|e| FilesError::Decrypt(e.to_string()))?;
+                let decryptor =
+                    age::Decryptor::new(reader).map_err(|e| FilesError::Decrypt(e.to_string()))?;
                 let mut reader = decryptor
                     .decrypt(std::iter::once(&identity as &dyn age::Identity))
                     .map_err(|e| FilesError::Decrypt(e.to_string()))?;
@@ -369,7 +463,7 @@ impl<K: Keyring> FsBlobStore<K> {
     }
 }
 
-impl<K: Keyring> BlobStore for FsBlobStore<K> {
+impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
     async fn put(
         &self,
         meta: PutMeta,
@@ -381,22 +475,23 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
         let identity = x25519::Identity::generate();
         let recipient = identity.to_public();
 
-        let tmp = self.root.join("tmp").join(format!(
-            "put-{}-{}",
+        let staging = ObjPath::from(format!(
+            "tmp/put-{}-{}",
             std::process::id(),
             self.tmp_counter.fetch_add(1, Ordering::Relaxed)
         ));
-        let file = tokio::fs::File::create(&tmp).await?;
 
-        // One pass: hash ⊕ encrypt, 64 KiB chunks, constant memory.
+        // One pass: hash ⊕ encrypt, 64 KiB chunks, constant memory,
+        // multipart-uploaded to the staging key as it streams.
         let mut hasher = Sha256::new();
         let mut byte_size: u64 = 0;
+        let upload = BufWriter::new(self.store.clone(), staging.clone());
         let encryptor = age::Encryptor::with_recipients(std::iter::once(
             &recipient as &dyn age::Recipient,
         ))
         .map_err(|e| FilesError::Encrypt(e.to_string()))?;
         let mut writer = encryptor
-            .wrap_async_output(file.compat_write())
+            .wrap_async_output(upload.compat_write())
             .await
             .map_err(|e| FilesError::Encrypt(e.to_string()))?;
         let mut buf = vec![0u8; 64 * 1024];
@@ -418,7 +513,7 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
         let hash = ContentHash { alg: HashAlg::Sha256, digest: hasher.finalize().into() };
 
         if self.has(&hash).await? {
-            tokio::fs::remove_file(&tmp).await.ok();
+            self.store.delete(&staging).await.ok();
             return Ok(hash); // dedup: already stored, nothing to do
         }
         match self.keyring.register(&hash, &identity).await {
@@ -426,15 +521,17 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
             Err(KeyringError::AlreadyRegistered(_)) => {
                 // A concurrent put of the same content won; its bytes
                 // are the ones the address names.
-                tokio::fs::remove_file(&tmp).await.ok();
+                self.store.delete(&staging).await.ok();
                 return Ok(hash);
             }
             Err(e) => {
-                tokio::fs::remove_file(&tmp).await.ok();
+                self.store.delete(&staging).await.ok();
                 return Err(e.into());
             }
         }
-        tokio::fs::rename(&tmp, self.blob_path(&hash)).await?;
+        // Server-side move to the content address.
+        self.store.copy(&staging, &Self::blob_path(&hash)).await?;
+        self.store.delete(&staging).await.ok();
         self.write_manifest(
             &hash,
             &ManifestRecord {
@@ -462,7 +559,11 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
     }
 
     async fn has(&self, hash: &ContentHash) -> Result<bool, FilesError> {
-        Ok(tokio::fs::try_exists(self.manifest_path(hash)).await?)
+        match self.store.head(&Self::manifest_path(hash)).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn stat(&self, hash: &ContentHash) -> Result<BlobInfo, FilesError> {
@@ -486,10 +587,10 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
         // Key row first: even if object removal fails, the bytes are
         // already unreadable (§13.6).
         self.keyring.shred(hash).await?;
-        for path in [self.manifest_path(hash), self.blob_path(hash)] {
-            match tokio::fs::remove_file(path).await {
+        for path in [Self::manifest_path(hash), Self::blob_path(hash)] {
+            match self.store.delete(&path).await {
                 Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(object_store::Error::NotFound { .. }) => {}
                 Err(e) => return Err(e.into()),
             }
         }
@@ -504,22 +605,24 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
     ) -> Result<SweepReport, FilesError> {
         let mut report = SweepReport::default();
 
-        // Abandoned in-flight puts: temp files older than the grace
-        // window can only be crashes.
-        let mut tmp_entries = tokio::fs::read_dir(self.root.join("tmp")).await?;
-        while let Some(entry) = tmp_entries.next_entry().await? {
-            let modified = entry.metadata().await?.modified()?;
+        // Abandoned in-flight puts: staging objects older than the
+        // grace window can only be crashes.
+        let mut staged = self.store.list(Some(&ObjPath::from("tmp")));
+        while let Some(entry) = staged.next().await {
+            let entry = entry?;
+            let modified: SystemTime = entry.last_modified.into();
             if now.duration_since(modified).unwrap_or(Duration::ZERO) >= grace {
-                tokio::fs::remove_file(entry.path()).await.ok();
+                self.store.delete(&entry.location).await.ok();
                 report.tmp_removed += 1;
             }
         }
 
-        let mut entries = tokio::fs::read_dir(self.root.join("manifest")).await?;
         let mut candidates = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            let name = entry.file_name();
-            let Some(stem) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+        let mut manifests = self.store.list(Some(&ObjPath::from("manifest")));
+        while let Some(entry) = manifests.next().await {
+            let entry = entry?;
+            let Some(stem) = entry.location.filename().and_then(|n| n.strip_suffix(".json"))
+            else {
                 continue;
             };
             let Ok(hash) = stem.replacen('-', ":", 1).parse::<ContentHash>() else {
@@ -548,6 +651,7 @@ impl<K: Keyring> BlobStore for FsBlobStore<K> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn now() -> SystemTime {
         UNIX_EPOCH + Duration::from_secs(1_766_000_000)
     }
@@ -556,11 +660,11 @@ mod tests {
         PutMeta { content_type: "application/pdf".into(), created_at: now() }
     }
 
-    async fn store(dir: &tempfile::TempDir) -> FsBlobStore<MemoryKeyring> {
-        FsBlobStore::open(dir.path(), MemoryKeyring::default()).await.unwrap()
+    async fn store(dir: &tempfile::TempDir) -> ObjectBlobStore<MemoryKeyring> {
+        ObjectBlobStore::local(dir.path(), MemoryKeyring::default()).unwrap()
     }
 
-    async fn read_all(store: &FsBlobStore<MemoryKeyring>, hash: &ContentHash) -> Vec<u8> {
+    async fn read_all(store: &ObjectBlobStore<MemoryKeyring>, hash: &ContentHash) -> Vec<u8> {
         let mut reader = store.get(hash).await.unwrap();
         let mut out = Vec::new();
         reader.read_to_end(&mut out).await.unwrap();
@@ -576,8 +680,9 @@ mod tests {
 
         assert_eq!(read_all(&store, &hash).await, plain);
 
-        // On disk: age ciphertext, never the plaintext.
-        let on_disk = std::fs::read(store.blob_path(&hash)).unwrap();
+        // On disk (local backend = real files): age ciphertext, never
+        // the plaintext.
+        let on_disk = std::fs::read(dir.path().join("blobs").join(stem(&hash))).unwrap();
         assert!(on_disk.starts_with(b"age-encryption.org/v1"));
         assert!(!on_disk.windows(plain.len()).any(|w| w == plain));
 
@@ -613,6 +718,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn provider_swap_is_a_constructor() {
+        // The same pipeline over the in-memory backend: what an
+        // S3-compatible provider sees, minus the network.
+        let store = ObjectBlobStore::memory(MemoryKeyring::default());
+        let plain: Vec<u8> = (0..200_000u32).map(|i| (i.wrapping_mul(17) % 249) as u8).collect();
+        let hash = store.put(meta(), plain.as_slice()).await.unwrap();
+
+        let mut reader = store.get(&hash).await.unwrap();
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).await.unwrap();
+        assert_eq!(out, plain);
+
+        let mut reader = store.get_range(&hash, 100_000..100_100).await.unwrap();
+        let mut window = Vec::new();
+        reader.read_to_end(&mut window).await.unwrap();
+        assert_eq!(window, plain[100_000..100_100]);
+
+        store.delete(&hash).await.unwrap();
+        assert!(!store.has(&hash).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn put_is_idempotent_by_hash() {
         let dir = tempfile::tempdir().unwrap();
         let store = store(&dir).await;
@@ -621,8 +748,11 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(store.keyring.len(), 1);
         assert_eq!(std::fs::read_dir(dir.path().join("blobs")).unwrap().count(), 1);
-        // The losing put's temp file was cleaned up.
-        assert_eq!(std::fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
+        // The losing put's staging object was cleaned up.
+        let staged: Vec<_> = std::fs::read_dir(dir.path().join("tmp"))
+            .map(|d| d.filter_map(Result::ok).collect())
+            .unwrap_or_default();
+        assert!(staged.is_empty());
     }
 
     #[tokio::test]
@@ -676,16 +806,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sweep_removes_abandoned_tmp_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = store(&dir).await;
-        std::fs::write(dir.path().join("tmp").join("put-999-0"), b"crashed mid-put").unwrap();
+    async fn sweep_removes_abandoned_staging() {
+        let store = ObjectBlobStore::memory(MemoryKeyring::default());
+        store
+            .store
+            .put(&ObjPath::from("tmp/put-999-0"), Bytes::from_static(b"crashed mid-put").into())
+            .await
+            .unwrap();
 
         let far_future = SystemTime::now() + Duration::from_secs(7200);
         let report =
             store.sweep(&BTreeSet::new(), Duration::from_secs(1800), far_future).await.unwrap();
         assert_eq!(report.tmp_removed, 1);
-        assert_eq!(std::fs::read_dir(dir.path().join("tmp")).unwrap().count(), 0);
     }
 
     #[tokio::test]

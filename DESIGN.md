@@ -2176,8 +2176,12 @@ make.
   state — without it every handler re-implements the sequence, and the
   invariants are only as strong as the sloppiest one.
 - `varve-files` — as planned (§2.15): blob trait + content-addressed
-  manifest; local-filesystem impl first, S3 later. Byte storage only —
-  the scan sweep is scheduling and lives in `varve-service`. The S3
+  manifest. *Refined in implementation:* one generic impl over
+  `object_store` backends — local filesystem and in-memory for dev and
+  tests, S3-compatible providers in production — so a provider swap is
+  a constructor, and dev runs the exact pipeline production runs. Byte
+  storage only — the scan sweep is scheduling and lives in
+  `varve-service`. The S3
   impl stores ciphertext only: platform-side streaming encryption (age
   format, per-blob envelope keys — settled 2026-08-19, PLATFORM.md
   P.10); blob addresses stay plaintext hashes (§2.15), key custody is
