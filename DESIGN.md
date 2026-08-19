@@ -2261,7 +2261,14 @@ web crates (tokio, toasty, topcoat, async-graphql, …), upholding §9's
 Known cost: workspace builds unify features on shared dependencies, so
 kernel tests may run with platform-activated features — harmless to the
 kernel's own declarations, worth remembering when an isolated build
-(`cargo hack`) behaves differently.
+(`cargo hack`) behaves differently. *Built 2026-08-19:
+`scripts/check-layering.sh` — plain `cargo tree` over the ten kernel
+crates, two checks: no runtime/ORM/web/storage crate (tokio, axum,
+async-graphql, toasty, sqlx, object_store, age, …) anywhere in a
+kernel crate's normal-dependency closure; `serde`/`serde_json` as a
+direct dependency only in `varve-wire` and `varve-value` (GeoJSON's
+parser). Runs as the `layering` CI job. It became non-hypothetical the
+day `varve-files` brought tokio into the workspace.*
 
 ### 13.6 The `varve-files` contract (settled 2026-08-19)
 
