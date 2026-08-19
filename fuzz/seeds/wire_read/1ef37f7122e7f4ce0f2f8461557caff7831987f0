@@ -1,0 +1,3 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"":{"integer":"-400000/0000000000000000001E-2"},"t":{"text":"x"},"tags":[{"option":"a"}]},"id":"r1","k":"record","lens":"len 0e000000000000000000000000s"}
+k":"it,"o!rd":0,"pad":"r1"}

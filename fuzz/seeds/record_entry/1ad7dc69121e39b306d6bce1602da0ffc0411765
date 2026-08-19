@@ -1,0 +1,1 @@
+{"ops":[{"op":"set","column":"e","path":[],"state":{"text":"unt"}}],"origin":{"derived":{"source":"insee","source_version":1,"mapping_version":1,"snapshot_ref":"sha256:000"}},"prev":""}

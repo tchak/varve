@@ -1,0 +1,1 @@
+{"actor":"a1","actor_kind":"human","content_hash":0,"content_hash":"sha25600","note":null,"op_salts":["010101"],"ops":[{"op":"set","column":"name","path":[],"state":{"text":"Dupont"}},{"op":"add_item","group":"g","parent":[],"item":"i1","at":0}],"origin":{"derived":{"source":1,"snapshot_ref":"s0000000000000000"}},"prev":"sha2560000007T10:00:00Z"}

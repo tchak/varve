@@ -1,0 +1,1 @@
+{"actor":"a101010101","note":null,"op_salts":["010101010100101010101"],"ops":[{"op":"set","column":"name","path":[],"state":{"text":"Dupont"}},{"op":"add_item","group":"g","parent":[],"item":"i0","at":0}],"origin":{"derivoeped":{"source":"insee","source_vef":"sh00"}},"prev":"sha256:0000000000000010:00:00Z"}

@@ -1,0 +1,1 @@
+{"actor":"a1","actor_kind":"hase_ver01","note":["0101010101010*0101q"],"ops":[{"op":"set","column":"name","path":[],"state":{"text":"Dupont"}},{"op":"add_item","at":0}],"origin":{"derived":{"source":"insee","souversion":1,"mahot_ref":"s5000000"}},"prev":"sha256:0000000000Z"}

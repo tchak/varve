@@ -1,0 +1,1 @@
+{"actor":"050505","note":null,"op_salts":["01"],"ops":[{"op":"set","column":"e","path":[],"state":{"text":""}}],"origin":{"derived":{"source":"insee","source_versin":1,"snapshot_ref":"sha256:000000000000000,"}},"prev":"sha000Z"}

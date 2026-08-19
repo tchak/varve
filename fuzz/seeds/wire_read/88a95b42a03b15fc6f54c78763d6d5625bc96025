@@ -1,0 +1,2 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"":{"decimal":"411111111111.11111111111111111770314490"},"gats":[{"option":"a"}]},"id":"r1{ {","k":"record","lens":"lens"}

@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"con777777":{"ion":"oui"}}},{"or":[{"op":"is"}]}]}

@@ -1,0 +1,1 @@
+{"actor":"a000","meta_salt":"0101010101010101010101010101010101010101010101010101010101010101","note":null,"op_salts":[],"ops":[{"op":"add_item","group":"g","parent":[],"item":"i1","at":0}],"origin":{"derived":{"source":"insee","source_version":1,"mapping_version":1,"snapshot_ref":"sha256:0040000000000000000000000000000000000000000000000000000000000000"}},"prev":"000"}

@@ -1,0 +1,4 @@
+{"attachments":"referenced","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["lens"],"source_instance":"seed"}
+{"cells":{"b,ank":null,"n":{"integer":"47712"},"gats":[{"option":"a"}]},"id":"r1{ {","k":"record","lens":"lens"}
+{"cells":{"cblank":null,"n":{"integer":"55/"},"t":{"text":"x"},"g`ts":[{"option":"a"}]},"id":"r2{ {","k":"record","lens":"lens"}
+{"}

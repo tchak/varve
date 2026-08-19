@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","source":{"cosonst":{"number":{"value":"5.5O","u":"$ay"}}}},{"op":"pending", "solver":"insee"}]}]}

@@ -1,0 +1,1 @@
+{"actor":"a0000101010101010101010101010101001101010101","note":null,"op_salts":["11111.111111"],"ops":[{"op":"set","column":"name","path":[1111],"state":{"text":"Dupont"}},{"parent":[],"item":"i1","at":0}],"origin":{"derived":{"source":"i000000000000000000"}},"prev":"sha256:00000:00Z"}

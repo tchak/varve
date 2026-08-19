@@ -1,0 +1,1 @@
+{"actor":"000","meta_salt":"001001010101010101","note":null,"op_salts":["0/000"],"ops":[{"op":"set","path":[],"state":{"text":"Dupont"}},{"op":"","parent":[],"item":"i0","at":0}],"origin":{"derderived":{"source":"inse","sdatee_on":1,"snapshot_ref":"sha256:0000000000000000"}},"prev":"sha256:00Z"}
