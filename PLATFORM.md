@@ -91,6 +91,21 @@ schema (transport-independent by construction), and thin resolvers
   each use case composes one `varve-service` operation with its
   platform side effects — submit case file = kernel append + system
   message + notification + webhook fan-out — in exactly one place.
+- `platform-store` — the Toasty implementation of the `varve-store`
+  traits (the name mirrors the kernel crate: `varve-store` defines,
+  `platform-store` implements). The kernel tables — record-log rows
+  keyed `(record, seq)`, publication events, block/nomenclature
+  version rows, revision objects, surfaces — are Toasty models kept
+  `pub(crate)`, making P.1's "kernel objects are never touched at the
+  store level from platform code" structural rather than a comment.
+  Depends on `varve-store` + toasty only, nothing platform-side:
+  `platform-core`'s use-case services stay generic over the store
+  traits (tested against `MemoryStore`, the §13.2 oracle),
+  `platform-server` wires this impl in, and the same conformance
+  suite reruns here against Postgres. This crate is P.2's "swap the
+  ORM" hedge made concrete and the subject of the Q1 spike (DESIGN
+  Q19): if toasty cannot carry the substrate, the replacement is this
+  one crate. Cross-table atomicity with platform writes is P.9 Q10.
 - `platform-i18n` — the MF2 catalogs (English + French) and their
   runtime over ICU4X: parse with `mf2_parser`, implement the MF2
   function registry (`:number`, `:datetime`, plural selection) by
@@ -296,6 +311,21 @@ everything shipped exists in DN and nothing shipped that doesn't.
    neighbor). Fallbacks, in order: apalis-postgres, then a hand-rolled
    SKIP LOCKED queue. Sweeps are unaffected — they are hand-rolled
    regardless (P.13).
+10. **One transaction across the kernel/platform table boundary.** The
+    `varve-store` traits are per-method atomic and expose no
+    transaction handle (deliberately — the trait must not name a
+    backend), yet the use-case composition in `platform-core` — kernel
+    append + system message + outbox row — wants a single Postgres
+    transaction spanning `platform-store`'s kernel tables and the
+    platform models. Candidates: (a) hand the `platform-store` impl a
+    toasty transaction at construction, so one txn threads through
+    both crates while the traits stay ignorant of it; (b) accept
+    per-method atomicity, commit the kernel append first, and let
+    P.13's sweeps heal the platform side effects (at-least-once, same
+    genus as the outbox drain). Lean (a) — (b) forfeits "exactly one
+    place" atomicity that motivates the use-case services. Same family
+    as Q9 (toasty txn into underway's enqueue); run with the Q1 spike
+    and decide at P0 with the first use-case service.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
