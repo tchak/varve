@@ -1,0 +1,23 @@
+[package]
+name = "varve-store"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# Tier 5 (§7, §13.2): async persistence traits for kernel objects — the
+# revision / block / nomenclature registries, surfaces, and record logs.
+# Traits only, plus the in-memory reference implementation and the
+# rehydration loaders; the production implementation (Toasty vs direct
+# SQL — §10 Q19) lives elsewhere and is chosen by the host.
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+varve-record = { path = "../varve-record" }
+varve-revision = { path = "../varve-revision" }
+varve-surface = { path = "../varve-surface" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+varve-value = { path = "../varve-value" }

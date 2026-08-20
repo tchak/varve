@@ -1975,7 +1975,8 @@ up.*
   logic: surface-side lines carry an opaque canonical body (§5).
 
 **Tier 5 — IO appears here for the first time** *(expanded 2026-08-18 — §13)*
-- `varve-store` (traits, async), a store implementation (substrate —
+- `varve-store` (traits, async — built 2026-08-20, §13.2), a store
+  implementation (substrate —
   Toasty vs direct SQL — is open question 19), `varve-files`
   (content-addressed manifest + blob trait), `varve-bundle` (the
   export bundle: stream ⊕ sidecar and surface ⊕ envelope joins —
@@ -2456,6 +2457,31 @@ make.
   hash-chained — plus content-addressed registries. There is almost
   nothing for an ORM to do on the write path; the read path is the
   read-model contract (open question 18).
+  *Built (2026-08-20), traits + `MemoryStore` reference impl +
+  rehydration loaders, with four shapes settled in implementation.*
+  **(1) Traits speak typed kernel objects, per-method atomic** — the
+  wire-line row is the production impl's layout, not the contract.
+  Every persistent object turned out append-only under a next-index
+  rule (entries by seq, publication events by index, block and
+  nomenclature versions by number) or content-addressed (revision
+  objects, shared across lineages — the corpus's 19.7% dedup falls out
+  of storage); the conditional append doubles as the §2.9
+  optimistic-concurrency guard, so the store needs no other locking
+  concept. **(2) The loader enforces**, mirroring the wire reader
+  (§5): the store checks index rules only; chain verification,
+  revision-id recomputation, block validation, and the §2.11
+  append-only rule re-run on every load by replaying events through
+  the kernel constructors — a tampered row is caught at first read,
+  and the conformance tests pin store-accepts/loader-refuses pairs.
+  **(3) `LineageId` is minted by the store crate**, not `varve-core`:
+  the key naming one revision DAG among many is storage scoping — the
+  kernel still has no procedure concept (§13.1). **(4) Deliberately
+  absent, each with its §10 home:** the typed-query entry point and
+  read models (Q18/Q19), cross-record `pending_resolutions` /
+  `referenced_blobs` enumerations (Q18's family; `records()`
+  pagination serves the §13.6 audit sweep meanwhile), and the snapshot
+  cache — pointless until `varve-record` can fold *from* a snapshot
+  (Q11 residual); it lands with that.
 - **A store implementation.** First on Toasty, for operational unity
   with the platform — one database, one migration story; direct SQL is
   the fallback. Substrate is open question 19; the trait is the hedge.

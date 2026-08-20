@@ -19,14 +19,16 @@ platform above it — the DN-successor web app and GraphQL API (§13
 fixes the boundary; platform crates will live in `platform/`). The
 workspace holds the deterministic kernel crates (`varve-core`,
 `-schema`, `-value`, `-logic`, `-projection`, `-impact`, `-record`,
-`-surface`, `-revision`, `-wire`), the first Tier 5 crate
+`-surface`, `-revision`, `-wire`), the Tier 5 crates
 (`varve-files`: encrypted content-addressed blob store over
-`object_store` backends), and `tools/m0`, the corpus harness;
+`object_store` backends; `varve-bundle`: the export-bundle joins;
+`varve-store`: async persistence traits + in-memory reference impl),
+and `tools/m0`, the corpus harness;
 `corpus/` holds the analyses (M0: all 42,723 published DN procedures
 express with zero residue; M3: they round-trip byte-stably through the
 wire). M1 and M2 machinery is built and awaits DN-internal data
 (revision history, rule extraction). Before committing run what CI
-runs (`.github/workflows/ci.yml`): `cargo test --workspace` (294 tests
+runs (`.github/workflows/ci.yml`): `cargo test --workspace` (307 tests
 incl. property suites), `cargo clippy --workspace --all-targets`,
 `cargo fmt --all --check` (rustfmt defaults are the style authority),
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM

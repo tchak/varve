@@ -8,6 +8,7 @@ members = [
     "crates/varve-surface",
     "crates/varve-revision",
     "crates/varve-wire",
+    "crates/varve-store",
     "crates/varve-files",
     "crates/varve-bundle",
     "crates/varve-projection",

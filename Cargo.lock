@@ -2993,6 +2993,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "varve-store"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "tokio",
+ "varve-core",
+ "varve-record",
+ "varve-revision",
+ "varve-schema",
+ "varve-surface",
+ "varve-value",
+]
+
+[[package]]
 name = "varve-surface"
 version = "0.1.0"
 dependencies = [
