@@ -28,7 +28,9 @@ KERNEL=(varve-core varve-schema varve-value varve-logic varve-projection
 # catches `tokio-util`, `sqlx` catches `sqlx-core`, …).
 FORBIDDEN=(tokio async-std smol futures hyper axum tower reqwest http
            async-graphql toasty topcoat sqlx diesel sea-orm rusqlite
-           object_store age tempfile rand getrandom)
+           object_store age tempfile rand getrandom
+           platform) # `platform` catches every platform-* crate: the
+                     # §7 DAG points platform -> kernel, never back.
 
 SERDE_ALLOWED=(varve-wire varve-value)
 
@@ -58,7 +60,33 @@ for crate in "${KERNEL[@]}"; do
   fi
 done
 
+#   3. License gate: every crate here is MIT OR Apache-2.0 (§9), and
+#      the kernel's embeddability depends on staying that way — no
+#      copyleft license may enter a kernel-crate closure. A license
+#      counts as copyleft only if *every* SPDX alternative is (an OR
+#      with a permissive branch is fine: we take that branch). Only
+#      kernel closures are checked; what platform/ may depend on is
+#      its own affair.
+kernel_closure="$(for c in "${KERNEL[@]}"; do closure "$c"; done | sort -u)"
+license_hits="$(cargo metadata --format-version 1 2>/dev/null | python3 -c "
+import json, sys
+names = set(\"\"\"$kernel_closure\"\"\".split())
+copyleft = ('GPL', 'SSPL', 'EUPL', 'OSL')
+for pkg in json.load(sys.stdin)['packages']:
+    if pkg['name'] not in names:
+        continue
+    lic = pkg.get('license') or ''
+    alts = [a.strip() for chunk in lic.split(' OR ') for a in chunk.split('/')]
+    if alts and all(any(c in a for c in copyleft) for a in alts):
+        print(f\"{pkg['name']} {pkg['version']}: {lic}\")
+")"
+if [[ -n "$license_hits" ]]; then
+  echo "LAYERING: copyleft license inside a kernel closure — the kernel stays MIT OR Apache-2.0 (§9):" >&2
+  echo "$license_hits" >&2
+  fail=1
+fi
+
 if [[ $fail -eq 0 ]]; then
-  echo "layering ok: ${#KERNEL[@]} kernel crates, no forbidden dependency in any closure"
+  echo "layering ok: ${#KERNEL[@]} kernel crates, no forbidden dependency or copyleft license in any closure"
 fi
 exit $fail

@@ -87,7 +87,7 @@ schema (transport-independent by construction), and thin resolvers
 
 **Settled (2026-08-20): one root workspace.** The `platform/` crates
 are members of the kernel repo's root Cargo workspace, not a nested
-workspace. Pre-publish ruthless refactoring (CLAUDE.md) wants
+workspace (DESIGN §13.5 carries the full argument). Pre-publish ruthless refactoring (CLAUDE.md) wants
 kernel↔platform breakage surfaced by the single
 `cargo test --workspace`; the accepted cost is kernel-lockfile churn
 from the fast-moving topcoat/toasty line. DB-backed tests gate behind
