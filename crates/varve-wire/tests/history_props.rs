@@ -388,7 +388,8 @@ proptest! {
 
     /// Re-importing a history over the store it produced, under
     /// `Upsert`, is accepted: every chain extends itself (§6 — same
-    /// prefix), and the outcome names them all as updated.
+    /// prefix) with nothing new, and the outcome names them all as
+    /// unchanged — `updated` implies a change.
     #[test]
     fn a_history_extends_itself_under_upsert(logs in logs()) {
         let mut store = BTreeMap::new();
@@ -397,7 +398,8 @@ proptest! {
         let outcome = adopt_history(&again, &mut store).unwrap();
         let ids: Vec<RecordId> = logs.iter().map(|(r, _)| r.clone()).collect();
         prop_assert!(outcome.created.is_empty());
-        prop_assert_eq!(&outcome.updated, &ids);
+        prop_assert!(outcome.updated.is_empty());
+        prop_assert_eq!(&outcome.unchanged, &ids);
         for (record, log) in &logs {
             prop_assert_eq!(store[record].entries(), log.entries());
         }

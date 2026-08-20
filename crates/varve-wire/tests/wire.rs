@@ -838,6 +838,18 @@ fn reader_checks_versions_first_and_revisions_for_consistency() {
         Err(ReadError::RevisionsMismatch)
     ));
 
+    // Once per id: a duplicated declaration would collapse in the set
+    // comparison against the revision lines — malformed on line 1.
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    m.revisions.push(revision_id(&schema()));
+    let mut lines = vec![Line::Header(m)];
+    lines.extend(schema_lines());
+    let bytes = write_lines(&lines).unwrap();
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::Malformed { line: 1, .. })
+    ));
+
     // A lens the stream does not carry: the data would arrive without
     // its schema.
     let mut m = manifest(Mode::Snapshot, Intent::Upsert, 1);

@@ -45,6 +45,10 @@ pub enum ImportError {
 pub struct ImportOutcome {
     pub created: Vec<RecordId>,
     pub updated: Vec<RecordId>,
+    /// In the stream, already in that state: a snapshot whose diff is
+    /// empty, or a history identical to the existing chain. Nothing
+    /// was appended or replaced — `updated` implies a change.
+    pub unchanged: Vec<RecordId>,
 }
 
 fn check_intent(intent: Intent, existing: bool, record: &RecordId) -> Result<(), ImportError> {
@@ -108,6 +112,11 @@ pub fn adopt_history(
             if !extends {
                 return Err(ImportError::Diverges(record.clone()));
             }
+            if current.entries().len() == log.entries().len() {
+                // The exact chain already held: nothing to adopt.
+                outcome.unchanged.push(record.clone());
+                continue;
+            }
             outcome.updated.push(record.clone());
         } else {
             outcome.created.push(record.clone());
@@ -165,7 +174,7 @@ pub fn import_snapshot(
             .values;
         let ops = diff(&current, &r.values);
         if ops.is_empty() && existing.is_some() {
-            outcome.updated.push(r.record.clone());
+            outcome.unchanged.push(r.record.clone());
             continue;
         }
         let salts = (request.salts_for)(ops.len());

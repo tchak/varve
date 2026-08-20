@@ -137,12 +137,16 @@ fn pax_record(key: &str, value: &str) -> String {
 // ------------------------------------------------------------- reading
 
 fn parse_octal(field: &[u8]) -> Result<u64, BundleError> {
+    // Leading spaces tolerated: historic writers space-pad octal
+    // fields where ours zero-pads — metadata proves nothing either
+    // way (module docs), so read both spellings.
     let text = field
         .iter()
+        .skip_while(|b| **b == b' ')
         .take_while(|b| **b != 0 && **b != b' ')
         .map(|b| *b as char)
         .collect::<String>();
-    u64::from_str_radix(text.trim(), 8)
+    u64::from_str_radix(&text, 8)
         .map_err(|_| BundleError::MalformedArchive("bad octal field".into()))
 }
 
@@ -319,6 +323,76 @@ mod tests {
         let mut field = [0u8; 8];
         octal(&mut field, 0o644);
         assert_eq!(parse_octal(&field).unwrap(), 0o644);
+        // Space-padded octal (historic writers): tolerated on read.
+        let mut field = [0u8; 12];
+        field[..7].copy_from_slice(b"  644 \0");
+        assert_eq!(parse_octal(&field).unwrap(), 0o644);
+        assert!(parse_octal(b"        \0   ").is_err());
+    }
+
+    /// A pax `size` record overrides the ustar field. The writer only
+    /// emits pax above `USTAR_MAX`, so the read side is pinned with a
+    /// hand-built archive: ustar size zeroed, pax size correct — the
+    /// import must read through the pax path to find the bytes.
+    #[tokio::test]
+    async fn pax_size_records_drive_the_read() {
+        use std::time::{Duration, UNIX_EPOCH};
+
+        use varve_files::{MemoryKeyring, ObjectBlobStore};
+        use varve_wire::{Intent, Line, Manifest, Mode};
+
+        let content = b"hello";
+        let now = UNIX_EPOCH + Duration::from_secs(1_766_000_000);
+        let meta = || PutMeta {
+            content_type: "text/plain".into(),
+            created_at: now,
+        };
+        // A scratch store computes the content address.
+        let scratch = ObjectBlobStore::memory(MemoryKeyring::default());
+        let hash = scratch.put(meta(), &content[..]).await.unwrap();
+
+        let stream = Stream {
+            manifest: Manifest {
+                format_version: varve_wire::FORMAT_VERSION,
+                source_instance: "s".into(),
+                mode: Mode::History,
+                intent: Intent::CreateOnly,
+                revisions: vec![],
+                record_count: 0,
+                blobs_bundled: true,
+            },
+            lines: vec![Line::Attachment {
+                hash,
+                byte_size: content.len() as u64,
+                content_type: "text/plain".into(),
+            }],
+        };
+
+        let name = entry_name(&hash);
+        let record = pax_record("size", &content.len().to_string());
+        let mut tar = Vec::new();
+        tar.extend_from_slice(&header(
+            &format!("PaxHeaders/{}", &name[7..]),
+            record.len() as u64,
+            b'x',
+        ));
+        tar.extend_from_slice(record.as_bytes());
+        tar.extend_from_slice(&vec![0u8; BLOCK - record.len() % BLOCK]);
+        tar.extend_from_slice(&header(&name, 0, b'0')); // ustar size lies
+        tar.extend_from_slice(content);
+        tar.extend_from_slice(&vec![0u8; BLOCK - content.len()]);
+        tar.extend_from_slice(&[0u8; 2 * BLOCK]);
+
+        let store = ObjectBlobStore::memory(MemoryKeyring::default());
+        let stored = import_sidecar(&stream, &store, tar.as_slice(), now)
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![hash]);
+        let mut out = Vec::new();
+        AsyncReadExt::read_to_end(&mut store.get(&hash).await.unwrap(), &mut out)
+            .await
+            .unwrap();
+        assert_eq!(out, content);
     }
 
     /// The header checksum is the historical spaces-then-sum form that

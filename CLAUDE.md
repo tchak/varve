@@ -26,7 +26,7 @@ workspace holds the deterministic kernel crates (`varve-core`,
 express with zero residue; M3: they round-trip byte-stably through the
 wire). M1 and M2 machinery is built and awaits DN-internal data
 (revision history, rule extraction). Before committing run what CI
-runs (`.github/workflows/ci.yml`): `cargo test --workspace` (277 tests
+runs (`.github/workflows/ci.yml`): `cargo test --workspace` (294 tests
 incl. property suites), `cargo clippy --workspace --all-targets`,
 `cargo fmt --all --check` (rustfmt defaults are the style authority),
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM

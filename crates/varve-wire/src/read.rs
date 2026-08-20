@@ -537,6 +537,20 @@ fn as_obj(v: &CanonicalValue) -> Result<&Obj, String> {
 }
 
 fn manifest_from(m: &Obj) -> Result<Manifest, String> {
+    let revisions: Vec<RevisionId> = as_arr(get(m, "revisions")?)?
+        .iter()
+        .map(|r| match r {
+            CanonicalValue::String(s) => Ok(RevisionId::new(s)),
+            _ => Err("revision ids must be strings".to_string()),
+        })
+        .collect::<Result<_, _>>()?;
+    // §5: line 1 declares what the stream carries — once per id. A
+    // duplicate would collapse in the set comparison against the
+    // stream's revision lines and slip through.
+    let unique: std::collections::BTreeSet<&RevisionId> = revisions.iter().collect();
+    if unique.len() != revisions.len() {
+        return Err("duplicate revision id in the manifest".into());
+    }
     Ok(Manifest {
         format_version: get_u32(m, "format_version")?,
         source_instance: get_str(m, "source_instance")?,
@@ -551,13 +565,7 @@ fn manifest_from(m: &Obj) -> Result<Manifest, String> {
             "upsert" => Intent::Upsert,
             other => return Err(format!("unknown intent '{other}'")),
         },
-        revisions: as_arr(get(m, "revisions")?)?
-            .iter()
-            .map(|r| match r {
-                CanonicalValue::String(s) => Ok(RevisionId::new(s)),
-                _ => Err("revision ids must be strings".to_string()),
-            })
-            .collect::<Result<_, _>>()?,
+        revisions,
         record_count: get_u64(m, "record_count")?,
         blobs_bundled: match get_str(m, "blobs")?.as_str() {
             "bundled" => true,
