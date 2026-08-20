@@ -5,8 +5,19 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# The MF2 catalogs (English + French) and their runtime over
-# ICU4X (PLATFORM.md P.3). Locale is a plain argument resolved in
-# `platform-app`; no crate below this one knows what a locale is. The
-# runtime choice is gated on the P.9 Q8 spike.
+# The MF2 message runtime over ICU4X (PLATFORM.md P.3, P.9 Q8). Parse
+# with ox_mf2_parser (MIT, spec-final CST), format with ICU4X compiled
+# data. Locale is a plain argument resolved in `platform-app`; no crate
+# below this one knows what a locale is.
 [dependencies]
+icu = { version = "2.3", features = ["compiled_data"] }
+# Pinned exactly: pre-1.0 alpha line, any bump may break the CST API.
+# The parser stays behind this crate's own interface (Q8 residual
+# risk: MIT, vendorable, swappable).
+ox_mf2_parser = "=0.14.0-alpha.12"
+# Same version icu 2.3 resolves to, so `Decimal` is one type across
+# the boundary. `ryu` enables lossless shortest-representation
+# f64 -> Decimal (Q8's open point, settled: see `ArgValue`'s
+# `From<f64>`).
+fixed_decimal = { version = "0.7.2", features = ["ryu"] }
+thiserror.workspace = true
