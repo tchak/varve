@@ -118,10 +118,13 @@ by new members.
   Q19): if toasty cannot carry the substrate, the replacement is this
   one crate. Cross-table atomicity with platform writes is P.9 Q10.
 - `platform-i18n` — the MF2 catalogs (English + French) and their
-  runtime over ICU4X: parse with `mf2_parser`, implement the MF2
+  runtime over ICU4X (correction, found in the Q8 spike: parse with
+  `ox_mf2_parser` — the originally named `mf2_parser` is GPL-3 and
+  parser-only, offering nothing over the MIT candidate), implement
+  the MF2
   function registry (`:number`, `:datetime`, plural selection) by
-  delegating to ICU4X (P.9 Q8 decides whether an existing runtime
-  crate replaces the hand-rolled interpreter). Locale is a plain
+  delegating to ICU4X (P.9 Q8, resolved: the interpreter is
+  hand-rolled — no existing runtime crate qualified). Locale is a plain
   argument: resolved in `platform-app` (`Accept-Language`, principal
   preference), passed as ordinary context — no crate below this one
   knows what a locale is.
@@ -324,18 +327,37 @@ everything shipped exists in DN and nothing shipped that doesn't.
    paths exercised in tests). Residual, deliberately deployment-level:
    master-key custody (KMS / injected secret, per environment).
    Contract: DESIGN §13.6.
-8. **MF2 runtime spike.** The MF2 *spec* is settled (P.2); what's
-   young is the Rust runtime. ICU4X does not yet ship an MF2
-   formatter (ICU4J/ICU4C only, as tech preview). Candidates:
-   `mf2-i18n` (claims a full runtime; assess), or a hand-rolled
-   interpreter over the `mf2_parser` AST delegating all hard parts
-   (plural rules, number/date formatting) to ICU4X — bounded code,
-   since MF2's runtime semantics are deliberately small. Either way
-   the catalogs don't change; when ICU4X ships its official MF2
-   formatter, swap the runtime and delete ours. Run the spike at P0
-   before the first UI strings land. Fallback if both fail: Fluent,
-   migrating catalogs to MF2 later (mechanical — MF2 descends from
-   it).
+8. ~~MF2 runtime spike: `mf2-i18n` vs hand-rolled over ICU4X.~~
+   **Resolved (2026-08-20): hand-rolled interpreter over
+   `ox_mf2_parser` + ICU4X.** Settled by spike (scratchpad, ~570-line
+   interpreter, 18/18 corpus tests): parse with `ox_mf2_parser` (MIT,
+   spec-final CST — its `SemanticModel` lowering is lint-only and
+   carries no option values; evaluate from the CST), delegate plural
+   selection, number, and datetime formatting to ICU4X 2.3
+   `compiled_data` (`icu_plurals` cardinal rules, `DecimalFormatter`
+   over `Decimal`, `DateTimeFormatter` fieldsets). French output is
+   CLDR-correct end to end: 1 → `one`, 1 000 000 → `many`, U+202F
+   group separators, `"20 août 2026"`. `mf2-i18n` **ruled out** on
+   source reading: despite the name it parses a homegrown
+   Fluent-style syntax, not LDML MF2; formatting is non-CLDR (chrono
+   + POSIX locale data, options silently ignored, French `many`
+   absent); runtime unusable without its manifest/bytecode pipeline;
+   two months old, bus factor 1, no CI. `mf2_parser` proved
+   spec-current despite Oct-2024 dormancy (accepts final `.match
+   $count`, rejects the draft form) but is GPL-3 and parser-only — it
+   offers nothing the MIT candidate lacks, so no licensing question
+   arises. Fluent fallback not needed. ICU4X still ships no MF2
+   formatter (checked `icu_experimental` 0.6); when it does, swap it
+   in and delete ours — unchanged. Implementation notes carried into
+   `platform-i18n`: evaluate declarations once in order; lower the
+   CST to a small IR per message, don't re-walk per format; pin
+   `:number` exact-match semantics on the resolved value; NFC-
+   normalize names before env lookup; unknown options warn-and-
+   continue per spec, don't Err; decide f64→`Decimal` via the `ryu`
+   feature or restrict argument types; treat formatted output as
+   opaque (NNBSP will break naive snapshots). Residual risk:
+   `ox_mf2_parser` is pre-1.0 and two weeks old — it stays behind
+   `platform-i18n`'s own interface, MIT/vendorable, swappable.
 9. **Underway beside toasty.** The spike gating P.13's queue half: does
    underway's sqlx pool coexist cleanly with toasty on the same
    Postgres, and can the use-case services thread toasty's transaction
