@@ -252,6 +252,19 @@ everything shipped exists in DN and nothing shipped that doesn't.
    subquery be expressed in Toasty's query API? Run before P1's
    compiler work starts; fallback is parameterized SQL against the same
    tables.
+   **Evidence (2026-08-20, source reading at `toasty-v0.10.0`,
+   distilled into `.claude/skills/toasty`): mostly yes.** `Expr<bool>`
+   is a plain composable value — `.and`/`.or`/`.not`,
+   `Expr::and_all(iter)` (empty → true), runtime `in_list`, `between`
+   — so arbitrary runtime predicate trees fold fine
+   (`crates/toasty/src/stmt/expr.rs`). Correlated subqueries exist but
+   **only along declared relation paths** (`Path::any()`/`.all()`,
+   lowered to `IN (SELECT …)`); the AST carries `Exists`/`InSubquery`
+   with no public constructor for arbitrary tables, and there is no
+   streaming terminal. The spike narrows to: does the Q19 compiler
+   ever need `EXISTS` off a declared relation path? If not, supported;
+   if so, the raw-SQL fallback covers that clause alone. Ratify only
+   against a compiled program.
 2. **Fragment ↔ component pairing.** No Relay-style compiler exists for
    Rust. Candidates: a macro colocating the fragment with the Topcoat
    component, plus a build-time check validating every fragment against
@@ -308,9 +321,21 @@ everything shipped exists in DN and nothing shipped that doesn't.
    into underway's enqueue (the transactional-enqueue property is the
    whole point — losing it demotes the queue to outbox-plus-drain)?
    Run alongside P.9 Q1 (same genus: early-stage ORM meets raw-sqlx
-   neighbor). Fallbacks, in order: apalis-postgres, then a hand-rolled
-   SKIP LOCKED queue. Sweeps are unaffected — they are hand-rolled
-   regardless (P.13).
+   neighbor). Sweeps are unaffected — they are hand-rolled regardless
+   (P.13). **Evidence (2026-08-20, same source reading): the hard
+   half is absent.** Separate pools on one database work (the PG
+   driver is tokio-postgres behind toasty's own deadpool pool), but
+   0.10 offers no pool injection and no access to the underlying
+   client (`Db::driver()` yields only `&dyn Driver`) — a transaction
+   *shared* with sqlx, hence with underway, is not possible at this
+   version. What survives: toasty's raw SQL executes inside toasty
+   transactions and savepoints, so a hand-rolled SKIP LOCKED queue
+   written through toasty raw SQL regains transactional enqueue
+   natively. That reorders the fallbacks: hand-rolled-via-toasty-raw-SQL
+   now leads; apalis-postgres (sqlx again — same wall) drops to last;
+   underway itself survives only as outbox-plus-drain. The spike
+   confirms against compiled code and checks whether newer toasty
+   ships pool/connection sharing before P2's queue work.
 10. **One transaction across the kernel/platform table boundary.** The
     `varve-store` traits are per-method atomic and expose no
     transaction handle (deliberately — the trait must not name a
@@ -325,7 +350,19 @@ everything shipped exists in DN and nothing shipped that doesn't.
     genus as the outbox drain). Lean (a) — (b) forfeits "exactly one
     place" atomicity that motivates the use-case services. Same family
     as Q9 (toasty txn into underway's enqueue); run with the Q1 spike
-    and decide at P0 with the first use-case service.
+    and decide at P0 with the first use-case service. **Evidence
+    (2026-08-20, same source reading): the API for (a) exists, but
+    its shape constrains the design.** `db.transaction().await?`
+    yields `Transaction<'a>: Executor` (Send+Sync) with
+    commit/rollback, auto-rollback on drop, nested savepoints, and
+    isolation config — threadable as `&mut dyn Executor`. But it
+    borrows `&mut Db`: it cannot be stored `'static`, so "hand the
+    impl a transaction at construction" cannot mean storing it in the
+    `platform-store` struct — the executor must flow per operation
+    (a scoped store constructed inside the txn, or store methods
+    over an executor argument). Reconciling that with the
+    executor-free `varve-store` trait signatures is now the crux of
+    the spike.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
