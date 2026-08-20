@@ -1,0 +1,12 @@
+[package]
+name = "platform-server"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The binary: the topcoat router (app + `/graphql` and
+# upload/download `#[route]` handlers) + the `platform-jobs` runners
+# (PLATFORM.md P.3). One process to start with; the seams are already
+# crates.
+[dependencies]

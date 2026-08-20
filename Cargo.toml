@@ -14,6 +14,10 @@ members = [
     "crates/varve-projection",
     "crates/varve-impact",
     "tools/m0",
+    "platform/platform-core",
+    "platform/platform-i18n",
+    "platform/platform-app",
+    "platform/platform-server",
 ]
 resolver = "3"
 # cargo-fuzz targets build on nightly with their own profile; see fuzz/.

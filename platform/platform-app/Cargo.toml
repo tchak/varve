@@ -1,0 +1,11 @@
+[package]
+name = "platform-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The Topcoat app: sessions, principal resolution, in-process
+# document execution, components with colocated fragments
+# (PLATFORM.md P.3, P.7).
+[dependencies]
