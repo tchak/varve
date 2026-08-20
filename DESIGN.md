@@ -1552,7 +1552,7 @@ in one file in dependency order.
 {"k":"entry", "record":"...", "seq":0, "prev":"...", "ops":[...], ...}  // history mode: one log entry (§2.9)
 {"k":"attachment", "hash":"sha256:...", "byte_size":..., "content_type":"..."}   // describes a blob (§2.15); algorithm-tagged (§2.13)
 {"k":"surface", "id":"...", "revision":"...", "surface":{...}}   // surface-side object (§2.1/§2.6): envelope typed by the wire, body opaque canonical JSON typed by varve-surface (settled 2026-08-19, below)
-{"k":"block_defaults", "block":{"id":"...","version":1}, "hash":"sha256:...", "defaults":{...}}   // the surface half of a block (§10 Q13); same treatment
+{"k":"block_defaults", "block":"...", "version":1, "hash":"sha256:...", "defaults":{...}}   // the surface half of a block (§10 Q13); same treatment
 ```
 
 **Surface-side objects travel as opaque bodies (settled 2026-08-19 —
