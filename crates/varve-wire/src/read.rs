@@ -47,6 +47,15 @@ pub enum ReadError {
     /// carried in the stream — the data would arrive without its schema.
     #[error("revision '{0}' is named by a record or entry but not carried in the stream")]
     RevisionNotCarried(RevisionId),
+    /// §5: a snapshot export is taken through a **single** revision —
+    /// one stream, one lens (mixed lenses would put heterogeneous
+    /// values under one column).
+    #[error("line {line}: snapshot lens '{lens}' differs from the stream's lens '{first}'")]
+    MixedLenses {
+        line: usize,
+        lens: RevisionId,
+        first: RevisionId,
+    },
 }
 
 /// A parsed stream, validated for structure (not yet applied).
@@ -97,6 +106,9 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     // the item paths seen so far, and per-(group, parent) item counts
     // so `ord` is checked in sequence.
     let mut open: Option<OpenRecord> = None;
+    // §5: a snapshot export is taken through a single revision — the
+    // first record line's lens is the stream's lens.
+    let mut snapshot_lens: Option<RevisionId> = None;
     let mut revisions_seen: std::collections::BTreeSet<RevisionId> = Default::default();
     // Every revision a record or entry names must be declared on line 1
     // and travel in-stream (§5: the writer schema travels with the data).
@@ -297,6 +309,17 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     });
                 }
                 let r = record_line_from(map).map_err(malformed)?;
+                match &snapshot_lens {
+                    None => snapshot_lens = Some(r.lens.clone()),
+                    Some(first) if *first != r.lens => {
+                        return Err(ReadError::MixedLenses {
+                            line: line_no,
+                            lens: r.lens.clone(),
+                            first: first.clone(),
+                        });
+                    }
+                    Some(_) => {}
+                }
                 revisions_named.insert(r.lens.clone());
                 // A stream is authoritative for each record it contains
                 // exactly once (§5) — a second `record` line for one id

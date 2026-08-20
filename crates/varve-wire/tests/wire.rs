@@ -177,7 +177,6 @@ fn snapshot_round_trip_and_import_as_log_entry() {
             kind: ActorKind::System,
         },
         timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
-        revision: revision_id(&schema()),
         note: Some("import".into()),
         salts_for: &salts,
     };
@@ -188,6 +187,48 @@ fn snapshot_round_trip_and_import_as_log_entry() {
     assert_eq!(imported.fold().unwrap().values, folded);
     imported.verify_chain().unwrap();
     assert_eq!(imported.entries()[0].envelope.actor.id, "importer");
+    // Authored against the stream's lens — the revision the exported
+    // fold was read through, not a caller-supplied one (§5).
+    assert_eq!(
+        imported.entries()[0].envelope.revision,
+        revision_id(&schema())
+    );
+}
+
+/// §5: a snapshot export is taken through a **single** revision — the
+/// reader refuses a stream whose record lines name two lenses.
+#[test]
+fn snapshot_streams_carry_one_lens() {
+    let a = revision_id(&schema());
+    let b = revision_id(&with_rib());
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 2);
+    m.revisions = vec![a.clone(), b.clone()];
+    let bytes = write_lines(&[
+        Line::Header(m),
+        Line::Revision {
+            id: a.clone(),
+            schema: schema(),
+        },
+        Line::Revision {
+            id: b.clone(),
+            schema: with_rib(),
+        },
+        Line::Record(RecordLine {
+            record: RecordId::new("r1"),
+            lens: a.clone(),
+            cells: BTreeMap::new(),
+        }),
+        Line::Record(RecordLine {
+            record: RecordId::new("r2"),
+            lens: b.clone(),
+            cells: BTreeMap::new(),
+        }),
+    ])
+    .unwrap();
+    assert!(matches!(
+        read_stream(&bytes),
+        Err(ReadError::MixedLenses { lens, first, .. }) if lens == b && first == a
+    ));
 }
 
 #[test]
@@ -558,7 +599,6 @@ fn imports_are_all_or_nothing() {
             kind: ActorKind::System,
         },
         timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
-        revision: revision_id(&schema()),
         note: None,
         salts_for: &salts,
     };

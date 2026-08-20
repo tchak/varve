@@ -8,7 +8,6 @@
 use std::collections::BTreeMap;
 
 use varve_core::RecordId;
-use varve_core::RevisionId;
 use varve_core::primitives::Instant;
 use varve_record::{Actor, Draft, Entry, EntryOp, EntrySalts, Origin, RecordLog};
 use varve_value::diff;
@@ -128,9 +127,6 @@ pub fn adopt_history(
 pub struct SnapshotImportRequest<'a> {
     pub actor: Actor,
     pub timestamp: Instant,
-    /// The revision the imported cells are read through, authored
-    /// against for the resulting entry.
-    pub revision: RevisionId,
     pub note: Option<String>,
     /// Fresh salts, one per op plus one for metadata — the caller sizes
     /// this per record via `salts_for(op_count)`.
@@ -141,6 +137,10 @@ pub struct SnapshotImportRequest<'a> {
 /// `diff(current folded state, imported state)` becomes one ordinary
 /// entry appended to the record's log — new records start from the
 /// empty state, so a snapshot export imports as a patch against empty.
+/// Each entry is authored against the record line's `lens` — the
+/// revision the exported fold was read through, one per stream (the
+/// reader refuses mixed lenses), carried in-stream with its schema.
+/// The request names no revision of its own: nothing to disagree.
 pub fn import_snapshot(
     stream: &Stream,
     store: &mut BTreeMap<RecordId, RecordLog>,
@@ -173,7 +173,7 @@ pub fn import_snapshot(
         log.append(Draft {
             actor: request.actor.clone(),
             timestamp: request.timestamp,
-            revision: request.revision.clone(),
+            revision: r.lens.clone(),
             base_version,
             origin: Origin::Entered,
             note: request.note.clone(),

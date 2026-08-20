@@ -1614,7 +1614,10 @@ set and the same apply function:
   projected through a single reading revision. Cheaper; loses history by
   design. The `record` line's `lens` field names the revision the fold used —
   a record is not "on" a revision (§2.9), so the field records the fold's
-  lens, never a property of the record.
+  lens, never a property of the record. One stream, one lens: "taken
+  through a single revision" (above) is enforced by the reader — a
+  snapshot stream whose `record` lines name two lenses is malformed
+  (settled 2026-08-20, audit).
 
 Do not blur them: a snapshot export must not carry `entry` lines, and a
 history export must not carry folded `record`/`item` cell lines — a stream
@@ -1648,9 +1651,12 @@ kinds cannot mix (above), so one format can never do both:
 - **Import is never a side door.** A snapshot import into a live record
   reduces to `diff(current state, imported state)` appended as an
   **ordinary log entry** — actor supplied by the importer,
-  `base_version` = current. LWW, conflict detection, provenance,
-  checkpoint enforcement and the audit trail apply to bulk imports
-  exactly as to human edits, with zero import-specific machinery.
+  `base_version` = current, authored against the stream's lens (the
+  import request names no revision of its own, so provenance cannot
+  disagree with the fold the values came from — settled 2026-08-20,
+  audit). LWW, conflict detection, provenance, checkpoint enforcement
+  and the audit trail apply to bulk imports exactly as to human edits,
+  with zero import-specific machinery.
 - **The manifest declares record-level intent**: `create-only`,
   `update-only`, or `upsert`. Unknown ids under update-only and
   colliding ids under create-only reject the stream on line 1 semantics

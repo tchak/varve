@@ -268,8 +268,7 @@ proptest! {
         let request = SnapshotImportRequest {
             actor: Actor { id: "importer".into(), kind: ActorKind::System },
             timestamp: Instant::parse("2026-08-17T12:00:00Z").unwrap(),
-            revision: common::lens(),
-            note: None,
+                        note: None,
             salts_for: &salts,
         };
         let _ = import_snapshot(&stream, &mut store, &request);
