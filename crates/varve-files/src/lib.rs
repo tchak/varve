@@ -23,7 +23,12 @@
 //! per-blob key is addressed by a hash only known once the bytes have
 //! passed, the identity is generated ephemerally at put-start and
 //! **registered** afterward: hence [`Keyring::register`] is
-//! first-write-wins, not get-or-create. Range access is a first-class
+//! first-write-wins, not get-or-create. The registration is the commit
+//! point of a `put`: a failure after it rolls the key row back, a
+//! concurrent loser only claims success once the winner's blob is
+//! readable (`PutInFlight` otherwise), and `sweep` shreds rows a crash
+//! orphaned — a key row without a manifest must never outlive the
+//! grace window, or the address is poisoned. Range access is a first-class
 //! operation (`get_range`), not client-side seek: age implements seek
 //! only on its sync reader, and remote backends serve ranges as ranged
 //! GETs anyway (P.10) — decryption runs on a blocking thread over a
@@ -102,6 +107,10 @@ pub struct SweepReport {
     pub kept_young: u64,
     /// Abandoned staging objects removed (a `put` that never completed).
     pub tmp_removed: u64,
+    /// Crash-orphaned key rows shredded: registrations older than the
+    /// grace window with no manifest behind them — a `put` that died
+    /// between register and commit. Shredding heals the address.
+    pub keys_removed: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,6 +134,13 @@ pub enum FilesError {
     Keyring(#[from] KeyringError),
     #[error("blob not found: {0}")]
     NotFound(ContentHash),
+    /// The address has a registered key but no stored blob behind it:
+    /// a concurrent `put` of the same content is mid-commit, or a
+    /// crashed one left an orphaned row (`sweep` reclaims those after
+    /// the grace window). Never claimed as success — a `put` that
+    /// returns `Ok` guarantees the blob is readable. Retryable.
+    #[error("blob {0}: a concurrent put owns the address but has not committed")]
+    PutInFlight(ContentHash),
     #[error("encryption: {0}")]
     Encrypt(String),
     #[error("decryption: {0}")]
@@ -147,11 +163,15 @@ pub trait Keyring: Send + Sync {
     /// First-write-wins: the streaming pipeline generates the identity
     /// before the hash is known, and registers it after. On
     /// `AlreadyRegistered`, the caller's ciphertext is discarded — the
-    /// concurrent writer's blob is the one the address names.
+    /// concurrent writer's blob is the one the address names. `at`
+    /// stamps the row (timestamps are inputs, §2.13) so `sweep` can
+    /// tell a crashed put's orphan from a registration whose put is
+    /// still committing.
     fn register(
         &self,
         hash: &ContentHash,
         identity: &x25519::Identity,
+        at: SystemTime,
     ) -> impl Future<Output = Result<(), KeyringError>> + Send;
 
     /// Identity of an already-stored blob; `Missing` if shredded.
@@ -161,6 +181,14 @@ pub trait Keyring: Send + Sync {
     ) -> impl Future<Output = Result<x25519::Identity, KeyringError>> + Send;
 
     fn shred(&self, hash: &ContentHash) -> impl Future<Output = Result<(), KeyringError>> + Send;
+
+    /// Hashes registered at or before `before` — `sweep`'s
+    /// reconciliation view: a row that old with no manifest behind it
+    /// is a crashed put's orphan, and shredding it heals the address.
+    fn registered_before(
+        &self,
+        before: SystemTime,
+    ) -> impl Future<Output = Result<Vec<ContentHash>, KeyringError>> + Send;
 }
 
 /// The blob trait (§13.6). Plaintext on both sides; hashes are computed
@@ -221,7 +249,7 @@ pub trait BlobStore: Send + Sync {
 /// database-backed impl must behave like, and what tests use.
 #[derive(Default)]
 pub struct MemoryKeyring {
-    keys: std::sync::Mutex<std::collections::BTreeMap<ContentHash, String>>,
+    keys: std::sync::Mutex<std::collections::BTreeMap<ContentHash, (String, SystemTime)>>,
 }
 
 impl MemoryKeyring {
@@ -239,12 +267,16 @@ impl Keyring for MemoryKeyring {
         &self,
         hash: &ContentHash,
         identity: &x25519::Identity,
+        at: SystemTime,
     ) -> Result<(), KeyringError> {
         let mut keys = self.keys.lock().expect("poisoned");
         if keys.contains_key(hash) {
             return Err(KeyringError::AlreadyRegistered(*hash));
         }
-        keys.insert(*hash, identity.to_string().expose_secret().to_string());
+        keys.insert(
+            *hash,
+            (identity.to_string().expose_secret().to_string(), at),
+        );
         Ok(())
     }
 
@@ -254,7 +286,7 @@ impl Keyring for MemoryKeyring {
     ) -> Result<x25519::Identity, KeyringError> {
         let keys = self.keys.lock().expect("poisoned");
         match keys.get(hash) {
-            Some(s) => s
+            Some((s, _)) => s
                 .parse::<x25519::Identity>()
                 .map_err(|e| KeyringError::Backend(e.to_string())),
             None => Err(KeyringError::Missing(*hash)),
@@ -264,6 +296,20 @@ impl Keyring for MemoryKeyring {
     async fn shred(&self, hash: &ContentHash) -> Result<(), KeyringError> {
         self.keys.lock().expect("poisoned").remove(hash);
         Ok(())
+    }
+
+    async fn registered_before(
+        &self,
+        before: SystemTime,
+    ) -> Result<Vec<ContentHash>, KeyringError> {
+        Ok(self
+            .keys
+            .lock()
+            .expect("poisoned")
+            .iter()
+            .filter(|(_, (_, at))| *at <= before)
+            .map(|(hash, _)| *hash)
+            .collect())
     }
 }
 
@@ -536,33 +582,58 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
             self.store.delete(&staging).await.ok();
             return Ok(hash); // dedup: already stored, nothing to do
         }
-        match self.keyring.register(&hash, &identity).await {
+        match self
+            .keyring
+            .register(&hash, &identity, meta.created_at)
+            .await
+        {
             Ok(()) => {}
             Err(KeyringError::AlreadyRegistered(_)) => {
                 // A concurrent put of the same content won; its bytes
-                // are the ones the address names.
+                // are the ones the address names — but only once they
+                // are actually there. Claiming success against a bare
+                // key row would be silent loss (the row may be a
+                // crashed put's orphan; `sweep` reclaims those).
                 self.store.delete(&staging).await.ok();
-                return Ok(hash);
+                return if self.has(&hash).await? {
+                    Ok(hash)
+                } else {
+                    Err(FilesError::PutInFlight(hash))
+                };
             }
             Err(e) => {
                 self.store.delete(&staging).await.ok();
                 return Err(e.into());
             }
         }
-        // Server-side move to the content address.
-        self.store.copy(&staging, &Self::blob_path(&hash)).await?;
+        // Registered as the address's writer: from here every failure
+        // must roll the key row back — a registration without a
+        // manifest poisons the address (`put` would claim success while
+        // `get` finds nothing, forever).
+        let commit: Result<(), FilesError> = async {
+            // Server-side move to the content address.
+            self.store.copy(&staging, &Self::blob_path(&hash)).await?;
+            self.write_manifest(
+                &hash,
+                &ManifestRecord {
+                    hash: hash.to_string(),
+                    byte_size,
+                    content_type: meta.content_type,
+                    created_at_unix_secs: unix(meta.created_at),
+                    scan: None,
+                },
+            )
+            .await
+        }
+        .await;
         self.store.delete(&staging).await.ok();
-        self.write_manifest(
-            &hash,
-            &ManifestRecord {
-                hash: hash.to_string(),
-                byte_size,
-                content_type: meta.content_type,
-                created_at_unix_secs: unix(meta.created_at),
-                scan: None,
-            },
-        )
-        .await?;
+        if let Err(error) = commit {
+            // Best-effort rollback; whatever it misses, `sweep`'s
+            // orphaned-row pass reclaims after the grace window.
+            self.keyring.shred(&hash).await.ok();
+            self.store.delete(&Self::blob_path(&hash)).await.ok();
+            return Err(error);
+        }
         Ok(hash)
     }
 
@@ -670,6 +741,23 @@ impl<K: Keyring> BlobStore for ObjectBlobStore<K> {
             }
             self.delete(&hash).await?;
             report.deleted.push(hash);
+        }
+
+        // Crash-orphaned key rows: a registration older than the grace
+        // window with no manifest behind it is a put that died between
+        // register and commit. Shred it so the address heals (a bare
+        // row makes every re-put of that content fail with
+        // `PutInFlight`), and drop any ciphertext the crash left at
+        // the content address.
+        if let Some(cutoff) = now.checked_sub(grace) {
+            for hash in self.keyring.registered_before(cutoff).await? {
+                if self.has(&hash).await? {
+                    continue; // a stored blob's key row — keep
+                }
+                self.keyring.shred(&hash).await?;
+                self.store.delete(&Self::blob_path(&hash)).await.ok();
+                report.keys_removed += 1;
+            }
         }
         Ok(report)
     }
@@ -871,6 +959,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.tmp_removed, 1);
+    }
+
+    /// The audit finding (2026-08-20): a key row without a manifest —
+    /// a put that died between register and commit — must never make
+    /// `put` claim success while `get` finds nothing. It fails loudly,
+    /// young rows are protected, and sweep heals the address.
+    #[tokio::test]
+    async fn a_bare_key_row_fails_loudly_and_sweep_heals_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(&dir).await;
+        let plain = b"unlucky content";
+        let hash = ContentHash {
+            alg: HashAlg::Sha256,
+            digest: Sha256::digest(plain).into(),
+        };
+        // Simulate the crash: the registration exists, nothing else.
+        store
+            .keyring
+            .register(&hash, &x25519::Identity::generate(), now())
+            .await
+            .unwrap();
+
+        // Re-putting the same content is refused, never silently "ok".
+        assert!(matches!(
+            store.put(meta(), &plain[..]).await.err(),
+            Some(FilesError::PutInFlight(h)) if h == hash
+        ));
+
+        // Within the grace window the row could still be an in-flight
+        // put's — protected.
+        let grace = Duration::from_secs(1800);
+        let report = store
+            .sweep(&BTreeSet::new(), grace, now() + Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(report.keys_removed, 0);
+
+        // Past it, it can only be a crash: shredded, address healed.
+        let report = store
+            .sweep(&BTreeSet::new(), grace, now() + Duration::from_secs(3600))
+            .await
+            .unwrap();
+        assert_eq!(report.keys_removed, 1);
+        assert!(store.keyring.is_empty());
+        let stored = store.put(meta(), &plain[..]).await.unwrap();
+        assert_eq!(stored, hash);
+        assert_eq!(read_all(&store, &hash).await, plain);
     }
 
     #[tokio::test]
