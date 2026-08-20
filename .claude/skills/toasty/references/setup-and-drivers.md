@@ -103,3 +103,15 @@ conditional-append therefore means: attempt the insert, treat
 `is_driver_operation_failed()` on a `#[unique]`/PK conflict as "already exists" —
 or use `upsert_by_*(...).or_ignore()` (returns `None` on conflict) for a race-free
 insert-if-absent on PG/SQLite.
+
+
+## Field notes (verified in production use, 2026-08-21)
+
+- **Connection URLs must carry a host.** toasty rejects host-less
+  forms: `postgres:///db` fails with `invalid connection URL: missing
+  host`. Unix-socket / implicit-host URLs are unsupported — write
+  `postgres://localhost/db`.
+- jiff aside (shows up next to `#[auto]` timestamps):
+  `jiff::Timestamp::saturating_add` returns `Result` — it errors only
+  for calendar-unit `Span`s and is infallible for `SignedDuration`;
+  prefer `SignedDuration` for const-constructible TTLs.

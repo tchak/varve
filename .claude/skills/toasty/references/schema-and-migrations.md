@@ -87,3 +87,21 @@ which `Db`.
 4. `migration apply` → 5. commit SQL + snapshot + history with the code.
 Keep models in a library crate consumed by both the app binary and the migrate
 binary so the diff sees exactly what the server runs (`examples/service-ops`).
+
+
+## Field notes (verified in production use, 2026-08-21)
+
+- **Concurrent migration application is unsafe.** Two parallel
+  `MigrationSet::apply` (or `migration apply`) calls on a fresh
+  database race creating `__toasty_migrations` and die with a
+  `pg_type_typname_nsp_index` duplicate-key error. Apply once at
+  boot; multi-replica boot needs an external advisory lock. Not
+  documented upstream.
+- **toasty-cli 0.10.0's own rustdoc is stale**: it shows
+  `Db::builder("sqlite::memory:")`, a pre-0.10 signature. The real
+  API is `builder().models(...).connect(url)` as this skill says —
+  do not "correct" the skill from those upstream docs.
+- From a bin inside the same package, `toasty::models!(my_crate::*)`
+  works (the inventory filter matches on `CARGO_PKG_NAME`); pattern:
+  a `migrate` bin behind an off-by-default feature with
+  `required-features`, wrapping `toasty_cli::ToastyCli`.
