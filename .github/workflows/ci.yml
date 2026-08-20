@@ -19,6 +19,25 @@ jobs:
   test:
     name: test (stable)
     runs-on: ubuntu-latest
+    # Platform DB tests gate on VARVE_TEST_DATABASE_URL (PLATFORM.md
+    # P.3): without it they pass vacuously, so local `cargo test
+    # --workspace` needs no database — CI provides one so they run
+    # for real here.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: varve
+          POSTGRES_PASSWORD: varve
+          POSTGRES_DB: varve_platform_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U varve"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VARVE_TEST_DATABASE_URL: postgres://varve:varve@localhost:5432/varve_platform_test
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
