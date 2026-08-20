@@ -1,0 +1,6 @@
+version = 1
+
+[[migrations]]
+id = 7685698228942473440
+name = "0000_auth_foundations.sql"
+snapshot_name = "0000_snapshot.toml"

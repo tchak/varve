@@ -1,0 +1,7 @@
+# Migration configuration for the project-local `migrate` CLI
+# (src/bin/migrate.rs, feature `migrate-cli`). See PLATFORM.md P.3.
+[migration]
+path = "toasty"
+prefix_style = "Sequential"
+checksums = false
+statement_breakpoints = true
