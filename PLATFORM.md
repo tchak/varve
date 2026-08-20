@@ -85,6 +85,17 @@ schema (transport-independent by construction), and thin resolvers
 
 ## P.3 Crates (`platform/`, `publish = false` permanently)
 
+**Settled (2026-08-20): one root workspace.** The `platform/` crates
+are members of the kernel repo's root Cargo workspace, not a nested
+workspace. Pre-publish ruthless refactoring (CLAUDE.md) wants
+kernel↔platform breakage surfaced by the single
+`cargo test --workspace`; the accepted cost is kernel-lockfile churn
+from the fast-moving topcoat/toasty line. DB-backed tests gate behind
+an env var so the workspace tests run without Postgres (CI provides a
+service container); the §13.5 layering guard already treats
+`platform/` as same-tree, and its kernel-closure checks are unaffected
+by new members.
+
 - `platform-core` — Toasty models for platform-owned data (accounts,
   procedure catalog, team membership, messages, API tokens, webhook
   subscriptions, notification outbox) and the **use-case services**:
@@ -233,6 +244,16 @@ invisible below `platform-app`.
   (procedure, case file, cells, updateCells/submitCaseFile), Topcoat
   applicant form rendered from the surface tree, sessions. Proof:
   create → publish → fill → submit, every step through the schema.
+  **Ordering settled (2026-08-20): outside-in.** The platform shell
+  comes first — the Topcoat app with sessions/auth (P.7) and i18n (Q8
+  spike first, since UI strings land here) over `platform-core`'s
+  account models — then the GraphQL schema executing in-process, and
+  only then the kernel edge: `varve-service` (DESIGN §13.2, not yet
+  built), the store-contract harness extracted from `varve-store`'s
+  tests, and `platform-store` over toasty (Q10 spike). Rationale: the
+  young half of the stack (topcoat, toasty, the MF2 runtime) is the
+  risk to retire first; the kernel side is already deterministic and
+  oracle-tested. The proof sequence is unchanged.
 - **P1 — instruction.** Read models + the query compiler (DESIGN
   Q18/Q19 land here, spike first), reviewer table with varve-logic
   filters, the checkpoint state machine, teams + routing.
