@@ -209,12 +209,20 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                                 attrs: attributes! { class="right-0 left-auto" },
                                 dropdown_menu_label((account_email))
                                 <a href=(href!(settings::page)) class=(MENU_LINK)>
+                                    icon(
+                                        data: iconify_icon!("feather:settings"),
+                                        attrs: attributes! { class="size-4" }
+                                    )
                                     (settings_label)
                                 </a>
                                 dropdown_menu_separator()
                                 <form method="post" action=(href!(signout::submit))>
                                     dropdown_menu_item(
                                         attrs: attributes! { type="submit" },
+                                        icon(
+                                            data: iconify_icon!("feather:log-out"),
+                                            attrs: attributes! { class="size-4" }
+                                        )
                                         (sign_out_label)
                                     )
                                 </form>
