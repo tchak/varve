@@ -47,6 +47,16 @@ pub const EN: &[(&str, &str)] = &[
     ("form.name", "Name"),
     ("form.email", "Email address"),
     ("form.password", "Password"),
+    ("settings.title", "Settings"),
+    ("settings.tab.account", "Account"),
+    ("settings.tab.security", "Security"),
+    ("settings.account.profile.title", "User profile"),
+    ("settings.security.sessions.title", "Active sessions"),
+    ("settings.security.sessions.current", "Current session"),
+    ("settings.security.sessions.revoke", "Revoke session"),
+    ("settings.security.sessions.unknown", "Unknown"),
+    ("settings.security.sessions.created", "Signed in on {$date}"),
+    ("settings.security.sessions.expires", "Expires on {$date}"),
     ("error.not-found", "Page not found."),
 ];
 
@@ -83,6 +93,16 @@ pub const FR: &[(&str, &str)] = &[
     ("form.name", "Nom"),
     ("form.email", "Adresse électronique"),
     ("form.password", "Mot de passe"),
+    ("settings.title", "Paramètres"),
+    ("settings.tab.account", "Compte"),
+    ("settings.tab.security", "Sécurité"),
+    ("settings.account.profile.title", "Profil de l'utilisateur"),
+    ("settings.security.sessions.title", "Sessions actives"),
+    ("settings.security.sessions.current", "Session actuelle"),
+    ("settings.security.sessions.revoke", "Révoquer la session"),
+    ("settings.security.sessions.unknown", "Inconnu"),
+    ("settings.security.sessions.created", "Ouverte le {$date}"),
+    ("settings.security.sessions.expires", "Expire le {$date}"),
     ("error.not-found", "Page introuvable."),
 ];
 

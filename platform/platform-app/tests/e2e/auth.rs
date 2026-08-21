@@ -1,7 +1,7 @@
 //! Subject: authentication journeys — signup, sign-in failure, the
 //! session cookie's transport hardening, signout.
 
-use playwright_rs::protocol::{AriaRole, BrowserContext, GetByRoleOptions};
+use playwright_rs::protocol::{AriaRole, Browser, BrowserContext, GetByRoleOptions};
 use playwright_rs::{expect, expect_page, locator};
 
 use crate::harness::{
@@ -14,7 +14,12 @@ async fn signup_greets_signs_out_and_reverts_the_header() {
     run_scenario("signup-roundtrip", default_context, signup_scenario).await;
 }
 
-async fn signup_scenario(context: &BrowserContext, app: &App, engine: &'static str) -> TestResult {
+async fn signup_scenario(
+    _browser: &Browser,
+    context: &BrowserContext,
+    app: &App,
+    engine: &'static str,
+) -> TestResult {
     let page = context.new_page().await?;
     // Mixed case in, normalized (trimmed, lowercased) out — the
     // header must show what platform-core stored, not what was typed.
@@ -84,6 +89,7 @@ async fn wrong_password_stays_on_signin_with_one_generic_alert() {
 }
 
 async fn wrong_password_scenario(
+    _browser: &Browser,
     context: &BrowserContext,
     app: &App,
     engine: &'static str,
@@ -131,7 +137,12 @@ async fn session_cookie_is_hardened_and_cleared_on_signout() {
     run_scenario("session-cookie", default_context, cookie_scenario).await;
 }
 
-async fn cookie_scenario(context: &BrowserContext, app: &App, engine: &'static str) -> TestResult {
+async fn cookie_scenario(
+    _browser: &Browser,
+    context: &BrowserContext,
+    app: &App,
+    engine: &'static str,
+) -> TestResult {
     let page = context.new_page().await?;
     let email = unique_email(&format!("e2e-cookie-{engine}"));
     browser_signup(&page, app, "Benoît", &email).await?;

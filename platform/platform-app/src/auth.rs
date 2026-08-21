@@ -128,11 +128,44 @@ async fn resolve_request_state(cx: &Cx, body: Body, next: Next<'_>) -> topcoat::
     next.run(&cx, body).await
 }
 
+/// The request's `User-Agent`, when the client sent a valid-UTF-8
+/// one. Untrusted display metadata for the session list;
+/// `platform-core` truncates it on storage.
+fn request_user_agent(cx: &Cx) -> Option<String> {
+    request::headers(cx)
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// The client IP, best-effort: the first `X-Forwarded-For` value
+/// when a proxy supplied one, else `None`.
+///
+/// Topcoat 0.6.2 never surfaces the socket peer address to handlers
+/// — `internal_serve` accepts `(stream, _remote)` and drops the
+/// remote, and nothing puts it in the request extensions — so behind
+/// no proxy there is nothing to record. Like the user agent this is
+/// display metadata, not an authentication input: an unproxied
+/// deployment simply shows the localized "unknown" fallback.
+fn request_client_ip(cx: &Cx) -> Option<String> {
+    request::headers(cx)
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
 /// Logs `account` in: mints a fresh session token (fixation-safe,
 /// issued to the client by topcoat) and records its hash in
-/// `platform-core`'s session storage. Call after
-/// [`platform_core::verify_credentials`] or a fresh registration —
-/// this function performs no credential check itself.
+/// `platform-core`'s session storage, together with the request's
+/// user agent and best-effort client IP (`request_client_ip` — the
+/// session-list metadata `/settings/security` shows).
+/// Call after [`platform_core::verify_credentials`] or a fresh
+/// registration — this function performs no credential check itself.
 ///
 /// If recording fails after the token was issued, the client holds a
 /// cookie no storage row backs — indistinguishable from an expired
@@ -146,6 +179,8 @@ pub async fn sign_in(cx: &Cx, account: &Account) -> topcoat::Result<()> {
         &encode_token_hash(&session.token_hash),
         jiff::Timestamp::now(),
         DEFAULT_SESSION_TTL,
+        request_user_agent(cx).as_deref(),
+        request_client_ip(cx).as_deref(),
     )
     .await?;
     Ok(())

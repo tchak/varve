@@ -15,10 +15,12 @@
 
 // Vendored from the topcoat-ui registry (managed by `topcoat ui`).
 pub mod alert;
+pub mod badge;
 pub mod button;
 pub mod card;
 pub mod input;
 pub mod label;
+pub mod tabs;
 
 // Ours (not in the registry; listed in `tests/registry_sync.rs`).
 pub mod field;

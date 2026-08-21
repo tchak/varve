@@ -157,10 +157,16 @@ pub async fn default_context(browser: &Browser) -> playwright_rs::Result<Browser
 /// stop tracing (writing `{name}.{engine}.trace.zip` only when that
 /// engine's run failed), close everything, and panic listing every
 /// failing engine.
+///
+/// The scenario also receives the engine's [`Browser`], so
+/// multi-context journeys (a second signed-in browser) can open
+/// extra contexts; close them in the scenario when the flow is done
+/// — the engine teardown's `browser.close()` only backstops the
+/// error paths (extra contexts are not traced).
 pub async fn run_scenario<C, F>(name: &str, make_context: C, scenario: F)
 where
     C: AsyncFn(&Browser) -> playwright_rs::Result<BrowserContext>,
-    F: AsyncFn(&BrowserContext, &App, &'static str) -> TestResult,
+    F: AsyncFn(&Browser, &BrowserContext, &App, &'static str) -> TestResult,
 {
     let Some((_playwright, engines, app)) = e2e().await else {
         return;
@@ -175,7 +181,7 @@ where
             }
         };
         let tracing = trace_start(&context, &format!("{name}.{engine}")).await;
-        let result = scenario(&context, &app, engine).await;
+        let result = scenario(browser, &context, &app, engine).await;
         let stop = if result.is_err() {
             let path =
                 Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.{engine}.trace.zip"));

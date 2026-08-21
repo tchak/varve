@@ -36,6 +36,6 @@ pub use account::{Account, AuthError, RegisterError, register, verify_credential
 pub use db::{MIGRATIONS, connect};
 pub use principal::Principal;
 pub use session::{
-    DEFAULT_SESSION_TTL, Session, create_session, delete_account_sessions, delete_session,
-    find_live_session, sweep_expired,
+    DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
+    delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,
 };

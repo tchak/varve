@@ -4,3 +4,8 @@ version = 1
 id = 7685698228942473440
 name = "0000_auth_foundations.sql"
 snapshot_name = "0000_snapshot.toml"
+
+[[migrations]]
+id = 7108876372962205711
+name = "0001_session_metadata.sql"
+snapshot_name = "0001_snapshot.toml"

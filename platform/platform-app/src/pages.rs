@@ -6,16 +6,19 @@
 //! the layout, the home page, and the `not_found!` catch-all live
 //! here pathlessly, and each submodule derives its URL from its
 //! name — `signin` serves `/signin`, `signup` `/signup`,
-//! `signout` `/signout`. No handler carries a path string. A
+//! `signout` `/signout`, and the `settings` subtree
+//! `/settings/{account,security}` (its signed-in gate is a
+//! module-derived layer — see the `settings` module docs). No
+//! handler carries a path string. A
 //! module's GET page is named `page` and its POST handler `submit`
 //! (both share the module's derived path); shared helpers
 //! (`redirect_to`, `one_arg`, `stylesheet_href`) sit in this
 //! parent module, reached from the submodules via `super::`.
 //!
 //! Every page is composed from [`crate::components`] — topcoat-ui
-//! components vendored by `topcoat ui add` (alert, button, card,
-//! input, label) plus our own in the same style (field, page_title,
-//! site_header) — styled with
+//! components vendored by `topcoat ui add` (alert, badge, button,
+//! card, input, label, tabs) plus our own in the same style (field,
+//! page_title, site_header) — styled with
 //! Tailwind classes against the theme tokens in `styles.css`. Every
 //! user-visible string still goes through [`t`] / [`t_args`] and is
 //! passed to components as display text; components carry no
@@ -36,6 +39,7 @@
 //! router-level tests (no bundle next to a test binary) never trip
 //! the by-design panic on rendering an unbundled asset.
 
+mod settings;
 mod signin;
 mod signout;
 mod signup;

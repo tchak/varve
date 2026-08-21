@@ -56,6 +56,31 @@ pub struct Session {
 
     /// The session is live strictly before this instant.
     pub expires_at: Timestamp,
+
+    /// The `User-Agent` presented at sign-in, truncated to
+    /// [`MAX_USER_AGENT_CHARS`] characters on the way in. `None` for
+    /// sessions created before this column existed, or by clients
+    /// sending no user agent. Display metadata only — never an
+    /// authentication input.
+    pub user_agent: Option<String>,
+
+    /// The client IP observed at sign-in, best-effort (the caller
+    /// decides what "client IP" means — e.g. the first
+    /// `X-Forwarded-For` value behind a proxy). `None` when nothing
+    /// trustworthy-enough was available. Display metadata only.
+    pub ip: Option<String>,
+}
+
+/// The most characters of a presented `User-Agent` that
+/// [`create_session`] stores; anything longer is truncated (on a
+/// character boundary), never rejected — the header is untrusted
+/// display metadata, not a protocol field.
+pub const MAX_USER_AGENT_CHARS: usize = 512;
+
+/// Truncates an untrusted user-agent string to
+/// [`MAX_USER_AGENT_CHARS`] characters.
+fn truncate_user_agent(user_agent: &str) -> String {
+    user_agent.chars().take(MAX_USER_AGENT_CHARS).collect()
 }
 
 /// Records a new session for `account_id`: live from `now` for
@@ -64,12 +89,19 @@ pub struct Session {
 /// `token_hash` must already be a hash — see the module docs. The
 /// expiry saturates at the timestamp range edge rather than failing,
 /// which for any sane TTL is unreachable.
+///
+/// `user_agent` and `ip` are optional display metadata captured at
+/// sign-in (shown on the account's session list); the user agent is
+/// truncated to [`MAX_USER_AGENT_CHARS`] characters, since the header
+/// is client-controlled and unbounded.
 pub async fn create_session(
     db: &mut toasty::Db,
     account_id: uuid::Uuid,
     token_hash: &str,
     now: Timestamp,
     ttl: SignedDuration,
+    user_agent: Option<&str>,
+    ip: Option<&str>,
 ) -> toasty::Result<Session> {
     // Infallible for a `SignedDuration` argument: `saturating_add`
     // only errors for calendar-unit `Span`s, and saturation (not
@@ -77,13 +109,18 @@ pub async fn create_session(
     let expires_at = now
         .saturating_add(ttl)
         .expect("SignedDuration arithmetic saturates instead of failing");
-    Session::create()
+    let mut builder = Session::create()
         .account_id(account_id)
         .token_hash(token_hash)
         .created_at(now)
-        .expires_at(expires_at)
-        .exec(db)
-        .await
+        .expires_at(expires_at);
+    if let Some(user_agent) = user_agent {
+        builder = builder.user_agent(truncate_user_agent(user_agent));
+    }
+    if let Some(ip) = ip {
+        builder = builder.ip(ip);
+    }
+    builder.exec(db).await
 }
 
 /// Looks up a live session by token hash. Expired sessions are
@@ -100,6 +137,54 @@ pub async fn find_live_session(
         .first()
         .exec(db)
         .await
+}
+
+/// Lists the live sessions of an account, newest first (`created_at`
+/// descending, id — UUID v7, time-ordered — as tie-breaker). Expired
+/// rows are excluded by the same strict predicate as
+/// [`find_live_session`]; a not-yet-swept stale row never shows up.
+pub async fn list_live_sessions(
+    db: &mut toasty::Db,
+    account_id: uuid::Uuid,
+    now: Timestamp,
+) -> toasty::Result<Vec<Session>> {
+    Session::filter_by_account_id(account_id)
+        .filter(Session::fields().expires_at().gt(now))
+        .order_by(Session::fields().created_at().desc())
+        .order_by(Session::fields().id().desc())
+        .exec(db)
+        .await
+}
+
+/// Deletes one session of `account_id` by id, returning whether a
+/// row was deleted.
+///
+/// **This is the authorization boundary for session revocation**: the
+/// account id is part of the delete predicate, not a hint — a caller
+/// acting for one account can never destroy another account's
+/// session, whatever `session_id` it presents (the mismatch is a
+/// quiet `false`, indistinguishable from an already-deleted session).
+/// Callers must pass the *authenticated* account's id, never one
+/// taken from the request.
+pub async fn destroy_session(
+    db: &mut toasty::Db,
+    account_id: uuid::Uuid,
+    session_id: uuid::Uuid,
+) -> toasty::Result<bool> {
+    // Toasty's delete terminal reports no affected-row count, so the
+    // scoped read supplies the bool; the delete itself repeats the
+    // full scoped predicate rather than trusting the read (no
+    // decision rides on the gap between the two statements).
+    let scoped = Session::fields()
+        .id()
+        .eq(session_id)
+        .and(Session::fields().account_id().eq(account_id));
+    let found = Session::filter(scoped.clone()).first().exec(db).await?;
+    if found.is_none() {
+        return Ok(false);
+    }
+    Session::filter(scoped).delete().exec(db).await?;
+    Ok(true)
 }
 
 /// Deletes the session with this token hash (logout). Deleting an

@@ -27,7 +27,12 @@ async fn french_context(browser: &Browser) -> playwright_rs::Result<BrowserConte
         .await
 }
 
-async fn french_scenario(context: &BrowserContext, app: &App, _engine: &'static str) -> TestResult {
+async fn french_scenario(
+    _browser: &Browser,
+    context: &BrowserContext,
+    app: &App,
+    _engine: &'static str,
+) -> TestResult {
     let page = context.new_page().await?;
     page.goto(&app.url("/signin"), None).await?;
     expect(page.locator(locator!("main h1")))

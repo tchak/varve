@@ -12,6 +12,10 @@ file = "styles.css"
 hash = "sha256:bb732eac12e2cfb8444dc4154f72fb4e5d25e4023d665b575d70cedea6ae5211"
 file = "src/components/alert.rs"
 
+[registries.topcoat.components.badge]
+hash = "sha256:237e2d1d23687302808316618a4de08cbf0cf5ffbadb49117d00df86a9166b0f"
+file = "src/components/badge.rs"
+
 [registries.topcoat.components.button]
 hash = "sha256:ba4ab32d87e4c9a982faf657258edd8cf2a0da904ece5976e70185eeb5808f57"
 file = "src/components/button.rs"
@@ -27,3 +31,7 @@ file = "src/components/input.rs"
 [registries.topcoat.components.label]
 hash = "sha256:ca749b5e7995b78ffb99e57cf01997282ee737cf34f5c8dc27bbdf143306823f"
 file = "src/components/label.rs"
+
+[registries.topcoat.components.tabs]
+hash = "sha256:40030d1cee55febec80592d466afc96b3a9360c89e186aa5c84f4609b768e80b"
+file = "src/components/tabs.rs"

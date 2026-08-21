@@ -13,8 +13,9 @@
 
 use jiff::{SignedDuration, Timestamp};
 use platform_core::{
-    DEFAULT_SESSION_TTL, RegisterError, connect, create_session, delete_account_sessions,
-    delete_session, find_live_session, register, sweep_expired, verify_credentials,
+    DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, RegisterError, connect, create_session,
+    delete_account_sessions, delete_session, destroy_session, find_live_session,
+    list_live_sessions, register, sweep_expired, verify_credentials,
 };
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -113,9 +114,17 @@ async fn session_lifecycle() {
 
     let now = Timestamp::now();
     let hash = unique_hash("lifecycle");
-    let session = create_session(&mut db, account.id, &hash, now, DEFAULT_SESSION_TTL)
-        .await
-        .expect("create_session");
+    let session = create_session(
+        &mut db,
+        account.id,
+        &hash,
+        now,
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create_session");
     assert_eq!(session.account_id, account.id);
     assert_eq!(session.created_at, now);
     assert_eq!(session.expires_at, now + DEFAULT_SESSION_TTL);
@@ -163,9 +172,17 @@ async fn sign_out_everywhere() {
     let now = Timestamp::now();
     let hashes: Vec<String> = (0..3).map(|i| unique_hash(&format!("multi{i}"))).collect();
     for hash in &hashes {
-        create_session(&mut db, account.id, hash, now, DEFAULT_SESSION_TTL)
-            .await
-            .expect("create");
+        create_session(
+            &mut db,
+            account.id,
+            hash,
+            now,
+            DEFAULT_SESSION_TTL,
+            None,
+            None,
+        )
+        .await
+        .expect("create");
     }
 
     delete_account_sessions(&mut db, account.id)
@@ -199,12 +216,22 @@ async fn sweep_collects_only_expired() {
         &expired,
         now - SignedDuration::from_hours(2),
         SignedDuration::from_hours(1),
+        None,
+        None,
     )
     .await
     .expect("create expired");
-    create_session(&mut db, account.id, &live, now, DEFAULT_SESSION_TTL)
-        .await
-        .expect("create live");
+    create_session(
+        &mut db,
+        account.id,
+        &live,
+        now,
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create live");
 
     sweep_expired(&mut db, now).await.expect("sweep");
 
@@ -221,5 +248,182 @@ async fn sweep_collects_only_expired() {
             .await
             .expect("find")
             .is_some()
+    );
+}
+
+#[tokio::test]
+async fn session_metadata_is_stored_and_user_agent_truncated() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("metadata"), "pw", "Meta")
+        .await
+        .expect("register");
+
+    let now = Timestamp::now();
+    // A multibyte character straddling the limit must not split: the
+    // truncation counts characters, not bytes.
+    let long_agent = "é".repeat(MAX_USER_AGENT_CHARS + 100);
+    let session = create_session(
+        &mut db,
+        account.id,
+        &unique_hash("metadata"),
+        now,
+        DEFAULT_SESSION_TTL,
+        Some(&long_agent),
+        Some("203.0.113.7"),
+    )
+    .await
+    .expect("create");
+    assert_eq!(
+        session.user_agent.as_deref(),
+        Some("é".repeat(MAX_USER_AGENT_CHARS).as_str())
+    );
+    assert_eq!(session.ip.as_deref(), Some("203.0.113.7"));
+
+    // A short agent is stored verbatim, and both columns stay `None`
+    // when nothing was presented.
+    let short = create_session(
+        &mut db,
+        account.id,
+        &unique_hash("metadata-short"),
+        now,
+        DEFAULT_SESSION_TTL,
+        Some("TestBrowser/1.0"),
+        None,
+    )
+    .await
+    .expect("create short");
+    assert_eq!(short.user_agent.as_deref(), Some("TestBrowser/1.0"));
+    assert_eq!(short.ip, None);
+}
+
+#[tokio::test]
+async fn list_live_sessions_is_scoped_live_only_and_newest_first() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("list"), "pw", "List")
+        .await
+        .expect("register");
+    let other = register(&mut db, &unique_email("list-other"), "pw", "Other")
+        .await
+        .expect("register other");
+
+    let now = Timestamp::now();
+    // Three sessions for the account — one expired — and one for
+    // another account that must never appear.
+    let oldest = create_session(
+        &mut db,
+        account.id,
+        &unique_hash("list-oldest"),
+        now - SignedDuration::from_hours(2),
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create oldest");
+    let newest = create_session(
+        &mut db,
+        account.id,
+        &unique_hash("list-newest"),
+        now,
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create newest");
+    create_session(
+        &mut db,
+        account.id,
+        &unique_hash("list-expired"),
+        now - SignedDuration::from_hours(2),
+        SignedDuration::from_hours(1),
+        None,
+        None,
+    )
+    .await
+    .expect("create expired");
+    create_session(
+        &mut db,
+        other.id,
+        &unique_hash("list-foreign"),
+        now,
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create foreign");
+
+    let sessions = list_live_sessions(&mut db, account.id, now)
+        .await
+        .expect("list");
+    assert_eq!(
+        sessions.iter().map(|s| s.id).collect::<Vec<_>>(),
+        vec![newest.id, oldest.id],
+        "live sessions of the account only, newest first"
+    );
+}
+
+#[tokio::test]
+async fn destroy_session_is_scoped_to_the_account() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let owner = register(&mut db, &unique_email("destroy"), "pw", "Owner")
+        .await
+        .expect("register");
+    let attacker = register(&mut db, &unique_email("destroy-attacker"), "pw", "Attacker")
+        .await
+        .expect("register attacker");
+
+    let now = Timestamp::now();
+    let hash = unique_hash("destroy");
+    let session = create_session(
+        &mut db,
+        owner.id,
+        &hash,
+        now,
+        DEFAULT_SESSION_TTL,
+        None,
+        None,
+    )
+    .await
+    .expect("create");
+
+    // The authorization boundary: another account's id cannot destroy
+    // the session — quiet `false`, row intact.
+    assert!(
+        !destroy_session(&mut db, attacker.id, session.id)
+            .await
+            .expect("scoped destroy")
+    );
+    assert!(
+        find_live_session(&mut db, &hash, now)
+            .await
+            .expect("find")
+            .is_some(),
+        "the row survives a foreign destroy attempt"
+    );
+
+    // The owner destroys it; a second attempt reports nothing to do.
+    assert!(
+        destroy_session(&mut db, owner.id, session.id)
+            .await
+            .expect("destroy")
+    );
+    assert!(
+        find_live_session(&mut db, &hash, now)
+            .await
+            .expect("find")
+            .is_none()
+    );
+    assert!(
+        !destroy_session(&mut db, owner.id, session.id)
+            .await
+            .expect("destroy twice")
     );
 }

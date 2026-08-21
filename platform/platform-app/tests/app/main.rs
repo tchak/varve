@@ -32,4 +32,5 @@
 mod auth;
 mod harness;
 mod i18n;
+mod settings;
 mod shell;
