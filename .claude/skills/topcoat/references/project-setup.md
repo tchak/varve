@@ -200,3 +200,52 @@ sources; `demos/coffee-shop/tests/` holds integration tests. Examples in
   serverless).
 - Embedding under axum/tower: `TowerService::new(router)` — see
   `references/routing.md` § Tower interop.
+
+
+## Field notes: tailwind + `topcoat ui` mechanics (verified 2026-08-21)
+
+The skill's original pass summarized these to command names; here is
+how they actually work at 0.6.2:
+
+- **CLI**: `cargo install topcoat-cli --version 0.6.2 --locked` —
+  pin to the runtime dep's version (the CLI warns on mismatch).
+- **`topcoat ui` is shadcn-style vendoring, not a crate**:
+  `topcoat ui init --package <pkg> --theme neutral` writes
+  `components.toml` (install state: theme + per-component sha256) and
+  `styles.css` (theme tokens + `@import "tailwindcss"` +
+  `@source "./src/**/*.rs"`). `topcoat ui add button ...` copies
+  sources from the `topcoat-ui-registry` crate (pulled transitively by
+  the `ui` cargo feature — that feature does nothing else) into
+  `src/components/`, appending `pub mod x;` to `src/components.rs`.
+  The CLI finds the registry via `cargo metadata` →
+  `[package.metadata.topcoat-ui].registry`. Pin vendored files with a
+  registry-sync test (see the coffee-shop demo; in a non-member
+  workspace locate the registry via `cargo metadata`).
+- **Catalog conventions** (match these for hand-written components):
+  `#[component] pub async fn`, file = snake_case component name,
+  `StaticClass` consts via `class!`, `#[default] mut attrs:
+  Attributes` forwarded with caller `class` merged, `#[into]` string
+  props carrying display text only. There is NO Props derive in the
+  catalog. Gotcha: `#[component]` defines a unit struct per component,
+  so a parameter named like an imported component collides — alias the
+  import (`label as field_label`).
+- **Tailwind**: runtime dep features `["tailwind", "ui"]` plus a
+  build-dep `topcoat { default-features = false, features =
+  ["tailwind"] }`; `build.rs` is
+  `BuildConfig::new().input("styles.css").render()`. First build
+  downloads the standalone Tailwind CLI (~76MB) into
+  `<target>/topcoat/cache/tailwind/` (file-locked, workspace-shared,
+  gone on `cargo clean`; offline once warm). Escape hatches:
+  `.executable("tailwindcss")` / `.executable_env("TAILWIND_CLI")`.
+- **Assets**: `tailwind::stylesheet!()` ≡
+  `asset!(concat!(env!("OUT_DIR"), "/tailwind.css"))`. `topcoat asset
+  bundle --package <bin-pkg>` writes `assets/` NEXT TO the scanned
+  executable; `AssetBundle::load()` reads `<exe_dir>/assets`; bundle
+  and binary must come from the same build. Rendering an `Asset` with
+  no `AssetConfig` in app context PANICS by design — for routers that
+  must also run bundle-less (tests, plain `cargo run`), resolve via
+  `try_app_context::<AssetConfig>` + `config.get(asset)` and skip the
+  `<link>` when absent.
+- `Topcoat.toml` is only a marker for `topcoat fmt` editor
+  integration. `topcoat fmt` formats `view!` bodies; rustfmt leaves
+  them alone — run both.
