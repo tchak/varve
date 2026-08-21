@@ -216,3 +216,19 @@ elsewhere, e.g. a `Bearer` header for API clients; `Token::encode()` /
   `OriginPolicy` (see routing.md) rejects cross-origin non-safe methods but
   deliberately not GET.
 - Compare sessions by hash lookup; never store or log the raw token.
+
+
+## Field notes (verified in production use, 2026-08-21)
+
+- **Cookie values are percent-encoded on `Set-Cookie`**: base64 `=`
+  padding arrives as `%3D`. Decode before parsing a token out of a
+  test's `Set-Cookie` header.
+- **Ext-layer ordering is part of the layer stack**: "last registered
+  = outermost" includes the `.cookies()`/`.sessions()` ext layers, and
+  `RouterBuilderCookieExt` wants cookies registered *after* same-path
+  layers that need the jar. Concretely: `.discover()` (your own root
+  layer) must precede `.cookies().sessions(...)` in the builder chain
+  or your layer runs outside the session machinery and
+  `session::token_hash(cx)` sees nothing.
+- Minor: `Token::decode` rejects both bad base64 and wrong length;
+  `session::Session.expires_at` is `web_time::SystemTime`.
