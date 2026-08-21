@@ -208,6 +208,25 @@ effect is surface assignment over a set of case files. **Routing rules
 are varve-logic predicates** evaluated at submission to pick the team —
 the same language as visibility rules and queries.
 
+**Organizations and membership (settled 2026-08-21).** An
+**Organization** (the owning administration — DN's *administrateur*
+scope, but as a first-class table) owns procedures. Two independent
+memberships, both plain account⟷X join tables **with no role column**:
+*organization membership* means administering every procedure the
+organization owns — it is the procedure-administrator principal, held
+at the organization rather than per procedure (DN assigns
+administrators procedure by procedure; one organization-level fact
+replaces that table); *team membership* means being a reviewer. Teams
+belong to an **organization, not a procedure** — a departure from DN,
+where a groupe instructeur is per procedure and identical groups get
+re-created across an administration's procedures; an organization's
+teams are reusable, and a procedure's routing rules select among them.
+The two memberships do not imply each other: a reviewer is commonly
+not an organization member. Roles are deliberately absent — membership
+*is* the right; a finer grant appears only if the corpus shows demand
+(P.9 Q13 holds the one known follow-up: which of the organization's
+teams a given procedure may route to).
+
 **Messaging**: platform entities keyed by case-file id; system messages
 are emitted by use-case services (state changes, resolver failures, …).
 Deliberately not kernel data — the log is cells, not chat (DESIGN
@@ -458,6 +477,13 @@ everything shipped exists in DN and nothing shipped that doesn't.
     lines of script (the component docs say as much). The e2e
     keyboard journey asserts what holds today and is the place the
     fix gets proven.
+13. **Routable teams per procedure.** Teams are organization-level
+    (P.4); today every team of the owning organization is a candidate
+    for a procedure's routing rules. Expected follow-up: an explicit
+    procedure⟷teams set listing the teams a procedure may route to,
+    so a large administration's procedures do not each see every
+    team. Deferred until procedures and routing exist (P1); the
+    membership tables are shaped so adding it is one join model.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
