@@ -450,7 +450,14 @@ everything shipped exists in DN and nothing shipped that doesn't.
     d'accessibilité + schéma pluriannuel) that French administrations
     must publish is derived from it; (c) whether the declaration is
     a platform-rendered page (per deployment, with the deploying
-    administration's contact) or integrator-supplied content.
+    administration's contact) or integrator-supplied content;
+    (d) the header's account menu is a `<details>` disclosure, so
+    Escape does not close it and focus does not return to the
+    trigger — the WAI-ARIA menu-button pattern expects both. Correct
+    HTML, but a keyboard user's expectation; closing it needs a few
+    lines of script (the component docs say as much). The e2e
+    keyboard journey asserts what holds today and is the place the
+    fix gets proven.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 

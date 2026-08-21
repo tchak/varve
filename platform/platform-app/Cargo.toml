@@ -44,4 +44,8 @@ serde_json = "1"
 # registry crate (`topcoat-ui-registry`, pulled in by the `ui`
 # feature above) — the upstream pattern from demos/coffee-shop.
 topcoat-ui = "0.6.2"
+# The e2e harness bundles the stylesheet out of its own test binary
+# (tests/e2e/harness.rs `assets`); the facade does not expose the
+# bundler feature, so the asset crate is named directly.
+topcoat-asset = { version = "0.6.2", features = ["bundler"] }
 scraper = "0.27"

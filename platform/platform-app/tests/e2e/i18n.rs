@@ -2,29 +2,14 @@
 //! language reaching the page as French copy. Uses /signin as its
 //! canvas, but the subject is i18n, not authentication.
 
-use playwright_rs::protocol::{
-    AriaRole, Browser, BrowserContext, BrowserContextOptions, GetByRoleOptions,
-};
+use playwright_rs::protocol::{AriaRole, Browser, BrowserContext, GetByRoleOptions};
 use playwright_rs::{expect, locator};
 
-use crate::harness::{App, TestResult, run_scenario};
+use crate::harness::{App, TestResult, french_context, run_scenario};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn french_context_renders_signin_in_french() {
     run_scenario("french-signin", french_context, french_scenario).await;
-}
-
-/// A French browser context: Playwright's `locale` sets the browser's
-/// Accept-Language, which is what the app's locale resolution reads
-/// for anonymous requests.
-async fn french_context(browser: &Browser) -> playwright_rs::Result<BrowserContext> {
-    browser
-        .new_context_with_options(
-            BrowserContextOptions::builder()
-                .locale("fr-FR".to_owned())
-                .build(),
-        )
-        .await
 }
 
 async fn french_scenario(

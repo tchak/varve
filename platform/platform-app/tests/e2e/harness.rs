@@ -5,14 +5,16 @@
 //! belongs in this module.
 
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use playwright_rs::protocol::{
-    AriaRole, Browser, BrowserContext, GetByRoleOptions, Page, Playwright, Tracing,
-    TracingStartOptions, TracingStopOptions,
+    AddScriptTagOptions, AriaRole, Browser, BrowserContext, BrowserContextOptions,
+    GetByRoleOptions, Page, Playwright, Tracing, TracingStartOptions, TracingStopOptions,
 };
 use playwright_rs::{Error, expect_page, locator};
 use tokio::sync::oneshot;
+use topcoat::asset::AssetBundle;
+use topcoat_asset::{Bundler, BundlerConfig};
 
 pub type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -102,7 +104,7 @@ pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
         let _guard = CONNECT_LOCK.lock().await;
         platform_core::connect(&url).await.expect("connect")
     };
-    let router = platform_app::router(db.clone(), None);
+    let router = platform_app::router(db.clone(), Some(assets().await));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind an ephemeral port");
@@ -128,6 +130,47 @@ pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
     ))
 }
 
+/// The app's asset bundle — the Tailwind stylesheet — scanned from
+/// *this test binary*, the way `topcoat asset bundle` scans a server
+/// binary: bundle and binary come from the same build, so the
+/// content-hashed asset ids match without a CI step. Bundled once
+/// per process under `CARGO_TARGET_TMPDIR`, then loaded per test.
+///
+/// Styled pages are a precondition, not a nicety: the `a11y` subject
+/// runs axe over contrast and target size, and unstyled markup would
+/// pass or fail those rules meaninglessly. Hence the hard check that
+/// the stylesheet made it into the bundle.
+async fn assets() -> AssetBundle {
+    static BUNDLE_DIR: tokio::sync::OnceCell<PathBuf> = tokio::sync::OnceCell::const_new();
+    let dir = BUNDLE_DIR
+        .get_or_init(|| async {
+            let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
+            let out_dir = tmp.join("e2e-assets");
+            let cache_dir = tmp.join("e2e-asset-cache");
+            let out = out_dir.clone();
+            tokio::task::spawn_blocking(move || {
+                let exe = std::env::current_exe().expect("current executable");
+                let bytes = std::fs::read(exe).expect("read the test binary");
+                Bundler::new(&BundlerConfig::new().cache_dir(cache_dir))
+                    .bundle(&bytes, &out)
+                    .expect("bundle the assets declared in the test binary");
+            })
+            .await
+            .expect("bundling task");
+            out_dir
+        })
+        .await;
+    let bundle = AssetBundle::load_dir(dir).expect("load the e2e asset bundle");
+    assert!(
+        bundle
+            .catalog()
+            .assets()
+            .any(|asset| asset.content_type() == "text/css"),
+        "the e2e asset bundle holds no stylesheet — pages would render unstyled"
+    );
+    bundle
+}
+
 /// Starts a trace on `context` (screenshots + DOM snapshots) so a
 /// failed scenario leaves a post-mortem artifact.
 async fn trace_start(context: &BrowserContext, name: &str) -> Tracing {
@@ -148,6 +191,19 @@ async fn trace_start(context: &BrowserContext, name: &str) -> Tracing {
 /// scenarios use.
 pub async fn default_context(browser: &Browser) -> playwright_rs::Result<BrowserContext> {
     browser.new_context().await
+}
+
+/// A French browser context: Playwright's `locale` sets the browser's
+/// Accept-Language, which is what the app's locale resolution reads
+/// for anonymous requests.
+pub async fn french_context(browser: &Browser) -> playwright_rs::Result<BrowserContext> {
+    browser
+        .new_context_with_options(
+            BrowserContextOptions::builder()
+                .locale("fr-FR".to_owned())
+                .build(),
+        )
+        .await
 }
 
 /// The whole multi-engine test body: gate, then for each installed
@@ -249,4 +305,76 @@ pub async fn browser_signup(page: &Page, app: &App, name: &str, email: &str) -> 
     .await?;
     expect_page(page).to_have_url(&app.url("/")).await?;
     Ok(())
+}
+
+/// One axe-core rule violation, the fields worth a failure message.
+#[derive(Debug, serde::Deserialize)]
+pub struct AxeViolation {
+    pub id: String,
+    pub impact: Option<String>,
+    pub help: String,
+    #[serde(rename = "helpUrl")]
+    pub help_url: String,
+    pub nodes: Vec<AxeNode>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct AxeNode {
+    pub target: Vec<String>,
+    pub html: String,
+    #[serde(rename = "failureSummary")]
+    pub failure_summary: Option<String>,
+}
+
+/// Runs the axe-core rule engine (vendored, `tests/e2e/vendor/axe-core`)
+/// over the page as currently rendered — WCAG 2.x A/AA tags plus the
+/// best-practice set — and fails with every violation listed. The
+/// dynamic share of PLATFORM.md P.1.5 (contrast, computed roles and
+/// names, focusability) that the router tests' static baseline
+/// cannot decide; `label` names the page in the failure.
+///
+/// Inject-then-evaluate mirrors `@axe-core/playwright`: the script
+/// tag is added to the live document, so call it after navigation
+/// (and again after any client-side state change worth checking).
+pub async fn check_axe(page: &Page, label: &str) -> TestResult {
+    page.add_script_tag(
+        AddScriptTagOptions::builder()
+            .content(include_str!("vendor/axe-core/axe.min.js"))
+            .build(),
+    )
+    .await?;
+    let violations: Vec<AxeViolation> = page
+        .evaluate(
+            "() => axe.run(document, { runOnly: { type: 'tag', values: \
+             ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] } }) \
+             .then(results => results.violations)",
+            None::<&()>,
+        )
+        .await?;
+    if violations.is_empty() {
+        return Ok(());
+    }
+    let mut report = format!("axe found {} violation(s) on {label}:", violations.len());
+    for violation in &violations {
+        report.push_str(&format!(
+            "\n  - [{}] {} ({}) {}",
+            violation.impact.as_deref().unwrap_or("unknown"),
+            violation.id,
+            violation.help,
+            violation.help_url
+        ));
+        for node in &violation.nodes {
+            report.push_str(&format!(
+                "\n      {} — {}",
+                node.target.join(" "),
+                node.html
+            ));
+            if let Some(summary) = &node.failure_summary {
+                for line in summary.lines() {
+                    report.push_str(&format!("\n        {line}"));
+                }
+            }
+        }
+    }
+    Err(report.into())
 }

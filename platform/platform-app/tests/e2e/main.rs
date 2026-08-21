@@ -36,6 +36,13 @@
 //!   cargo test -p platform-app --test e2e
 //! ```
 //!
+//! The app is served *styled*: the harness bundles the Tailwind
+//! stylesheet out of the test binary itself (the same scan `topcoat
+//! asset bundle` runs on a server binary), so bundle and binary come
+//! from one build and no bundling step precedes the run. Unstyled
+//! pages would make the axe contrast and target-size rules
+//! meaningless, so a bundle without a stylesheet is a hard failure.
+//!
 //! Tests share one database and run in parallel, so every test mints
 //! unique emails (unique per engine too — engines within one test
 //! share the database), uses a fresh browser context per engine, and
@@ -53,12 +60,21 @@
 //! `cargo test --test e2e auth::`. A new subject is a new module —
 //! never grow one file past its subject.
 //!
+//! **Accessibility** (PLATFORM.md P.1.5) is its own subject, `a11y`:
+//! the axe-core rule engine (vendored under `vendor/axe-core`, run
+//! through [`harness::check_axe`]) over every page the app renders,
+//! and the keyboard journeys only a browser can prove. Other
+//! subjects may call `check_axe` on a state their journey reaches
+//! that the sweep cannot (a mid-flow rendering), never as a
+//! substitute for the sweep.
+//!
 //! **Known engine divergence.** WebKit refuses the app's `Secure`
 //! `__Host-session` cookie over plain-http loopback, so signed-in
 //! flows cannot run there; the affected scenarios assert that
 //! refusal explicitly instead — see
 //! [`accepts_secure_cookie_on_loopback_http`].
 
+mod a11y;
 mod auth;
 mod harness;
 mod i18n;

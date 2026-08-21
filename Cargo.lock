@@ -3949,6 +3949,7 @@ dependencies = [
  "toasty",
  "tokio",
  "topcoat",
+ "topcoat-asset",
  "topcoat-ui",
  "ua-parser",
  "uuid",
@@ -6293,6 +6294,7 @@ checksum = "a72e4ba8cb6a9d29613a25c2151e72d887b4a79b3f179b497734eed0e65ea702"
 dependencies = [
  "http",
  "memchr",
+ "mime_guess",
  "serde",
  "sha2 0.11.0",
  "thiserror 2.0.20",
@@ -6301,6 +6303,7 @@ dependencies = [
  "topcoat-core",
  "topcoat-router",
  "topcoat-view",
+ "ureq",
 ]
 
 [[package]]
