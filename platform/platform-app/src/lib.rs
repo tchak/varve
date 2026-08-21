@@ -48,6 +48,12 @@ use topcoat::{
 /// [`platform_core::connect`]) and, when one is supplied, an asset
 /// bundle.
 ///
+/// The route table is the [`pages`] module tree: `pages::builder`
+/// calls `module_router!` in the route root, so every pathless
+/// handler under [`pages`] registers at its module-derived path.
+/// `.discover()` is still needed on top for the explicit-path items
+/// collected at link time — [`auth`]'s request-state layer at `/`.
+///
 /// `assets` carries the Tailwind stylesheet (and any future static
 /// files): pass the bundle `topcoat asset bundle` wrote next to the
 /// binary (`platform-server` does — see its `main`). With `None` the
@@ -68,7 +74,7 @@ use topcoat::{
 /// and every state-changing route in [`pages`] is a POST, which is what
 /// makes that check sufficient (GETs are deliberately unchecked).
 pub fn router(db: toasty::Db, assets: Option<AssetBundle>) -> Router {
-    let builder = Router::builder()
+    let builder = pages::builder()
         .discover()
         .cookies()
         .sessions(auth::session_config())
