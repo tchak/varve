@@ -11,4 +11,15 @@ fn main() {
         .input("styles.css")
         .render()
         .unwrap();
+
+    // The vendored `select` component draws its chevron and checkmark
+    // with `iconify_icon!("feather:...")`, which reads the staged
+    // `feather` set at compile time. Staging downloads the set's
+    // `@iconify-json/feather` package once and caches it under
+    // `<target>/topcoat/cache/iconify`; builds stay offline after
+    // that.
+    topcoat::icon::iconify::BuildConfig::new()
+        .icon_set("feather")
+        .stage()
+        .unwrap();
 }

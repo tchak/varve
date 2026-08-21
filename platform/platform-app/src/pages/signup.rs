@@ -20,7 +20,7 @@ use crate::{
         page_title::page_title,
     },
     db,
-    i18n::t,
+    i18n::{request_locale, t},
 };
 
 use super::redirect_to;
@@ -118,10 +118,30 @@ pub async fn page() -> Result {
 /// re-renders with a message ([`platform_core::register`] settles
 /// the race on the database's unique index, so two concurrent
 /// submissions cannot both pass).
+///
+/// The new account's locale preference is this request's *resolved*
+/// locale ([`request_locale`] — the `RequestLocale` the root layer
+/// scoped, already reduced by `resolve_locale` to a supported tag or
+/// the English fallback), not the raw `Accept-Language` header.
+/// Storing the resolved value is deliberate: it records the language
+/// the user actually signed up in, always names a locale the
+/// platform can serve, and — because the stored preference wins over
+/// the header in resolution — pins the UI to that language even if
+/// the browser's language changes later, until the account picks
+/// another on `/settings/account`.
 #[page(POST)]
 async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
     let mut db = db(cx);
-    match platform_core::register(&mut db, &input.email, &input.password, &input.name).await {
+    let locale = request_locale(cx).to_string();
+    match platform_core::register(
+        &mut db,
+        &input.email,
+        &input.password,
+        &input.name,
+        Some(&locale),
+    )
+    .await
+    {
         Ok(account) => {
             sign_in(cx, &account).await?;
             redirect_to(cx, href!(super::home).resolve(cx)).await

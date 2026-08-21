@@ -15,7 +15,7 @@ use jiff::{SignedDuration, Timestamp};
 use platform_core::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, RegisterError, connect, create_session,
     delete_account_sessions, delete_session, destroy_session, find_live_session,
-    list_live_sessions, register, sweep_expired, verify_credentials,
+    list_live_sessions, register, sweep_expired, update_profile, verify_credentials,
 };
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -55,7 +55,7 @@ async fn register_then_verify() {
     };
     let email = unique_email("verify");
 
-    let account = register(&mut db, &email, "s3cret", "Alice")
+    let account = register(&mut db, &email, "s3cret", "Alice", None)
         .await
         .expect("register");
     assert_eq!(account.email, email);
@@ -92,11 +92,11 @@ async fn duplicate_email_is_a_typed_error() {
     };
     let email = unique_email("dup");
 
-    register(&mut db, &email, "first", "First")
+    register(&mut db, &email, "first", "First", None)
         .await
         .expect("register");
     // Same email modulo normalization: still taken.
-    let err = register(&mut db, &email.to_uppercase(), "second", "Second")
+    let err = register(&mut db, &email.to_uppercase(), "second", "Second", None)
         .await
         .expect_err("duplicate must fail");
     assert!(matches!(err, RegisterError::EmailTaken), "got: {err:?}");
@@ -108,7 +108,7 @@ async fn session_lifecycle() {
         return;
     };
     let email = unique_email("session");
-    let account = register(&mut db, &email, "pw", "Sess")
+    let account = register(&mut db, &email, "pw", "Sess", None)
         .await
         .expect("register");
 
@@ -165,7 +165,7 @@ async fn sign_out_everywhere() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let account = register(&mut db, &unique_email("everywhere"), "pw", "Multi")
+    let account = register(&mut db, &unique_email("everywhere"), "pw", "Multi", None)
         .await
         .expect("register");
 
@@ -203,7 +203,7 @@ async fn sweep_collects_only_expired() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let account = register(&mut db, &unique_email("sweep"), "pw", "Sweep")
+    let account = register(&mut db, &unique_email("sweep"), "pw", "Sweep", None)
         .await
         .expect("register");
 
@@ -256,7 +256,7 @@ async fn session_metadata_is_stored_and_user_agent_truncated() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let account = register(&mut db, &unique_email("metadata"), "pw", "Meta")
+    let account = register(&mut db, &unique_email("metadata"), "pw", "Meta", None)
         .await
         .expect("register");
 
@@ -303,10 +303,10 @@ async fn list_live_sessions_is_scoped_live_only_and_newest_first() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let account = register(&mut db, &unique_email("list"), "pw", "List")
+    let account = register(&mut db, &unique_email("list"), "pw", "List", None)
         .await
         .expect("register");
-    let other = register(&mut db, &unique_email("list-other"), "pw", "Other")
+    let other = register(&mut db, &unique_email("list-other"), "pw", "Other", None)
         .await
         .expect("register other");
 
@@ -373,12 +373,18 @@ async fn destroy_session_is_scoped_to_the_account() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let owner = register(&mut db, &unique_email("destroy"), "pw", "Owner")
+    let owner = register(&mut db, &unique_email("destroy"), "pw", "Owner", None)
         .await
         .expect("register");
-    let attacker = register(&mut db, &unique_email("destroy-attacker"), "pw", "Attacker")
-        .await
-        .expect("register attacker");
+    let attacker = register(
+        &mut db,
+        &unique_email("destroy-attacker"),
+        "pw",
+        "Attacker",
+        None,
+    )
+    .await
+    .expect("register attacker");
 
     let now = Timestamp::now();
     let hash = unique_hash("destroy");
@@ -426,4 +432,59 @@ async fn destroy_session_is_scoped_to_the_account() {
             .await
             .expect("destroy twice")
     );
+}
+
+#[tokio::test]
+async fn register_stores_the_locale() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    // The value is opaque to platform-core: whatever the app passes
+    // is what comes back.
+    let account = register(&mut db, &unique_email("locale"), "pw", "Loc", Some("fr"))
+        .await
+        .expect("register");
+    assert_eq!(account.locale.as_deref(), Some("fr"));
+
+    let found = verify_credentials(&mut db, &account.email, "pw")
+        .await
+        .expect("verify")
+        .expect("the account exists");
+    assert_eq!(found.locale.as_deref(), Some("fr"));
+}
+
+#[tokio::test]
+async fn update_profile_trims_persists_and_returns_the_row() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("profile"), "pw", "Before", None)
+        .await
+        .expect("register");
+
+    let updated = update_profile(&mut db, account.id, "  Après  ", Some("fr"))
+        .await
+        .expect("update_profile");
+    assert_eq!(updated.id, account.id);
+    assert_eq!(updated.name, "Après", "the name is stored trimmed");
+    assert_eq!(updated.locale.as_deref(), Some("fr"));
+    assert!(
+        updated.updated_at > account.updated_at,
+        "the returned row is the updated one"
+    );
+
+    // Persisted, not just reloaded in memory.
+    let found = verify_credentials(&mut db, &account.email, "pw")
+        .await
+        .expect("verify")
+        .expect("the account exists");
+    assert_eq!(found.name, "Après");
+    assert_eq!(found.locale.as_deref(), Some("fr"));
+
+    // `None` leaves the stored locale untouched.
+    let updated = update_profile(&mut db, account.id, "Nom Final", None)
+        .await
+        .expect("update_profile without locale");
+    assert_eq!(updated.name, "Nom Final");
+    assert_eq!(updated.locale.as_deref(), Some("fr"));
 }

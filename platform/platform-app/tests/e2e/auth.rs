@@ -98,7 +98,7 @@ async fn wrong_password_scenario(
     // under test is the failed sign-in, not registration.
     let email = unique_email(&format!("e2e-wrong-password-{engine}"));
     let mut db = app.db.clone();
-    platform_core::register(&mut db, &email, "s3cret-enough", "Alice")
+    platform_core::register(&mut db, &email, "s3cret-enough", "Alice", None)
         .await
         .map_err(|error| format!("seed account: {error}"))?;
 

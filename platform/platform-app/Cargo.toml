@@ -15,14 +15,14 @@ platform-i18n = { version = "0.1.0", path = "../platform-i18n" }
 serde = { version = "1.0.229", features = ["derive"] }
 uuid = "1"
 toasty = "0.10.0"
-topcoat = { version = "0.6.2", features = ["tailwind", "ui"] }
+topcoat = { version = "0.6.2", features = ["tailwind", "ui", "icon-iconify"] }
 
 [build-dependencies]
 # The Tailwind build script (`build.rs`): `BuildConfig` needs the
 # `build` half of topcoat-tailwind, which the facade's `tailwind`
 # feature enables; default features off keeps the whole runtime
 # stack out of the build-dependency graph.
-topcoat = { version = "0.6.2", default-features = false, features = ["tailwind"] }
+topcoat = { version = "0.6.2", default-features = false, features = ["tailwind", "icon-iconify"] }
 
 [dev-dependencies]
 # Pinned exact: the crate bundles a specific Playwright driver, and the

@@ -319,3 +319,164 @@ async fn sessions_without_metadata_render_the_unknown_fallback() {
     assert!(html.contains("Unknown"), "{html}");
     assert!(html.contains("ModernBrowser/2.0"), "{html}");
 }
+
+#[tokio::test]
+async fn profile_form_shows_the_stored_name_and_selected_locale() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("settings-form");
+    let cookie = crate::harness::signup(&router, "Marguerite", &email, "s3cret-enough").await;
+    let response = router
+        .handle(get("/settings/account", &[("cookie", &cookie)]))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    // The profile card is a form posting back to this module's path,
+    // with the stored name as the input's value and the save button.
+    assert!(
+        html.contains(r#"<form method="post" action="/settings/account""#),
+        "{html}"
+    );
+    assert!(html.contains(r#"value="Marguerite""#), "{html}");
+    assert!(html.contains(r#"name="name""#), "{html}");
+    assert!(html.contains("Save changes"), "{html}");
+    // The language select offers exactly the supported locales as
+    // endonyms; the account signed up without an Accept-Language, so
+    // its stored preference is the English fallback — selected.
+    assert!(html.contains(r#"name="locale""#), "{html}");
+    assert!(html.contains("Language"), "{html}");
+    assert!(
+        html.contains(r#"<option value="en" selected="">English</option>"#),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<option value="fr">Français</option>"#),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn email_card_shows_the_address_as_read_only_prose() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("settings-email-card");
+    let cookie = crate::harness::signup(&router, "Lectrice", &email, "s3cret-enough").await;
+    let html = body_text(
+        router
+            .handle(get("/settings/account", &[("cookie", &cookie)]))
+            .await,
+    )
+    .await;
+    assert!(html.contains("Email address"), "{html}");
+    // Prose, not a control: the address renders in a paragraph and
+    // no input carries it.
+    assert!(
+        html.contains(&format!(r#"<p class="text-sm">{email}</p>"#)),
+        "{html}"
+    );
+    assert!(!html.contains(r#"name="email""#), "{html}");
+}
+
+#[tokio::test]
+async fn saving_the_profile_redirects_and_renders_in_the_new_locale() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("settings-save");
+    let cookie = crate::harness::signup(&router, "Avant", &email, "s3cret-enough").await;
+
+    let response = router
+        .handle(post(
+            "/settings/account",
+            &[("cookie", &cookie)],
+            form_body(&[("name", "  Après  "), ("locale", "fr")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings/account");
+
+    // The follow-up GET renders in the new locale purely through the
+    // existing resolution order (stored preference wins): French tab
+    // labels, French lang attribute — and the trimmed name.
+    let html = body_text(
+        router
+            .handle(get("/settings/account", &[("cookie", &cookie)]))
+            .await,
+    )
+    .await;
+    assert!(html.contains(r#"lang="fr""#), "{html}");
+    assert!(html.contains("Paramètres"), "{html}");
+    assert!(html.contains("Sécurité"), "{html}");
+    assert!(html.contains(r#"value="Après""#), "{html}");
+    assert!(
+        html.contains(r#"<option value="fr" selected="">Français</option>"#),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn empty_name_rerenders_with_an_error_and_saves_nothing() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("settings-empty-name");
+    let cookie = crate::harness::signup(&router, "Intacte", &email, "s3cret-enough").await;
+
+    let response = router
+        .handle(post(
+            "/settings/account",
+            &[("cookie", &cookie)],
+            form_body(&[("name", "   "), ("locale", "fr")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    // The localized message sits in the name field's error slot,
+    // wired to the input via aria.
+    assert!(html.contains("Please enter a name."), "{html}");
+    assert!(html.contains(r#"<p id="account-name-error""#), "{html}");
+    assert!(
+        html.contains(r#"aria-describedby="account-name-error""#),
+        "{html}"
+    );
+    // The submitted locale stays selected on the re-render.
+    assert!(
+        html.contains(r#"<option value="fr" selected="">Français</option>"#),
+        "{html}"
+    );
+
+    // Nothing was saved: name and locale are as they were.
+    let html = body_text(
+        router
+            .handle(get("/settings/account", &[("cookie", &cookie)]))
+            .await,
+    )
+    .await;
+    assert!(html.contains(r#"value="Intacte""#), "{html}");
+    assert!(
+        html.contains(r#"<option value="en" selected="">English</option>"#),
+        "{html}"
+    );
+}
+
+#[tokio::test]
+async fn forged_locale_is_a_bad_request() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("settings-forged-locale");
+    let cookie = crate::harness::signup(&router, "Forgeur", &email, "s3cret-enough").await;
+
+    // The select never offers an unsupported locale, so this value
+    // can only come from a forged form — a 400, not a re-render.
+    let response = router
+        .handle(post(
+            "/settings/account",
+            &[("cookie", &cookie)],
+            form_body(&[("name", "Forgeur"), ("locale", "de")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

@@ -47,10 +47,22 @@ pub const EN: &[(&str, &str)] = &[
     ("form.name", "Name"),
     ("form.email", "Email address"),
     ("form.password", "Password"),
+    ("form.language", "Language"),
+    // The language options are endonyms — each language named in
+    // itself, the i18n convention for language pickers — so both
+    // tables carry them verbatim, one per supported locale id.
+    ("locale.en", "English"),
+    ("locale.fr", "Français"),
     ("settings.title", "Settings"),
     ("settings.tab.account", "Account"),
     ("settings.tab.security", "Security"),
     ("settings.account.profile.title", "User profile"),
+    ("settings.account.profile.save", "Save changes"),
+    (
+        "settings.account.profile.error.name-required",
+        "Please enter a name.",
+    ),
+    ("settings.account.email.title", "Email address"),
     ("settings.security.sessions.title", "Active sessions"),
     ("settings.security.sessions.current", "Current session"),
     ("settings.security.sessions.revoke", "Revoke session"),
@@ -99,10 +111,23 @@ pub const FR: &[(&str, &str)] = &[
     ("form.name", "Nom"),
     ("form.email", "Adresse électronique"),
     ("form.password", "Mot de passe"),
+    ("form.language", "Langue"),
+    // Endonyms, identical to the English table — see its note.
+    ("locale.en", "English"),
+    ("locale.fr", "Français"),
     ("settings.title", "Paramètres"),
     ("settings.tab.account", "Compte"),
     ("settings.tab.security", "Sécurité"),
     ("settings.account.profile.title", "Profil de l'utilisateur"),
+    (
+        "settings.account.profile.save",
+        "Enregistrer les modifications",
+    ),
+    (
+        "settings.account.profile.error.name-required",
+        "Veuillez saisir un nom.",
+    ),
+    ("settings.account.email.title", "Adresse électronique"),
     ("settings.security.sessions.title", "Sessions actives"),
     ("settings.security.sessions.current", "Session actuelle"),
     ("settings.security.sessions.revoke", "Révoquer la session"),

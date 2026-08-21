@@ -1,8 +1,9 @@
 //! Subject: the settings area as one browser journey — the session
 //! list across two real browser contexts (what `Router::handle`
 //! cannot prove: two live cookie jars against one account), the
-//! current-session marker, per-session revocation, and the tab
-//! navigation ridden along the way.
+//! current-session marker, per-session revocation, the tab
+//! navigation ridden along the way, and the profile save through the
+//! real language select flipping the whole page to French.
 
 use playwright_rs::protocol::{AriaRole, Browser, BrowserContext, GetByRoleOptions};
 use playwright_rs::{expect, expect_page, locator};
@@ -117,5 +118,39 @@ async fn sessions_scenario(
         .await?;
     expect(rows.clone()).to_have_count(1).await?;
     expect(current_row.clone()).to_be_visible().await?;
+
+    // Ride into the Account tab and change the language through the
+    // real select — the part only a browser proves: a native select
+    // interaction, the form submit, and the full-page language flip
+    // on the followed redirect.
+    page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("Account").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect_page(&page)
+        .to_have_url(&app.url("/settings/account"))
+        .await?;
+    page.locator(locator!("#account-locale"))
+        .select_option("fr", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Save changes").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect_page(&page)
+        .to_have_url(&app.url("/settings/account"))
+        .await?;
+    // The page re-rendered in the stored preference's locale: the
+    // security tab label is now French.
+    expect(page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("Sécurité").exact(true)),
+    ))
+    .to_be_visible()
+    .await?;
     Ok(())
 }

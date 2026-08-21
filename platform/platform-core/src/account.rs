@@ -132,6 +132,10 @@ fn dummy_hash() -> &'static str {
 /// Registers a new account: normalizes the email, hashes the
 /// password, inserts.
 ///
+/// `locale` is stored as-is on the new account when present — an
+/// opaque preference string here, like the model's `locale` column
+/// (resolution and validation are `platform-app`'s job, P.3).
+///
 /// Duplicate detection is race-free: the insert is an
 /// insert-or-ignore against the `email` unique index
 /// (`upsert_by_email(..).or_ignore()`, `ON CONFLICT DO NOTHING` on
@@ -143,17 +147,50 @@ pub async fn register(
     email: &str,
     password: &str,
     name: &str,
+    locale: Option<&str>,
 ) -> Result<Account, RegisterError> {
     let email = normalize_email(email);
     let password_hash = hash_password(password).map_err(AuthError::from)?;
-    let created = Account::upsert_by_email(&email)
+    let mut builder = Account::upsert_by_email(&email)
         .name(name)
-        .password_hash(&password_hash)
+        .password_hash(&password_hash);
+    if let Some(locale) = locale {
+        builder = builder.locale(locale);
+    }
+    let created = builder
         .or_ignore()
         .exec(db)
         .await
         .map_err(AuthError::from)?;
     created.ok_or(RegisterError::EmailTaken)
+}
+
+/// Updates an account's profile: the display name (trimmed of
+/// surrounding whitespace) and, when `locale` is present, the stored
+/// locale preference. Returns the updated row (fresh `updated_at`).
+///
+/// `locale` is opaque here, exactly like the column it lands in
+/// (P.3: no crate below `platform-app` knows what a locale is —
+/// validating it against the supported set is the app's job before
+/// calling). `None` leaves the stored preference untouched; this
+/// function never clears it.
+///
+/// The name is stored as trimmed — deciding what to do with an
+/// *empty* trimmed name (reject, re-prompt) is the caller's
+/// validation, not this function's.
+pub async fn update_profile(
+    db: &mut toasty::Db,
+    account_id: uuid::Uuid,
+    name: &str,
+    locale: Option<&str>,
+) -> toasty::Result<Account> {
+    let mut account = Account::get_by_id(db, account_id).await?;
+    let mut update = account.update().name(name.trim());
+    if let Some(locale) = locale {
+        update = update.locale(locale);
+    }
+    update.exec(db).await?;
+    Ok(account)
 }
 
 /// Checks an email/password pair. `Ok(Some(account))` on success;

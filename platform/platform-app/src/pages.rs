@@ -17,7 +17,7 @@
 //!
 //! Every page is composed from [`crate::components`] — topcoat-ui
 //! components vendored by `topcoat ui add` (alert, badge, button,
-//! card, input, label, tabs) plus our own in the same style (field,
+//! card, input, label, select, tabs) plus our own in the same style (field,
 //! page_title, site_header) — styled with
 //! Tailwind classes against the theme tokens in `styles.css`. Every
 //! user-visible string still goes through [`t`] / [`t_args`] and is

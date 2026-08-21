@@ -181,3 +181,78 @@ async fn cross_origin_post_is_rejected() {
         .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+/// The stored locale of an account, read straight from platform-core.
+async fn stored_locale(db: &mut toasty::Db, email: &str) -> Option<String> {
+    platform_core::Account::filter_by_email(email)
+        .first()
+        .exec(db)
+        .await
+        .expect("lookup account")
+        .expect("the account exists")
+        .locale
+}
+
+#[tokio::test]
+async fn signup_stores_the_resolved_browser_locale() {
+    let Some((router, db)) = test_app().await else {
+        return;
+    };
+    let mut db = db;
+    let email = unique_email("signup-locale-fr");
+    let response = router
+        .handle(post(
+            "/signup",
+            &[("accept-language", "fr-FR,fr;q=0.9,en;q=0.5")],
+            form_body(&[
+                ("name", "Française"),
+                ("email", &email),
+                ("password", "s3cret-enough"),
+            ]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    // The *resolved* locale is stored, not the raw header: fr-FR
+    // resolves to the supported base tag.
+    assert_eq!(stored_locale(&mut db, &email).await.as_deref(), Some("fr"));
+
+    // And it now pins the UI regardless of the browser language: an
+    // English-headed follow-up still renders French.
+    let cookie = session_cookie(&response).expect("signup sets a session cookie");
+    let html = body_text(
+        router
+            .handle(get(
+                "/settings/account",
+                &[("cookie", &cookie), ("accept-language", "en")],
+            ))
+            .await,
+    )
+    .await;
+    assert!(html.contains(r#"lang="fr""#), "{html}");
+    assert!(html.contains("Sécurité"), "{html}");
+}
+
+#[tokio::test]
+async fn signup_with_an_unsupported_language_stores_the_fallback() {
+    let Some((router, db)) = test_app().await else {
+        return;
+    };
+    let mut db = db;
+    let email = unique_email("signup-locale-de");
+    let response = router
+        .handle(post(
+            "/signup",
+            &[("accept-language", "de-DE,de;q=0.9")],
+            form_body(&[
+                ("name", "Deutsche"),
+                ("email", &email),
+                ("password", "s3cret-enough"),
+            ]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    // resolve_locale already reduced the unsupported language to the
+    // English fallback; that resolved value is what lands in storage
+    // — never a tag the catalogs cannot serve.
+    assert_eq!(stored_locale(&mut db, &email).await.as_deref(), Some("en"));
+}

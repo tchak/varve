@@ -32,7 +32,9 @@ pub mod db;
 pub mod principal;
 pub mod session;
 
-pub use account::{Account, AuthError, RegisterError, register, verify_credentials};
+pub use account::{
+    Account, AuthError, RegisterError, register, update_profile, verify_credentials,
+};
 pub use db::{MIGRATIONS, connect};
 pub use principal::Principal;
 pub use session::{
