@@ -17,5 +17,10 @@ toasty = "0.10.0"
 topcoat = "0.6.2"
 
 [dev-dependencies]
+# Pinned exact: the crate bundles a specific Playwright driver, and the
+# installed browsers must match it (see tests/e2e.rs and
+# examples/install-browsers.rs — a version bump moves driver and
+# browsers together through the lockfile).
+playwright-rs = "=0.16.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.24.1", features = ["v4"] }
