@@ -29,15 +29,28 @@
 
 pub mod account;
 pub mod db;
+pub mod organization;
 pub mod principal;
+pub mod procedure;
 pub mod session;
+pub mod team;
 
 pub use account::{
     Account, AuthError, RegisterError, register, update_profile, verify_credentials,
 };
 pub use db::{MIGRATIONS, connect};
+pub use organization::{
+    CreateOrganizationError, Organization, OrganizationMembership, add_organization_member,
+    create_organization, find_organization_by_slug, is_organization_member,
+    list_account_organizations, remove_organization_member,
+};
 pub use principal::Principal;
+pub use procedure::{Procedure, create_procedure, list_organization_procedures};
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
     delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,
+};
+pub use team::{
+    Team, TeamMembership, add_team_member, create_team, list_account_teams,
+    list_organization_teams, remove_team_member,
 };

@@ -13,9 +13,13 @@
 
 use jiff::{SignedDuration, Timestamp};
 use platform_core::{
-    DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, RegisterError, connect, create_session,
-    delete_account_sessions, delete_session, destroy_session, find_live_session,
-    list_live_sessions, register, sweep_expired, update_profile, verify_credentials,
+    CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, RegisterError,
+    add_organization_member, add_team_member, connect, create_organization, create_procedure,
+    create_session, create_team, delete_account_sessions, delete_session, destroy_session,
+    find_live_session, find_organization_by_slug, is_organization_member,
+    list_account_organizations, list_account_teams, list_live_sessions,
+    list_organization_procedures, list_organization_teams, register, remove_organization_member,
+    remove_team_member, sweep_expired, update_profile, verify_credentials,
 };
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -487,4 +491,194 @@ async fn update_profile_trims_persists_and_returns_the_row() {
         .expect("update_profile without locale");
     assert_eq!(updated.name, "Nom Final");
     assert_eq!(updated.locale.as_deref(), Some("fr"));
+}
+
+fn unique_slug(tag: &str) -> String {
+    format!("{tag}-{}", uuid::Uuid::new_v4())
+}
+
+#[tokio::test]
+async fn organization_slug_is_normalized_and_unique() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let slug = unique_slug("org");
+
+    let org = create_organization(&mut db, &format!("  {}  ", slug.to_uppercase()), " DGFiP ")
+        .await
+        .expect("create");
+    assert_eq!(org.slug, slug);
+    assert_eq!(org.name, "DGFiP");
+
+    let err = create_organization(&mut db, &slug, "Again")
+        .await
+        .expect_err("duplicate slug must fail");
+    assert!(
+        matches!(err, CreateOrganizationError::SlugTaken),
+        "got: {err:?}"
+    );
+
+    let found = find_organization_by_slug(&mut db, &slug.to_uppercase())
+        .await
+        .expect("find");
+    assert_eq!(found.map(|o| o.id), Some(org.id));
+    assert!(
+        find_organization_by_slug(&mut db, &unique_slug("ghost"))
+            .await
+            .expect("find")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn organization_membership_is_idempotent_and_independent_of_teams() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let admin = register(&mut db, &unique_email("admin"), "pw", "Admin", None)
+        .await
+        .expect("register");
+    let reviewer = register(&mut db, &unique_email("reviewer"), "pw", "Reviewer", None)
+        .await
+        .expect("register");
+    let org = create_organization(&mut db, &unique_slug("org"), "Org")
+        .await
+        .expect("create org");
+
+    // Adding twice keeps one membership.
+    add_organization_member(&mut db, org.id, admin.id)
+        .await
+        .expect("add");
+    add_organization_member(&mut db, org.id, admin.id)
+        .await
+        .expect("add again");
+    assert!(
+        is_organization_member(&mut db, org.id, admin.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !is_organization_member(&mut db, org.id, reviewer.id)
+            .await
+            .unwrap()
+    );
+
+    let orgs = list_account_organizations(&mut db, admin.id).await.unwrap();
+    assert_eq!(orgs.iter().map(|o| o.id).collect::<Vec<_>>(), vec![org.id]);
+
+    // A reviewer in one of the org's teams is not thereby an org member.
+    let team = create_team(&mut db, org.id, " Guichet ")
+        .await
+        .expect("team");
+    assert_eq!(team.name, "Guichet");
+    assert_eq!(team.organization_id, org.id);
+    add_team_member(&mut db, team.id, reviewer.id)
+        .await
+        .expect("add");
+    add_team_member(&mut db, team.id, reviewer.id)
+        .await
+        .expect("add again");
+    assert!(
+        !is_organization_member(&mut db, org.id, reviewer.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        list_account_organizations(&mut db, reviewer.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let teams = list_account_teams(&mut db, reviewer.id).await.unwrap();
+    assert_eq!(
+        teams.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![team.id]
+    );
+    assert!(
+        list_account_teams(&mut db, admin.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let org_teams = list_organization_teams(&mut db, org.id).await.unwrap();
+    assert_eq!(
+        org_teams.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![team.id]
+    );
+
+    // The derived `via` relations agree with the service queries.
+    let members = org.members().exec(&mut db).await.unwrap();
+    assert_eq!(
+        members.iter().map(|a| a.id).collect::<Vec<_>>(),
+        vec![admin.id]
+    );
+    let reviewers = team.members().exec(&mut db).await.unwrap();
+    assert_eq!(
+        reviewers.iter().map(|a| a.id).collect::<Vec<_>>(),
+        vec![reviewer.id]
+    );
+
+    // Removal: a no-op for non-members, effective for members.
+    remove_organization_member(&mut db, org.id, reviewer.id)
+        .await
+        .expect("noop");
+    remove_organization_member(&mut db, org.id, admin.id)
+        .await
+        .expect("remove");
+    assert!(
+        !is_organization_member(&mut db, org.id, admin.id)
+            .await
+            .unwrap()
+    );
+    remove_team_member(&mut db, team.id, admin.id)
+        .await
+        .expect("noop");
+    remove_team_member(&mut db, team.id, reviewer.id)
+        .await
+        .expect("remove");
+    assert!(
+        list_account_teams(&mut db, reviewer.id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn organization_owns_procedures() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let org = create_organization(&mut db, &unique_slug("org"), "Org")
+        .await
+        .expect("create org");
+    let other = create_organization(&mut db, &unique_slug("other"), "Other")
+        .await
+        .expect("create org");
+
+    let first = create_procedure(&mut db, org.id, " Demande de bourse ", "")
+        .await
+        .expect("procedure");
+    assert_eq!(first.title, "Demande de bourse");
+    assert_eq!(first.description, "");
+    let second = create_procedure(&mut db, org.id, "Permis", " Desc ")
+        .await
+        .expect("procedure");
+    assert_eq!(second.description, "Desc");
+    create_procedure(&mut db, other.id, "Elsewhere", "")
+        .await
+        .expect("procedure");
+
+    let listed = list_organization_procedures(&mut db, org.id).await.unwrap();
+    assert_eq!(
+        listed.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![first.id, second.id]
+    );
+    let via = org.procedures().exec(&mut db).await.unwrap();
+    assert_eq!(via.len(), 2);
+    assert_eq!(
+        second.organization().exec(&mut db).await.unwrap().id,
+        org.id
+    );
 }

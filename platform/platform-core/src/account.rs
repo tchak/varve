@@ -17,6 +17,11 @@
 
 use std::sync::OnceLock;
 
+use toasty::Deferred;
+
+use crate::organization::{Organization, OrganizationMembership};
+use crate::team::{Team, TeamMembership};
+
 use argon2::{
     Argon2,
     password_hash::{
@@ -59,6 +64,27 @@ pub struct Account {
     /// Set on insert and on every update.
     #[auto]
     pub updated_at: jiff::Timestamp,
+
+    /// Organization memberships (P.4: membership = administers every
+    /// procedure the organization owns). Mutate through
+    /// [`crate::organization`].
+    #[has_many]
+    pub organization_memberships: Deferred<Vec<OrganizationMembership>>,
+
+    /// The organizations this account administers — read-only
+    /// derived relation.
+    #[has_many(via = organization_memberships.organization)]
+    pub organizations: Deferred<Vec<Organization>>,
+
+    /// Team memberships (P.4: membership = reviewer). Mutate through
+    /// [`crate::team`].
+    #[has_many]
+    pub team_memberships: Deferred<Vec<TeamMembership>>,
+
+    /// The teams this account reviews for — read-only derived
+    /// relation.
+    #[has_many(via = team_memberships.team)]
+    pub teams: Deferred<Vec<Team>>,
 }
 
 /// Infrastructure failure during an auth operation: the database, or
