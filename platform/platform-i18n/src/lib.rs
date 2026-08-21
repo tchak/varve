@@ -32,6 +32,23 @@
 //! knows what a locale is, and this one only accepts a typed
 //! [`Locale`] (see [`locale`]).
 //!
+//! **Deliberately absent, so far** (each waits for its first real
+//! use — implement here, not around this crate, when a page needs
+//! it): a `:time` function and `:datetime`'s `timeStyle` (the
+//! formatter is built on ICU4X's date-only YMD fieldsets, so
+//! time-of-day cannot render at all; adding it also inherits the
+//! time-zone question, PLATFORM.md P.9 Q11 — this crate formats the
+//! civil date/time it is handed and must stay zone-ignorant);
+//! **markup placeholders** (`{#b}...{/b}` is a
+//! [`CompileError::Unsupported`] — a message cannot carry an inline
+//! link or emphasis, so copy needing one must currently split into
+//! fragments, which mangles translations; the fix is lowering markup
+//! to open/close parts in the IR and letting the caller map them to
+//! views); `:number` beyond `style=decimal` + fraction digits (no
+//! percent/currency/unit, no ordinal selection); `:date style=full`
+//! renders as `long` (no weekday); no bidi isolation of placeholder
+//! output (mandatory before any RTL locale ships).
+//!
 //! Formatted output is **opaque** (Q8): CLDR French uses U+202F
 //! NARROW NO-BREAK SPACE as the group separator — naive snapshot
 //! assertions on "1 000 000" will break. Compare against literals

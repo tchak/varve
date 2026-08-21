@@ -406,6 +406,21 @@ everything shipped exists in DN and nothing shipped that doesn't.
     over an executor argument). Reconciling that with the
     executor-free `varve-store` trait signatures is now the crux of
     the spike.
+11. **Whose time zone renders an instant?** Every timestamp the UI
+    shows must become a civil date/time in *some* zone; the platform
+    models none, so `platform-app` renders UTC as a documented
+    stopgap (every UI date funnels through one `utc_date_arg`
+    helper — near a midnight boundary the shown date is off by one
+    for the viewer). Candidates, combinable: a per-account zone
+    preference beside the locale preference (P.7's principal
+    resolution would carry it); a per-deployment default (a French
+    administration wants Europe/Paris even for accounts without a
+    preference); a browser hint as a last resort. i18n is not the
+    question — `platform-i18n` formats whatever civil date it is
+    handed; the question is where the zone lives in the domain model.
+    Decide before reviewer-facing timestamps land (P1's instruction
+    views show submission times — off-by-one dates there are
+    user-visible wrongness, not polish).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
