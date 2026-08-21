@@ -68,11 +68,22 @@ pub async fn page(cx: &Cx) -> Result {
 /// The shared settings shell: the page title, the Account | Security
 /// tab navigation (the active tab carries `aria-current="page"` via
 /// [`tabs_trigger`]), then the page's cards as the tab panel.
+///
+/// The panel opens with a visually hidden `<h2>` naming the active
+/// tab: the cards' titles are `<h3>` (vendored `card_title`), and the
+/// outline must not skip from the page's `<h1>` to them (RGAA 9.1,
+/// enforced by the router tests' baseline lint). Hidden because the
+/// selected tab already shows the name; a screen reader's heading
+/// navigation still lands on it.
 #[component]
 async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
     let title = t(cx, "settings.title")?;
     let account_label = t(cx, "settings.tab.account")?;
     let security_label = t(cx, "settings.tab.security")?;
+    let panel_heading = match active {
+        Tab::Account => account_label.clone(),
+        Tab::Security => security_label.clone(),
+    };
     view! {
         <div class="flex flex-col gap-6">
             page_title((title))
@@ -89,7 +100,10 @@ async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
                         (security_label)
                     )
                 )
-                tabs_content((child))
+                tabs_content(
+                    <h2 class="sr-only">(panel_heading)</h2>
+                    (child)
+                )
             )
         </div>
     }

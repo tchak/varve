@@ -44,3 +44,4 @@ serde_json = "1"
 # registry crate (`topcoat-ui-registry`, pulled in by the `ui`
 # feature above) — the upstream pattern from demos/coffee-shop.
 topcoat-ui = "0.6.2"
+scraper = "0.27"
