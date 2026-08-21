@@ -17,8 +17,8 @@
 //!
 //! Every page is composed from [`crate::components`] — topcoat-ui
 //! components vendored by `topcoat ui add` (alert, badge, button,
-//! card, input, label, select, tabs) plus our own in the same style (field,
-//! page_title, site_header) — styled with
+//! card, dropdown_menu, input, label, select, tabs) plus our own in
+//! the same style (field, page_title, site_header) — styled with
 //! Tailwind classes against the theme tokens in `styles.css`. Every
 //! user-visible string still goes through [`t`] / [`t_args`] and is
 //! passed to components as display text; components carry no
@@ -49,18 +49,23 @@ use topcoat::{
     Result,
     asset::AssetConfig,
     context::{Cx, try_app_context},
+    icon::{icon, iconify::iconify_icon},
     router::{
         HeaderValue, RouterBuilder, StatusCode, error::NotFoundError, header, href, layout,
         not_found, page,
     },
     tailwind,
-    view::{attributes, view},
+    view::{StaticClass, attributes, class, view},
 };
 
 use crate::{
     auth::{account, principal},
     components::{
-        button::{ButtonSize, ButtonVariant, button, button_variants},
+        button::{ButtonSize, ButtonVariant, button_variants},
+        dropdown_menu::{
+            dropdown_menu, dropdown_menu_content, dropdown_menu_item, dropdown_menu_label,
+            dropdown_menu_separator, dropdown_menu_trigger,
+        },
         page_title::page_title,
         site_header::site_header,
     },
@@ -126,10 +131,30 @@ fn stylesheet_href(cx: &Cx) -> Option<String> {
         .map(|config| config.resolve(stylesheet))
 }
 
-/// The HTML shell: [`site_header`] with the sign-in state, main
-/// slot. Also brands the not-found error (from the [`not_found!`]
-/// catch-all or any page) instead of letting it bubble to a bare
-/// 404.
+/// The classes giving the account menu's settings *link* the same row
+/// look as a [`dropdown_menu_item`] — whose classes are private to the
+/// vendored component, which renders a `<button>` where navigation
+/// needs an `<a>`. Kept in step with the component's `ITEM` const,
+/// minus the `disabled:` states a link cannot be in.
+const MENU_LINK: StaticClass = class!(
+    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm \
+     whitespace-nowrap outline-none hover:bg-foreground/5 focus-visible:bg-foreground/5 \
+     active:bg-foreground/10",
+);
+
+/// The HTML shell: [`site_header`] with the sign-in state — the
+/// signed-out links, or the signed-in account menu (a [`dropdown_menu`],
+/// `<details>`-based so it opens without scripting: the round
+/// icon-only trigger named by `nav.account-menu`, the account email as
+/// a non-interactive [`dropdown_menu_label`], the settings link, and
+/// the sign-out POST form, which is what the router's `OriginPolicy`
+/// protects) — then the main slot. The trigger dresses
+/// [`button_variants`]' ghost icon button round with `rounded-full!`:
+/// the important marker, because `ButtonSize::Icon` carries
+/// `rounded-lg` along and stylesheet order (not class order) decides
+/// between two radius utilities — and Tailwind emits `.rounded-full`
+/// first. Also brands the not-found error (from the [`not_found!`]
+/// catch-all or any page) instead of letting it bubble to a bare 404.
 #[layout]
 async fn shell(cx: &Cx, slot: Result) -> Result {
     let lang = request_locale(cx).to_string();
@@ -144,14 +169,9 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
         }
         other => other,
     };
-    let signed_in_as = match principal(cx) {
-        Some(principal) => Some(t_args(
-            cx,
-            "nav.signed-in-as",
-            &one_arg("email", principal.email.as_str()),
-        )?),
-        None => None,
-    };
+    let account_email = principal(cx).map(|principal| principal.email.clone());
+    let account_menu_label = t(cx, "nav.account-menu")?;
+    let settings_label = t(cx, "settings.title")?;
     let sign_in_label = t(cx, "nav.sign-in")?;
     let sign_up_label = t(cx, "nav.sign-up")?;
     let sign_out_label = t(cx, "nav.sign-out")?;
@@ -170,18 +190,36 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                 site_header(
                     brand_label: title.as_str(),
                     brand_href: href!(home).resolve(cx),
-                    if let Some(signed_in_as) = &signed_in_as {
-                        <span class="text-sm text-muted-foreground">
-                            (signed_in_as)
-                        </span>
-                        <form method="post" action=(href!(signout::submit))>
-                            button(
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                attrs: attributes! { type="submit" },
-                                (sign_out_label)
+                    if let Some(account_email) = &account_email {
+                        dropdown_menu(
+                            dropdown_menu_trigger(
+                                attrs: attributes! {
+                                    aria-label=(account_menu_label.as_str())
+                                    class=(class!(
+                                        button_variants(
+                                            ButtonVariant::Ghost,
+                                            ButtonSize::Icon,
+                                        ),
+                                        "rounded-full!",
+                                    ))
+                                },
+                                icon(data: iconify_icon!("feather:user"))
                             )
-                        </form>
+                            dropdown_menu_content(
+                                attrs: attributes! { class="right-0 left-auto" },
+                                dropdown_menu_label((account_email))
+                                <a href=(href!(settings::page)) class=(MENU_LINK)>
+                                    (settings_label)
+                                </a>
+                                dropdown_menu_separator()
+                                <form method="post" action=(href!(signout::submit))>
+                                    dropdown_menu_item(
+                                        attrs: attributes! { type="submit" },
+                                        (sign_out_label)
+                                    )
+                                </form>
+                            )
+                        )
                     } else {
                         <a
                             href=(href!(signin::page))

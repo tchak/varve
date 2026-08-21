@@ -26,7 +26,9 @@ pub const EN: &[(&str, &str)] = &[
     ("nav.sign-in", "Sign in"),
     ("nav.sign-up", "Create an account"),
     ("nav.sign-out", "Sign out"),
-    ("nav.signed-in-as", "Signed in as {$email}"),
+    // The account menu's trigger is an icon-only button; this is its
+    // accessible name (`aria-label`), not visible text.
+    ("nav.account-menu", "Account menu"),
     ("home.title", "Home"),
     ("home.greeting", "Hello, {$name}."),
     ("home.signed-out", "Please sign in to continue."),
@@ -88,7 +90,8 @@ pub const FR: &[(&str, &str)] = &[
     ("nav.sign-in", "Se connecter"),
     ("nav.sign-up", "Créer un compte"),
     ("nav.sign-out", "Se déconnecter"),
-    ("nav.signed-in-as", "Connecté(e) en tant que {$email}"),
+    // See the English table: the icon-only trigger's `aria-label`.
+    ("nav.account-menu", "Menu du compte"),
     ("home.title", "Accueil"),
     ("home.greeting", "Bonjour {$name}."),
     ("home.signed-out", "Veuillez vous connecter pour continuer."),

@@ -59,8 +59,9 @@ async fn gate(cx: &Cx, body: Body, next: Next<'_>) -> topcoat::Result<Response> 
 }
 
 /// `/settings` has no content of its own: 303 to the account tab.
+/// `pub` so the shell's account menu can link here with `href!`.
 #[page]
-async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result {
     super::redirect_to(cx, href!(account::page).resolve(cx)).await
 }
 

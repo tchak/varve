@@ -48,17 +48,29 @@ async fn signup_scenario(
         ))
         .to_be_visible()
         .await?;
-        expect(header.get_by_text("Signed in as", false))
+        expect(header.get_by_label("Account menu", true))
             .not()
             .to_be_visible()
             .await?;
         return Ok(());
     }
-    expect(header.get_by_text(&format!("Signed in as {normalized}"), false))
-        .to_be_visible()
-        .await?;
     expect(page.locator(locator!("main p")))
         .to_have_text("Hello, Amélie.")
+        .await?;
+
+    // The signed-in header is the account menu: the email is not on
+    // the page until the trigger opens it — a real browser proving
+    // the `<details>` disclosure. The trigger is a `<summary>`, which
+    // has no implicit ARIA role, so the accessible-name lookup is
+    // `get_by_label` (its `aria-label`), not `get_by_role`.
+    let menu_trigger = header.get_by_label("Account menu", true);
+    expect(header.get_by_text(&normalized, false))
+        .not()
+        .to_be_visible()
+        .await?;
+    menu_trigger.click(None).await?;
+    expect(header.get_by_text(&normalized, false))
+        .to_be_visible()
         .await?;
 
     header
@@ -76,7 +88,7 @@ async fn signup_scenario(
     ))
     .to_be_visible()
     .await?;
-    expect(header.get_by_text("Signed in as", false))
+    expect(header.get_by_label("Account menu", true))
         .not()
         .to_be_visible()
         .await?;
@@ -195,7 +207,10 @@ async fn cookie_scenario(
         format!("session cookie path is {:?}, not /", cookie.path),
     )?;
 
-    // Sign out, wait for the signed-out header, and the cookie is gone.
+    // Sign out through the account menu (the button only exists
+    // inside it), wait for the signed-out header, and the cookie is
+    // gone.
+    page.get_by_label("Account menu", true).click(None).await?;
     page.get_by_role(
         AriaRole::Button,
         Some(GetByRoleOptions::default().name("Sign out").exact(true)),

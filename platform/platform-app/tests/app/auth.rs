@@ -90,7 +90,10 @@ async fn signup_signs_in_greets_and_logs_out() {
     let response = router.handle(get("/", &[("cookie", &cookie)])).await;
     let html = body_text(response).await;
     assert!(html.contains("Hello, Amélie."), "{html}");
-    assert!(html.contains(&format!("Signed in as {email}")), "{html}");
+    // The stored email surfaces in the header's account menu (the
+    // full menu contract is the shell subject's), with the sign-out
+    // POST form alongside it.
+    assert!(html.contains(&email), "{html}");
     assert!(html.contains(r#"action="/signout""#), "{html}");
 
     // Logout: 303 home, session row deleted, cookie unusable.
