@@ -9,3 +9,13 @@ license.workspace = true
 # document execution, components with colocated fragments
 # (PLATFORM.md P.3, P.7).
 [dependencies]
+jiff = "0.2"
+platform-core = { version = "0.1.0", path = "../platform-core" }
+platform-i18n = { version = "0.1.0", path = "../platform-i18n" }
+serde = { version = "1.0.229", features = ["derive"] }
+toasty = "0.10.0"
+topcoat = "0.6.2"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1.24.1", features = ["v4"] }

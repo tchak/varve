@@ -10,3 +10,9 @@ license.workspace = true
 # (PLATFORM.md P.3). One process to start with; the seams are already
 # crates.
 [dependencies]
+platform-app = { version = "0.1.0", path = "../platform-app" }
+platform-core = { version = "0.1.0", path = "../platform-core" }
+thiserror.workspace = true
+toasty = "0.10.0"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+topcoat = "0.6.2"
