@@ -258,3 +258,6 @@ version bump. Local rules for this repo:
   per-engine expectations explicitly (see `accepts_secure_cookie_on_
   loopback_http` in tests/e2e.rs) — never weaken an assertion for the
   engines that do accept.
+- When driving the app manually via the Playwright MCP browser,
+  save screenshots into `.playwright-mcp/` (gitignored; it is an
+  allowed MCP root) — never at the repo root.

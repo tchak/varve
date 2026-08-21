@@ -4,4 +4,10 @@
 /fuzz/artifacts
 /fuzz/corpus
 /fuzz/Cargo.lock
-/.env
+# Local env files (server loads .env; the committed example stays)
+/.env*
+!/.env.example
+# Playwright MCP browser-session artifacts (snapshots, screenshots)
+/.playwright-mcp/
+# macOS
+.DS_Store
