@@ -121,7 +121,7 @@ async fn signup(router: &Router, name: &str, email: &str, password: &str) -> Str
 }
 
 #[tokio::test]
-async fn home_signed_out_prompts_login_in_english_by_default() {
+async fn home_signed_out_prompts_signin_in_english_by_default() {
     let Some((router, _db)) = test_app().await else {
         return;
     };
@@ -151,20 +151,20 @@ async fn home_renders_french_from_accept_language() {
 }
 
 #[tokio::test]
-async fn login_page_renders_the_form() {
+async fn signin_page_renders_the_form() {
     let Some((router, _db)) = test_app().await else {
         return;
     };
-    let response = router.handle(get("/login", &[])).await;
+    let response = router.handle(get("/signin", &[])).await;
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_text(response).await;
-    assert!(html.contains(r#"action="/login""#), "{html}");
+    assert!(html.contains(r#"action="/signin""#), "{html}");
     assert!(html.contains(r#"name="email""#), "{html}");
     assert!(html.contains(r#"name="password""#), "{html}");
 }
 
 #[tokio::test]
-async fn failed_login_rerenders_with_one_generic_error() {
+async fn failed_signin_rerenders_with_one_generic_error() {
     let Some((router, _db)) = test_app().await else {
         return;
     };
@@ -175,7 +175,7 @@ async fn failed_login_rerenders_with_one_generic_error() {
     // platform-core `None` collapse carried through to the view.
     let wrong_password = router
         .handle(post(
-            "/login",
+            "/signin",
             &[],
             form_body(&[("email", &email), ("password", "nope")]),
         ))
@@ -189,7 +189,7 @@ async fn failed_login_rerenders_with_one_generic_error() {
 
     let unknown_email = router
         .handle(post(
-            "/login",
+            "/signin",
             &[],
             form_body(&[("email", &unique_email("ghost")), ("password", "nope")]),
         ))
@@ -229,11 +229,11 @@ async fn signup_signs_in_greets_and_logs_out() {
     let html = body_text(response).await;
     assert!(html.contains("Hello, Amélie."), "{html}");
     assert!(html.contains(&format!("Signed in as {email}")), "{html}");
-    assert!(html.contains(r#"action="/logout""#), "{html}");
+    assert!(html.contains(r#"action="/signout""#), "{html}");
 
     // Logout: 303 home, session row deleted, cookie unusable.
     let response = router
-        .handle(post("/logout", &[("cookie", &cookie)], String::new()))
+        .handle(post("/signout", &[("cookie", &cookie)], String::new()))
         .await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers()[header::LOCATION], "/");
@@ -242,7 +242,7 @@ async fn signup_signs_in_greets_and_logs_out() {
             .await
             .expect("lookup")
             .is_none(),
-        "logout deletes the session row"
+        "signout deletes the session row"
     );
     let response = router.handle(get("/", &[("cookie", &cookie)])).await;
     let html = body_text(response).await;
@@ -251,23 +251,23 @@ async fn signup_signs_in_greets_and_logs_out() {
 }
 
 #[tokio::test]
-async fn login_starts_a_fresh_session() {
+async fn signin_starts_a_fresh_session() {
     let Some((router, _db)) = test_app().await else {
         return;
     };
-    let email = unique_email("login");
+    let email = unique_email("signin");
     let first_cookie = signup(&router, "Benoît", &email, "s3cret-enough").await;
 
     let response = router
         .handle(post(
-            "/login",
+            "/signin",
             &[],
             form_body(&[("email", &email), ("password", "s3cret-enough")]),
         ))
         .await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers()[header::LOCATION], "/");
-    let cookie = session_cookie(&response).expect("login sets a session cookie");
+    let cookie = session_cookie(&response).expect("signin sets a session cookie");
     // Fixation safety: a fresh token, not the one signup issued.
     assert_ne!(cookie, first_cookie);
 
@@ -312,7 +312,7 @@ async fn cross_origin_post_is_rejected() {
     };
     let response = router
         .handle(post(
-            "/login",
+            "/signin",
             &[("sec-fetch-site", "cross-site")],
             form_body(&[("email", "a@b.test"), ("password", "x")]),
         ))

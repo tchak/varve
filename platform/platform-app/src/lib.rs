@@ -1,6 +1,6 @@
 //! The Topcoat app shell (PLATFORM.md P.3): browser sessions adapted
 //! onto `platform-core`'s session storage, principal resolution, locale
-//! resolution, and the P0 pages — home, login, signup, logout.
+//! resolution, and the P0 pages — home, signin, signup, signout.
 //!
 //! **Current scope: the P0 walking-skeleton shell** (P.8, outside-in
 //! ordering). Later phases add in-process document execution and the

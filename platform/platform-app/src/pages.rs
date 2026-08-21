@@ -1,5 +1,5 @@
 //! The P0 pages (PLATFORM.md P.8: the walking skeleton's shell):
-//! layout, home, login, signup, logout, and a branded not-found.
+//! layout, home, signin, signup, signout, and a branded not-found.
 //!
 //! Structure only — styling (Tailwind) comes later. Every
 //! user-visible string goes through [`t`] / [`t_args`]; every state
@@ -54,7 +54,7 @@ fn one_arg(name: &str, value: &str) -> Args {
     args
 }
 
-/// The HTML shell: header with login state, main slot. Also brands
+/// The HTML shell: header with sign-in state, main slot. Also brands
 /// the not-found error (from the [`not_found!`] catch-all or any
 /// page) instead of letting it bubble to a bare 404.
 #[layout("/")]
@@ -96,11 +96,11 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                     <nav>
                         if let Some(signed_in_as) = &signed_in_as {
                             <span>(signed_in_as)</span>
-                            <form method="post" action=(href!(logout))>
+                            <form method="post" action=(href!(signout))>
                                 <button type="submit">(sign_out_label)</button>
                             </form>
                         } else {
-                            <a href=(href!(login))>(sign_in_label)</a>
+                            <a href=(href!(signin))>(sign_in_label)</a>
                             <a href=(href!(signup))>(sign_up_label)</a>
                         }
                     </nav>
@@ -134,30 +134,30 @@ struct Credentials {
     password: String,
 }
 
-/// The login form, shared by the GET page and the failed POST
+/// The sign-in form, shared by the GET page and the failed POST
 /// re-render (which passes the generic error and the typed email
 /// back).
 #[component]
-async fn login_form(cx: &Cx, error: Option<String>, email: String) -> Result {
-    let title = t(cx, "login.title")?;
+async fn signin_form(cx: &Cx, error: Option<String>, email: String) -> Result {
+    let title = t(cx, "signin.title")?;
     let email_label = t(cx, "form.email")?;
     let password_label = t(cx, "form.password")?;
-    let submit_label = t(cx, "login.submit")?;
-    let signup_link = t(cx, "login.signup-link")?;
+    let submit_label = t(cx, "signin.submit")?;
+    let signup_link = t(cx, "signin.signup-link")?;
     view! {
         <h1>(title)</h1>
         if let Some(error) = &error {
             <p role="alert">(error)</p>
         }
-        <form method="post" action=(href!(login_submit))>
+        <form method="post" action=(href!(signin_submit))>
             <p>
-                <label for="login-email">(email_label)</label>
-                <input type="email" id="login-email" name="email" value=(email)
+                <label for="signin-email">(email_label)</label>
+                <input type="email" id="signin-email" name="email" value=(email)
                     required="" autocomplete="email">
             </p>
             <p>
-                <label for="login-password">(password_label)</label>
-                <input type="password" id="login-password" name="password"
+                <label for="signin-password">(password_label)</label>
+                <input type="password" id="signin-password" name="password"
                     required="" autocomplete="current-password">
             </p>
             <button type="submit">(submit_label)</button>
@@ -166,10 +166,10 @@ async fn login_form(cx: &Cx, error: Option<String>, email: String) -> Result {
     }
 }
 
-#[page("/login")]
-async fn login() -> Result {
+#[page("/signin")]
+async fn signin() -> Result {
     view! {
-        login_form(error: None, email: String::new())
+        signin_form(error: None, email: String::new())
     }
 }
 
@@ -177,8 +177,8 @@ async fn login() -> Result {
 /// same for an unknown email and a wrong password —
 /// [`platform_core::verify_credentials`] already collapses the two
 /// (including their timing), and the view must not reopen the leak.
-#[page(POST "/login")]
-async fn login_submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
+#[page(POST "/signin")]
+async fn signin_submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
     let mut db = db(cx);
     match platform_core::verify_credentials(&mut db, &input.email, &input.password).await? {
         Some(account) => {
@@ -186,9 +186,9 @@ async fn login_submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
             redirect_to(cx, href!(home).resolve(cx)).await
         }
         None => {
-            let error = t(cx, "login.error.invalid-credentials")?;
+            let error = t(cx, "signin.error.invalid-credentials")?;
             view! {
-                login_form(error: Some(error), email: input.email)
+                signin_form(error: Some(error), email: input.email)
             }
         }
     }
@@ -211,7 +211,7 @@ async fn signup_form(cx: &Cx, error: Option<String>, name: String, email: String
     let email_label = t(cx, "form.email")?;
     let password_label = t(cx, "form.password")?;
     let submit_label = t(cx, "signup.submit")?;
-    let login_link = t(cx, "signup.login-link")?;
+    let signin_link = t(cx, "signup.signin-link")?;
     view! {
         <h1>(title)</h1>
         if let Some(error) = &error {
@@ -235,7 +235,7 @@ async fn signup_form(cx: &Cx, error: Option<String>, name: String, email: String
             </p>
             <button type="submit">(submit_label)</button>
         </form>
-        <p><a href=(href!(login))>(login_link)</a></p>
+        <p><a href=(href!(signin))>(signin_link)</a></p>
     }
 }
 
@@ -269,8 +269,8 @@ async fn signup_submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
 }
 
 /// Ends the session (idempotent) and returns home.
-#[route(POST "/logout")]
-async fn logout(cx: &Cx) -> topcoat::Result<SeeOther> {
+#[route(POST "/signout")]
+async fn signout(cx: &Cx) -> topcoat::Result<SeeOther> {
     sign_out(cx).await?;
     Ok(see_other(href!(home).resolve(cx)))
 }
