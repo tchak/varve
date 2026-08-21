@@ -77,3 +77,82 @@ pub async fn field(
         </div>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use topcoat::view::{attributes, view};
+
+    use super::field;
+    use crate::components::testing::render;
+
+    /// The rendered `<input ...>` tag, extracted so attribute
+    /// assertions cannot accidentally match the label or the error
+    /// paragraph.
+    fn input_tag(html: &str) -> &str {
+        let start = html.find("<input").expect("an <input> rendered");
+        let end = html[start..].find('>').expect("the <input> tag closes");
+        &html[start..start + end + 1]
+    }
+
+    #[test]
+    fn links_label_to_input_and_forwards_attrs() {
+        let html = render(async |cx| {
+            view! {
+                cx =>
+                field(
+                    id: "signin-email",
+                    label: "Email address",
+                    attrs: attributes! { type="email" name="email" class="mt-4" }
+                )
+            }
+        });
+
+        // The label carries the caption and points at the control.
+        assert!(html.contains(r#"for="signin-email""#), "{html}");
+        assert!(html.contains("Email address"), "{html}");
+        let tag = input_tag(&html);
+        assert!(tag.contains(r#"id="signin-email""#), "{tag}");
+        assert!(tag.contains(r#"type="email""#), "{tag}");
+        assert!(tag.contains(r#"name="email""#), "{tag}");
+        // The caller's class merged into the input's single class
+        // attribute instead of replacing or duplicating it.
+        assert_eq!(tag.matches("class=").count(), 1, "{tag}");
+        assert!(tag.contains("mt-4"), "{tag}");
+    }
+
+    #[test]
+    fn without_error_renders_no_error_wiring() {
+        let html = render(async |cx| {
+            view! { cx => field(id: "signin-email", label: "Email address") }
+        });
+
+        assert!(!html.contains("aria-invalid"), "{html}");
+        assert!(!html.contains("aria-describedby"), "{html}");
+        assert!(!html.contains("signin-email-error"), "{html}");
+        assert!(!html.contains("<p"), "{html}");
+    }
+
+    #[test]
+    fn with_error_wires_aria_and_renders_the_message() {
+        let html = render(async |cx| {
+            view! {
+                cx =>
+                field(
+                    id: "signin-email",
+                    label: "Email address",
+                    error: Some("Required field.".to_owned())
+                )
+            }
+        });
+
+        let tag = input_tag(&html);
+        assert!(tag.contains(r#"aria-invalid="true""#), "{tag}");
+        assert!(
+            tag.contains(r#"aria-describedby="signin-email-error""#),
+            "{tag}"
+        );
+        // The error paragraph carries the referenced id and the text.
+        assert!(html.contains(r#"<p id="signin-email-error""#), "{html}");
+        assert!(html.contains("Required field."), "{html}");
+    }
+}

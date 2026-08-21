@@ -118,15 +118,11 @@ async fn wrong_password_scenario(
     expect(alerts.first())
         .to_have_text("Incorrect email address or password.")
         .await?;
-    // Still on /signin; the email survives the re-render, the
-    // password never does.
+    // Still on /signin. The re-render's field details (email kept,
+    // password cleared) are the router-level test's contract
+    // (CLAUDE.md § Platform test policy: never re-assert what a
+    // lower level owns).
     expect_page(&page).to_have_url(&app.url("/signin")).await?;
-    expect(page.locator(locator!("#signin-email")))
-        .to_have_value(&email)
-        .await?;
-    expect(page.locator(locator!("#signin-password")))
-        .to_have_value("")
-        .await?;
     Ok(())
 }
 

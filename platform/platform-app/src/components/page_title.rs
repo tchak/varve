@@ -28,3 +28,21 @@ const PAGE_TITLE: StaticClass = class!("text-2xl font-semibold tracking-tight te
 pub async fn page_title(#[default] mut attrs: Attributes, #[default] child: View) -> Result {
     view! { <h1 class=(class!(PAGE_TITLE, attrs.remove("class"))) (attrs)>(child)</h1> }
 }
+
+#[cfg(test)]
+mod tests {
+    use topcoat::view::view;
+
+    use super::page_title;
+    use crate::components::testing::render;
+
+    #[test]
+    fn renders_the_heading_text_in_an_h1() {
+        let html = render(async |cx| {
+            view! { cx => page_title("Sign in") }
+        });
+        assert!(html.contains("<h1"), "{html}");
+        assert!(html.contains("Sign in"), "{html}");
+        assert!(html.contains("</h1>"), "{html}");
+    }
+}

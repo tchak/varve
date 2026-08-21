@@ -44,8 +44,11 @@ Three levels; always use the **lowest level that can prove the
 behavior**.
 
 1. **Component tests** — `#[cfg(test)]` beside the component: plain
-   `#[test]`, `CxTestBuilder` + `View::render` (the view executor
-   drives component futures itself; no runtime needed). Only for *our*
+   `#[test]`, no runtime — but component futures resolve at view
+   *build*, not render, so use the shared helper
+   `components::testing::render` (a `CxTestBuilder` Cx + a noop-waker
+   `block_on` driving the `view!` build, the pattern topcoat-view's
+   own unit tests use). Only for *our*
    pure presentational components (props in → HTML out, no IO); they
    own our components' markup contracts — aria wiring, slots, class
    merging. Never test vendored registry components: `registry_sync`

@@ -58,3 +58,62 @@ pub async fn site_header(
         </header>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use topcoat::view::{attributes, view};
+
+    use super::site_header;
+    use crate::components::testing::render;
+
+    // The signed-in/signed-out navigation is the `shell` layout's
+    // contract (it builds the child nodes), covered at router level
+    // in `tests/app/`; the component's own contract is the landmarks,
+    // the brand link, the child slot, and attrs forwarding.
+
+    #[test]
+    fn renders_landmarks_brand_link_and_children() {
+        let html = render(async |cx| {
+            view! {
+                cx =>
+                site_header(
+                    brand_label: "Varve",
+                    brand_href: "/",
+                    <a href="/signin">"Sign in"</a>
+                )
+            }
+        });
+
+        assert!(html.contains("<header"), "{html}");
+        assert!(html.contains("<nav"), "{html}");
+        // The brand link points home and carries the label.
+        assert!(html.contains(r#"<a href="/""#), "{html}");
+        assert!(html.contains("Varve"), "{html}");
+        // The child landed in the navigation area.
+        assert!(html.contains(r#"<a href="/signin""#), "{html}");
+        assert!(html.contains("Sign in"), "{html}");
+    }
+
+    #[test]
+    fn forwards_attrs_and_merges_class_onto_the_header() {
+        let html = render(async |cx| {
+            view! {
+                cx =>
+                site_header(
+                    brand_label: "Varve",
+                    brand_href: "/",
+                    attrs: attributes! { data-test="header" class="sticky" }
+                )
+            }
+        });
+
+        let start = html.find("<header").expect("a <header> rendered");
+        let end = html[start..].find('>').expect("the <header> tag closes");
+        let tag = &html[start..start + end + 1];
+        assert!(tag.contains(r#"data-test="header""#), "{tag}");
+        // The caller's class merged into the header's single class
+        // attribute instead of replacing or duplicating it.
+        assert_eq!(tag.matches("class=").count(), 1, "{tag}");
+        assert!(tag.contains("sticky"), "{tag}");
+    }
+}

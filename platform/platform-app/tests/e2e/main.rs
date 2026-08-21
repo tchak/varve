@@ -12,7 +12,7 @@
 //! after printing why, unless **both**
 //!
 //! 1. `VARVE_TEST_DATABASE_URL` is set (same scratch database as
-//!    `tests/app.rs`), and
+//!    `tests/app/`), and
 //! 2. at least one Playwright engine matching the bundled driver is
 //!    installed — a miss surfaces as the crate's
 //!    [`playwright_rs::Error::BrowserNotInstalled`] at launch. Each
@@ -39,7 +39,7 @@
 //! Tests share one database and run in parallel, so every test mints
 //! unique emails (unique per engine too — engines within one test
 //! share the database), uses a fresh browser context per engine, and
-//! never asserts on global counts (same rules as `tests/app.rs`). On
+//! never asserts on global counts (same rules as `tests/app/`). On
 //! failure a Playwright trace named after the scenario *and* engine
 //! (e.g. `signup-roundtrip.webkit.trace.zip`) is written under
 //! `CARGO_TARGET_TMPDIR` (the path is printed); open it at

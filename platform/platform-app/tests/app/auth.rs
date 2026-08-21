@@ -1,154 +1,16 @@
-//! Router-level tests over the real database, gated on
-//! `VARVE_TEST_DATABASE_URL` (the settled P.3 convention, same as
-//! `platform-core/tests/db.rs`): `cargo test --workspace` stays
-//! green without Postgres. Run for real with e.g.:
-//!
-//! ```text
-//! VARVE_TEST_DATABASE_URL=postgres://localhost/varve_platform_test \
-//!   cargo test -p platform-app
-//! ```
-//!
-//! Everything goes through `Router::handle` — no listener, no
-//! browser. Tests share one database and run in parallel, so every
-//! test mints unique emails and never asserts on global counts.
+//! Subject: authentication as header-and-markup contracts — the
+//! signin page, failure re-renders, the signup/signout round trip,
+//! session freshness, duplicate signup, and the cross-origin guard.
 
 use platform_app::auth::encode_token_hash;
 use topcoat::{
-    router::{
-        Body, Method, Router, StatusCode, header, request::Request, response::Response, to_bytes,
-    },
+    router::{StatusCode, header},
     session::Token,
 };
 
-/// Connects (applying migrations) and builds the app router; `None`
-/// (after printing why) when `VARVE_TEST_DATABASE_URL` is unset so
-/// the test passes vacuously. Connects one test at a time — see
-/// `platform-core/tests/db.rs` for why (unguarded concurrent
-/// migration application in toasty 0.10).
-async fn test_app() -> Option<(Router, toasty::Db)> {
-    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-    let url = match std::env::var("VARVE_TEST_DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            println!("skipped: VARVE_TEST_DATABASE_URL not set");
-            return None;
-        }
-    };
-    let _guard = CONNECT_LOCK.lock().await;
-    let db = platform_core::connect(&url).await.expect("connect");
-    Some((platform_app::router(db.clone(), None), db))
-}
-
-fn unique_email(tag: &str) -> String {
-    format!("{tag}-{}@example.test", uuid::Uuid::new_v4())
-}
-
-/// Builds a request; `headers` are `(name, value)` pairs.
-fn request(method: Method, path: &str, headers: &[(&str, &str)], body: Body) -> Request {
-    let mut builder = Request::builder().method(method).uri(path);
-    for (name, value) in headers {
-        builder = builder.header(*name, *value);
-    }
-    builder.body(body).unwrap()
-}
-
-fn get(path: &str, headers: &[(&str, &str)]) -> Request {
-    request(Method::GET, path, headers, Body::empty())
-}
-
-/// A `POST` with an `application/x-www-form-urlencoded` body.
-fn post(path: &str, headers: &[(&str, &str)], form: String) -> Request {
-    let mut all = vec![("content-type", "application/x-www-form-urlencoded")];
-    all.extend_from_slice(headers);
-    request(Method::POST, path, &all, Body::from(form))
-}
-
-/// Percent-encodes one form value conservatively (everything but
-/// unreserved characters), so emails and passwords survive
-/// `application/x-www-form-urlencoded` exactly.
-fn urlencode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-fn form_body(fields: &[(&str, &str)]) -> String {
-    fields
-        .iter()
-        .map(|(name, value)| format!("{name}={}", urlencode(value)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-async fn body_text(response: Response) -> String {
-    let (_parts, body) = response.into_parts();
-    let bytes = to_bytes(body, usize::MAX).await.unwrap();
-    String::from_utf8(bytes.to_vec()).unwrap()
-}
-
-/// The `name=value` pair of the session cookie a response set.
-fn session_cookie(response: &Response) -> Option<String> {
-    response
-        .headers()
-        .get_all(header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find(|value| value.contains("session="))
-        .map(|value| value.split(';').next().unwrap().to_owned())
-}
-
-/// Signs a fresh account up through `POST /signup`, returning
-/// `(email, session cookie)`. Asserts the 303-to-home contract.
-async fn signup(router: &Router, name: &str, email: &str, password: &str) -> String {
-    let response = router
-        .handle(post(
-            "/signup",
-            &[],
-            form_body(&[("name", name), ("email", email), ("password", password)]),
-        ))
-        .await;
-    assert_eq!(response.status(), StatusCode::SEE_OTHER);
-    assert_eq!(response.headers()[header::LOCATION], "/");
-    session_cookie(&response).expect("signup sets a session cookie")
-}
-
-#[tokio::test]
-async fn home_signed_out_prompts_signin_in_english_by_default() {
-    let Some((router, _db)) = test_app().await else {
-        return;
-    };
-    let response = router.handle(get("/", &[])).await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = body_text(response).await;
-    assert!(html.contains("Please sign in to continue."), "{html}");
-    assert!(html.contains("Sign in"), "{html}");
-    assert!(html.contains(r#"lang="en""#), "{html}");
-}
-
-#[tokio::test]
-async fn home_renders_french_from_accept_language() {
-    let Some((router, _db)) = test_app().await else {
-        return;
-    };
-    let response = router
-        .handle(get("/", &[("accept-language", "fr-CH, en;q=0.7")]))
-        .await;
-    let html = body_text(response).await;
-    assert!(
-        html.contains("Veuillez vous connecter pour continuer."),
-        "{html}"
-    );
-    assert!(html.contains("Se connecter"), "{html}");
-    assert!(html.contains(r#"lang="fr""#), "{html}");
-}
+use crate::harness::{
+    body_text, form_body, get, post, session_cookie, signup, test_app, unique_email,
+};
 
 #[tokio::test]
 async fn signin_page_renders_the_form() {
@@ -318,17 +180,4 @@ async fn cross_origin_post_is_rejected() {
         ))
         .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn unknown_url_renders_the_branded_not_found() {
-    let Some((router, _db)) = test_app().await else {
-        return;
-    };
-    let response = router.handle(get("/no/such/page", &[])).await;
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    let html = body_text(response).await;
-    // The layout rendered around the 404 (branding, header intact).
-    assert!(html.contains("Page not found."), "{html}");
-    assert!(html.contains("Varve"), "{html}");
 }
