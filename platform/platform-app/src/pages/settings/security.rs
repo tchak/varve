@@ -210,7 +210,7 @@ pub async fn page(cx: &Cx) -> Result {
                                             value=(row.id.as_str())
                                         >
                                         button(
-                                            variant: ButtonVariant::Outline,
+                                            variant: ButtonVariant::Destructive,
                                             size: ButtonSize::Sm,
                                             attrs: attributes! { type="submit" },
                                             (revoke_label.as_str())
