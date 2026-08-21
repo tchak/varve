@@ -35,6 +35,24 @@ their place by existing in DN.
    executes the same schema in-process that integrators call over HTTP,
    through the same principal context. The wire format is dogfooded at
    the fidelity edges (exports, signed logs — DESIGN §13.4).
+5. **Accessible by construction.** The platform is the successor of a
+   French public-service site, so accessibility is a legal duty
+   (RGAA 4.1 — loi 2005-102, décret 2019-768), not a polish item.
+   Target: **RGAA 4.1 / WCAG 2.2 AA** on every page. The means are
+   structural, not retrofitted: server-rendered HTML that is complete
+   without JavaScript; semantic landmarks and a single `<h1>` per
+   page; every control labelled, every error linked to its control
+   (`aria-describedby` / `aria-invalid`), every flash announced
+   (`role="alert"`); keyboard-complete with visible focus; `lang` on
+   every document. Each test level owns its share of the proof
+   (CLAUDE.md, platform test policy): component tests own aria
+   wiring, router tests run the static baseline lint over every HTML
+   response they fetch, e2e owns keyboard journeys and the rule
+   engine (axe-core) in a real browser. Vendored registry components
+   are pinned byte-for-byte (`registry_sync`); an accessibility defect
+   inside one is an upstream fix, never a local patch. Automated
+   checks catch roughly a third of WCAG failures: they stop
+   regressions, they are not the audit (P.9 Q12).
 
 ## P.2 Stack
 
@@ -421,6 +439,18 @@ everything shipped exists in DN and nothing shipped that doesn't.
     Decide before reviewer-facing timestamps land (P1's instruction
     views show submission times — off-by-one dates there are
     user-visible wrongness, not polish).
+12. **Accessibility audit and declaration.** P.1.5 is enforced
+    automatically only up to the baseline. Open: (a) the contrast
+    audit of the topcoat-ui theme tokens in both color schemes (the
+    theme is vendored — a failing token is an upstream conversation
+    or a recorded local override in our own stylesheet); (b) when to
+    run the first manual audit (screen readers, 200% zoom, Ara's RGAA
+    grid) — no later than the first reviewer-facing release, since
+    the public accessibility declaration (déclaration
+    d'accessibilité + schéma pluriannuel) that French administrations
+    must publish is derived from it; (c) whether the declaration is
+    a platform-rendered page (per deployment, with the deploying
+    administration's contact) or integrator-supplied content.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 

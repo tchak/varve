@@ -71,6 +71,18 @@ only when e2e adds real-browser semantics; never re-assert details a
 lower level already owns. DB-backed and browser tests gate on
 `VARVE_TEST_DATABASE_URL` (+ installed engines) and skip vacuously.
 
+**Accessibility is a core value** (PLATFORM.md P.1.5: RGAA 4.1 /
+WCAG 2.2 AA) and each level owns part of the proof. Component tests
+assert aria wiring (label↔control, `aria-describedby`/`aria-invalid`
+on errors, names on icon-only controls). Router tests run the static
+baseline lint automatically: `harness::body_text` lints every
+`text/html` response it reads (`lang`, one `h1`, heading order, `alt`,
+labelled controls, named buttons/links, landmarks) — never bypass it
+for a page; fix the page. E2e owns what needs a browser: keyboard
+journeys (focus order, Escape, focus return) and the axe-core rule
+engine. A violation inside a vendored registry component is an
+upstream fix, not a local patch.
+
 ## Version control: jj, not git
 
 This is a colocated jj (Jujutsu) repository; `.git` exists for tool interop.
