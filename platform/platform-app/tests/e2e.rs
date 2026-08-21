@@ -126,7 +126,7 @@ async fn e2e() -> Option<(Playwright, Browser, App)> {
         let _guard = CONNECT_LOCK.lock().await;
         platform_core::connect(&url).await.expect("connect")
     };
-    let router = platform_app::router(db.clone());
+    let router = platform_app::router(db.clone(), None);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind an ephemeral port");

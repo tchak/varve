@@ -21,16 +21,23 @@
 //!   [`platform_i18n::Catalogs::format`]; the provisional in-code
 //!   catalogs live in [`strings`].
 //!
+//! - Pages ([`pages`]) are composed from [`components`]: topcoat-ui
+//!   components vendored by `topcoat ui add` plus a few of our own in
+//!   the same style, styled with Tailwind against the theme tokens in
+//!   `styles.css` (the Tailwind input `build.rs` compiles).
+//!
 //! [`router`] assembles the app; `platform-server` serves it.
 
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod components;
 pub mod i18n;
 pub mod pages;
 pub mod strings;
 
 use topcoat::{
+    asset::{AssetBundle, RouterBuilderAssetExt},
     context::{Cx, app_context},
     cookie::RouterBuilderCookieExt,
     router::{Router, RouterBuilderDiscoverExt},
@@ -38,7 +45,16 @@ use topcoat::{
 };
 
 /// Builds the platform router over a connected database (from
-/// [`platform_core::connect`]).
+/// [`platform_core::connect`]) and, when one is supplied, an asset
+/// bundle.
+///
+/// `assets` carries the Tailwind stylesheet (and any future static
+/// files): pass the bundle `topcoat asset bundle` wrote next to the
+/// binary (`platform-server` does — see its `main`). With `None` the
+/// pages render without the stylesheet link — the shape router-level
+/// tests use, since a test binary has no bundle of its own and
+/// rendering an unbundled [`topcoat::asset::Asset`] panics by design
+/// (bundle and binary must come from the same build).
 ///
 /// Layer nesting is load-bearing: among same-path (root) layers the
 /// most recently registered runs outermost, so the chain below runs
@@ -51,14 +67,17 @@ use topcoat::{
 /// state-changing cross-origin browser requests are rejected with 403,
 /// and every state-changing route in [`pages`] is a POST, which is what
 /// makes that check sufficient (GETs are deliberately unchecked).
-pub fn router(db: toasty::Db) -> Router {
-    Router::builder()
+pub fn router(db: toasty::Db, assets: Option<AssetBundle>) -> Router {
+    let builder = Router::builder()
         .discover()
         .cookies()
         .sessions(auth::session_config())
         .app_context(db)
-        .app_context(strings::catalogs())
-        .build()
+        .app_context(strings::catalogs());
+    match assets {
+        Some(bundle) => builder.assets(bundle).build(),
+        None => builder.build(),
+    }
 }
 
 /// The app-context database handle, cloned per use ([`toasty::Db`] is a

@@ -3808,9 +3808,11 @@ dependencies = [
  "platform-i18n",
  "playwright-rs",
  "serde",
+ "serde_json",
  "toasty",
  "tokio",
  "topcoat",
+ "topcoat-ui",
  "uuid",
 ]
 
@@ -6031,6 +6033,8 @@ dependencies = [
  "topcoat-runtime",
  "topcoat-runtime-macro",
  "topcoat-session",
+ "topcoat-tailwind",
+ "topcoat-ui-registry",
  "topcoat-view",
  "topcoat-view-macro",
 ]
@@ -6314,6 +6318,37 @@ dependencies = [
  "topcoat-router",
  "web-time",
 ]
+
+[[package]]
+name = "topcoat-tailwind"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a330145b9aa08c4bafad74400e3b3fcb81c88b96f177e0dc4eba829e4fc5ac79"
+dependencies = [
+ "sha2 0.11.0",
+ "thiserror 2.0.20",
+ "topcoat-core",
+ "ureq",
+]
+
+[[package]]
+name = "topcoat-ui"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "478dc7282e822306620c1d48b6510eaa479ca2b8999e96982d18151af6dfde13"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.20",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
+name = "topcoat-ui-registry"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ea1e845c03eb8a75032be4b32eaa3964f0ccf03e0d0143634c5f540f80fcc14"
 
 [[package]]
 name = "topcoat-view"

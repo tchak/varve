@@ -1,0 +1,29 @@
+# Topcoat UI install state. Managed by `topcoat ui`.
+version = 1
+components_dir = "src/components"
+
+[theme]
+name = "neutral"
+registry = "topcoat"
+hash = "sha256:c7bdcb5ea4ff757611ba616e92178169b262be98155c06dfa2407584d51e7459"
+file = "styles.css"
+
+[registries.topcoat.components.alert]
+hash = "sha256:bb732eac12e2cfb8444dc4154f72fb4e5d25e4023d665b575d70cedea6ae5211"
+file = "src/components/alert.rs"
+
+[registries.topcoat.components.button]
+hash = "sha256:ba4ab32d87e4c9a982faf657258edd8cf2a0da904ece5976e70185eeb5808f57"
+file = "src/components/button.rs"
+
+[registries.topcoat.components.card]
+hash = "sha256:edfefa3c9ef8e98aedc2f5bad6db77aea7af04211722a23bdac7c532768a554d"
+file = "src/components/card.rs"
+
+[registries.topcoat.components.input]
+hash = "sha256:2640a13bb6147da23026022adc14b2811097e69e5f50ca25b30534d24e1dba5e"
+file = "src/components/input.rs"
+
+[registries.topcoat.components.label]
+hash = "sha256:ca749b5e7995b78ffb99e57cf01997282ee737cf34f5c8dc27bbdf143306823f"
+file = "src/components/label.rs"

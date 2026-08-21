@@ -16,12 +16,27 @@
 //! - `HOST` / `PORT` (optional): the listen address, default
 //!   `127.0.0.1:3000` — read by [`topcoat::start`].
 //!
+//! # Static assets (the Tailwind stylesheet)
+//!
+//! The pages' stylesheet is a topcoat asset: `topcoat asset bundle
+//! --package platform-server` (or `topcoat dev`) writes an `assets/`
+//! directory next to this binary, and [`AssetBundle::load`] picks it
+//! up at boot. Without a bundle (plain `cargo run` with no bundling
+//! step) the server comes up and serves every page *unstyled* — the
+//! layout omits the stylesheet link — with a warning on stderr;
+//! bundle and binary must come from the same build (asset IDs embed
+//! `OUT_DIR` paths), so a stale directory fails at render, not
+//! silently.
+//!
 //! Shutdown is graceful on Ctrl+C / `SIGTERM` (topcoat gives
 //! in-flight requests its shutdown timeout).
 
 #![forbid(unsafe_code)]
 
+use std::io;
 use std::process::ExitCode;
+
+use topcoat::asset::AssetBundle;
 
 /// Everything that can stop the server from coming up (or bring it
 /// down), each with an actionable message — a missing variable must
@@ -35,8 +50,10 @@ enum ServerError {
     MissingDatabaseUrl,
     #[error("connecting to the database (or applying migrations) failed: {0}")]
     Database(#[from] toasty::Error),
+    #[error("loading the asset bundle next to the executable failed: {0}")]
+    Assets(io::Error),
     #[error("serving failed: {0}")]
-    Serve(#[from] std::io::Error),
+    Serve(#[from] io::Error),
 }
 
 #[tokio::main]
@@ -54,7 +71,18 @@ async fn run() -> Result<(), ServerError> {
     let database_url =
         std::env::var("DATABASE_URL").map_err(|_| ServerError::MissingDatabaseUrl)?;
     let db = platform_core::connect(&database_url).await?;
-    let router = platform_app::router(db);
+    let assets = match AssetBundle::load() {
+        Ok(bundle) => Some(bundle),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            eprintln!(
+                "platform-server: no asset bundle next to the executable — serving without \
+                 the stylesheet; bundle with `topcoat asset bundle --package platform-server`"
+            );
+            None
+        }
+        Err(error) => return Err(ServerError::Assets(error)),
+    };
+    let router = platform_app::router(db, assets);
     topcoat::start(router).await?;
     Ok(())
 }

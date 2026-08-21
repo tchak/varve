@@ -14,7 +14,14 @@ platform-core = { version = "0.1.0", path = "../platform-core" }
 platform-i18n = { version = "0.1.0", path = "../platform-i18n" }
 serde = { version = "1.0.229", features = ["derive"] }
 toasty = "0.10.0"
-topcoat = "0.6.2"
+topcoat = { version = "0.6.2", features = ["tailwind", "ui"] }
+
+[build-dependencies]
+# The Tailwind build script (`build.rs`): `BuildConfig` needs the
+# `build` half of topcoat-tailwind, which the facade's `tailwind`
+# feature enables; default features off keeps the whole runtime
+# stack out of the build-dependency graph.
+topcoat = { version = "0.6.2", default-features = false, features = ["tailwind"] }
 
 [dev-dependencies]
 # Pinned exact: the crate bundles a specific Playwright driver, and the
@@ -24,3 +31,8 @@ topcoat = "0.6.2"
 playwright-rs = "=0.16.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.24.1", features = ["v4"] }
+serde_json = "1"
+# `tests/registry_sync.rs` pins the vendored components to the
+# registry crate (`topcoat-ui-registry`, pulled in by the `ui`
+# feature above) — the upstream pattern from demos/coffee-shop.
+topcoat-ui = "0.6.2"
