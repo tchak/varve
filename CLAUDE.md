@@ -38,6 +38,36 @@ CI also denies rustdoc warnings and replays the tracked fuzz seeds
 a PR with new-coverage seeds — locally, the `-merge=1` command in
 README).
 
+## Platform test policy (platform/ crates)
+
+Three levels; always use the **lowest level that can prove the
+behavior**.
+
+1. **Component tests** — `#[cfg(test)]` beside the component: plain
+   `#[test]`, `CxTestBuilder` + `View::render` (the view executor
+   drives component futures itself; no runtime needed). Only for *our*
+   pure presentational components (props in → HTML out, no IO); they
+   own our components' markup contracts — aria wiring, slots, class
+   merging. Never test vendored registry components: `registry_sync`
+   pins them byte-for-byte and their behavior is upstream's.
+2. **Router-level tests** — `tests/app/`: `Router::handle`, no
+   listener, no browser. They own route/status/redirect contracts,
+   form handling, session mechanics as headers, page markup and
+   strings, locale resolution from headers. Fast — the default home
+   for new behavior.
+3. **Browser e2e** — `tests/e2e/`: full journeys on every installed
+   Playwright engine. They own only what a real browser proves —
+   cookie acceptance, engine divergence, form encoding, redirect
+   following. Keep them few and journey-shaped.
+
+Both test dirs are one binary each: `main.rs` (doc + module list),
+`harness.rs` (all shared machinery), one module per **subject**
+(journeys/features: auth, i18n, shell, …) — never per page; a new
+subject is a new module. A journey may exist at router *and* e2e level
+only when e2e adds real-browser semantics; never re-assert details a
+lower level already owns. DB-backed and browser tests gate on
+`VARVE_TEST_DATABASE_URL` (+ installed engines) and skip vacuously.
+
 ## Version control: jj, not git
 
 This is a colocated jj (Jujutsu) repository; `.git` exists for tool interop.
