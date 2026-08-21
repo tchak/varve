@@ -31,6 +31,9 @@ wire). M1 and M2 machinery is built and awaits DN-internal data
 runs (`.github/workflows/ci.yml`): `cargo test --workspace` (307 tests
 incl. property suites), `cargo clippy --workspace --all-targets`,
 `cargo fmt --all --check` (rustfmt defaults are the style authority),
+`topcoat fmt platform` (formats `view!` macro bodies, which rustfmt
+leaves alone — not yet enforced by CI, so run it and commit the result;
+the root `Topcoat.toml` is only an editor-integration marker),
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM
 crate in any Tier 0–4 closure, serde direct only in `-wire`/`-value`);
 CI also denies rustdoc warnings and replays the tracked fuzz seeds
