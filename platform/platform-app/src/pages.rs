@@ -92,10 +92,27 @@ async fn redirect_to(cx: &Cx, location: String) -> Result {
 }
 
 /// One `{$email}` / `{$name}`-style argument map.
-fn one_arg(name: &str, value: &str) -> Args {
+fn one_arg(name: &str, value: impl Into<ArgValue>) -> Args {
     let mut args = Args::new();
-    args.insert(name.to_owned(), ArgValue::from(value));
+    args.insert(name.to_owned(), value.into());
     args
+}
+
+/// The UTC calendar date of an instant, as an i18n argument for
+/// `{$date :date ...}` messages (CLDR-formatted per locale by
+/// `platform-i18n`). **UTC is a stopgap**: rendering an instant as a
+/// civil date needs a time zone, and the platform has no per-account
+/// (or deployment) zone preference yet — near a midnight boundary the
+/// shown date can be off by one for the viewer. Every date shown in
+/// the UI goes through here so fixing the zone story fixes them all.
+fn utc_date_arg(ts: jiff::Timestamp) -> ArgValue {
+    let date = ts.to_zoned(jiff::tz::TimeZone::UTC).date();
+    ArgValue::date(
+        i32::from(date.year()),
+        date.month().unsigned_abs(),
+        date.day().unsigned_abs(),
+    )
+    .expect("a jiff civil date is a valid ISO date")
 }
 
 /// The Tailwind stylesheet's URL, when the router holds an asset
@@ -131,7 +148,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
         Some(principal) => Some(t_args(
             cx,
             "nav.signed-in-as",
-            &one_arg("email", &principal.email),
+            &one_arg("email", principal.email.as_str()),
         )?),
         None => None,
     };
@@ -199,7 +216,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
 async fn home(cx: &Cx) -> Result {
     let title = t(cx, "home.title")?;
     let message = match account(cx) {
-        Some(account) => t_args(cx, "home.greeting", &one_arg("name", &account.name))?,
+        Some(account) => t_args(cx, "home.greeting", &one_arg("name", account.name.as_str()))?,
         None => t(cx, "home.signed-out")?,
     };
     view! {

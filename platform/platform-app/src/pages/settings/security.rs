@@ -84,12 +84,12 @@ pub async fn page(cx: &Cx) -> Result {
         let created = t_args(
             cx,
             "settings.security.sessions.created",
-            &super::super::one_arg("date", &session.created_at.strftime("%Y-%m-%d").to_string()),
+            &super::super::one_arg("date", super::super::utc_date_arg(session.created_at)),
         )?;
         let expires = t_args(
             cx,
             "settings.security.sessions.expires",
-            &super::super::one_arg("date", &session.expires_at.strftime("%Y-%m-%d").to_string()),
+            &super::super::one_arg("date", super::super::utc_date_arg(session.expires_at)),
         )?;
         let ip = session.ip.as_deref().unwrap_or(&unknown);
         rows.push(Row {
