@@ -231,7 +231,12 @@ Copied verbatim from upstream `padamson/playwright-rust` at v0.16.0
 version bump. Local rules for this repo:
 
 - `playwright-rs` is an exact-pinned dev-dependency of `platform-app`
-  only; e2e tests live in `platform/platform-app/tests/e2e.rs`.
+  only; e2e tests are one binary, `platform/platform-app/tests/e2e/`,
+  split by SUBJECT (journeys, not pages): `harness.rs` holds the
+  shared machinery; each other module is one subject (`auth.rs`,
+  `i18n.rs`, ...). A new subject = a new module; anything two subjects
+  need goes in the harness. Filter with `cargo test --test e2e
+  auth::`.
 - Browsers install once via
   `cargo run -p platform-app --example install-browsers -- chromium`
   (the vendored example; versions ride Cargo.lock — never
