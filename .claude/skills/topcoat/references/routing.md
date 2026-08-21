@@ -162,6 +162,20 @@ pub fn router() -> topcoat::router::Router {
 - `module_router!` registers module-derived handlers only; add `.discover()`
   for explicit-path handlers, fonts, procedures, shards, or register by hand.
 - Two module-derived layouts (or layers) at the same logical path are rejected.
+- **Field note (verified 2026-08-21): `module_router!` takes no root
+  argument** — it roots at the *calling module* (expands to
+  `ModuleRouterBuilder::new(module_path!())`). Call it inside the
+  route-root module (a one-line `pub(crate) fn builder() ->
+  RouterBuilder` there; chain cookies/sessions/etc. in lib.rs), never
+  from lib.rs — calling it in the crate root would make `pages` a
+  `/pages` segment. Module-derived items outside the calling module's
+  subtree panic at build. Bare `not_found!()` expands to a
+  `/{*rest}`-style CatchAll module registered by `module_router!`
+  itself; the macro's internal module inventory and a chained
+  `.discover()`'s explicit-path inventory are separate — no double
+  registration. Convention (coffee-shop demo + this repo): GET handler
+  named `page`, POST named `submit`, shared helpers in the parent
+  module via `super::`.
 
 ## Path parameters
 
