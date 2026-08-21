@@ -38,11 +38,11 @@ struct Credentials {
 /// submission failed, and a [`card`] holding the [`field`]s.
 #[component]
 async fn signin_form(cx: &Cx, error: Option<String>, email: String) -> Result {
-    let title = t(cx, "signin.title")?;
-    let email_label = t(cx, "form.email")?;
-    let password_label = t(cx, "form.password")?;
-    let submit_label = t(cx, "signin.submit")?;
-    let signup_link = t(cx, "signin.signup-link")?;
+    let title = t(cx, "signin.title").await?;
+    let email_label = t(cx, "form.email").await?;
+    let password_label = t(cx, "form.password").await?;
+    let submit_label = t(cx, "signin.submit").await?;
+    let signup_link = t(cx, "signin.signup-link").await?;
     view! {
         <div class="mx-auto flex w-full max-w-sm flex-col gap-6">
             page_title((title))
@@ -120,7 +120,7 @@ async fn submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
             redirect_to(cx, href!(super::home).resolve(cx)).await
         }
         None => {
-            let error = t(cx, "signin.error.invalid-credentials")?;
+            let error = t(cx, "signin.error.invalid-credentials").await?;
             view! { signin_form(error: Some(error), email: input.email) }
         }
     }

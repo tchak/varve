@@ -9,7 +9,7 @@ use topcoat::{
     icon::{IconData, icon, iconify::iconify_icon},
     router::{
         content::Form,
-        error::{RouterErrorExt, SeeOther, bad_request, see_other},
+        error::{SeeOther, bad_request, see_other},
         href, page, route,
     },
     session,
@@ -17,7 +17,7 @@ use topcoat::{
 };
 
 use crate::{
-    auth::{account, encode_token_hash},
+    auth::{account, encode_token_hash, require_account},
     components::{
         badge::{BadgeVariant, badge},
         button::{ButtonSize, ButtonVariant, button},
@@ -122,20 +122,17 @@ async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid:
 /// current row without parsing the badge text.
 #[page]
 pub async fn page(cx: &Cx) -> Result {
-    // The settings gate (`super::gate`) already turned anonymous
-    // requests away; a missing account here is a wiring defect, not
-    // a user state.
-    let account = account(cx).ok_or_unauthorized()?;
+    let account = require_account(cx).await?;
     let mut db = db(cx);
     let sessions =
         platform_core::list_live_sessions(&mut db, account.id, jiff::Timestamp::now()).await?;
     let current_id = current_session_id(cx, &mut db).await?;
 
-    let sessions_title = t(cx, "settings.security.sessions.title")?;
-    let current_label = t(cx, "settings.security.sessions.current")?;
-    let revoke_label = t(cx, "settings.security.sessions.revoke")?;
-    let unknown = t(cx, "settings.security.sessions.unknown")?;
-    let unknown_browser = t(cx, "settings.security.sessions.unknown-browser")?;
+    let sessions_title = t(cx, "settings.security.sessions.title").await?;
+    let current_label = t(cx, "settings.security.sessions.current").await?;
+    let revoke_label = t(cx, "settings.security.sessions.revoke").await?;
+    let unknown = t(cx, "settings.security.sessions.unknown").await?;
+    let unknown_browser = t(cx, "settings.security.sessions.unknown-browser").await?;
 
     let mut rows = Vec::with_capacity(sessions.len());
     for session in &sessions {
@@ -143,12 +140,14 @@ pub async fn page(cx: &Cx) -> Result {
             cx,
             "settings.security.sessions.created",
             &super::super::one_arg("date", super::super::utc_date_arg(session.created_at)),
-        )?;
+        )
+        .await?;
         let expires = t_args(
             cx,
             "settings.security.sessions.expires",
             &super::super::one_arg("date", super::super::utc_date_arg(session.expires_at)),
-        )?;
+        )
+        .await?;
         let ip = session.ip.as_deref().unwrap_or(&unknown);
         let browser = session.user_agent.as_deref().and_then(ua::describe);
         rows.push(Row {
@@ -238,7 +237,12 @@ pub async fn page(cx: &Cx) -> Result {
 /// landing home like `/signout`.
 #[route(POST)]
 pub async fn submit(cx: &Cx, Form(input): Form<Revocation>) -> topcoat::Result<SeeOther> {
-    let account_id = account(cx).ok_or_unauthorized()?.id;
+    // A `#[route]`, so the settings layout's redirect does not
+    // apply: answer the anonymous case the same way explicitly.
+    let Some(account) = account(cx).await? else {
+        return Ok(see_other(super::signin_location(cx)));
+    };
+    let account_id = account.id;
     let session_id: uuid::Uuid = input
         .session_id
         .parse()

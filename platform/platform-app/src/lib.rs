@@ -52,8 +52,9 @@ use topcoat::{
 /// The route table is the [`pages`] module tree: `pages::builder`
 /// calls `module_router!` in the route root, so every pathless
 /// handler under [`pages`] registers at its module-derived path.
-/// `.discover()` is still needed on top for the explicit-path items
-/// collected at link time — [`auth`]'s request-state layer at `/`.
+/// `.discover()` is still chained for explicit-path items collected
+/// at link time (fonts, procedures, shards) — none yet; it costs
+/// nothing and keeps the registration shape the docs show.
 ///
 /// `assets` carries the Tailwind stylesheet (and any future static
 /// files): pass the bundle `topcoat asset bundle` wrote next to the
@@ -63,12 +64,12 @@ use topcoat::{
 /// rendering an unbundled [`topcoat::asset::Asset`] panics by design
 /// (bundle and binary must come from the same build).
 ///
-/// Layer nesting is load-bearing: among same-path (root) layers the
-/// most recently registered runs outermost, so the chain below runs
-/// sessions → cookies → [`auth`]'s request-state layer (discovered
-/// first, hence innermost) → handlers. The request-state layer needs
-/// both the session cell and the cookie jar in scope to resolve the
-/// presented token, which this ordering guarantees.
+/// The app registers no layers of its own: the principal and the
+/// locale are request functions ([`auth`], [`i18n`]) that handlers
+/// call on demand, so only topcoat's cookie and session layers wrap
+/// the handlers (sessions outermost — among root layers the most
+/// recently registered runs outermost — then cookies, which
+/// [`auth`]'s session lookup reads through).
 ///
 /// The router keeps topcoat's default [`topcoat::router::OriginPolicy`]:
 /// state-changing cross-origin browser requests are rejected with 403,

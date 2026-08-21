@@ -7,16 +7,12 @@ use serde::Deserialize;
 use topcoat::{
     Result,
     context::Cx,
-    router::{
-        content::Form,
-        error::{RouterErrorExt, bad_request},
-        href, page,
-    },
+    router::{content::Form, error::bad_request, href, page},
     view::{attributes, component, view},
 };
 
 use crate::{
-    auth::account,
+    auth::require_account,
     components::{
         button::button,
         card::{card, card_content, card_footer, card_header, card_title},
@@ -50,13 +46,13 @@ struct ProfileUpdate {
 /// submit a locale the platform serves.
 #[component]
 async fn profile_card(cx: &Cx, name: String, locale: String, name_error: Option<String>) -> Result {
-    let profile_title = t(cx, "settings.account.profile.title")?;
-    let name_label = t(cx, "form.name")?;
-    let language_label = t(cx, "form.language")?;
-    let save_label = t(cx, "settings.account.profile.save")?;
+    let profile_title = t(cx, "settings.account.profile.title").await?;
+    let name_label = t(cx, "form.name").await?;
+    let language_label = t(cx, "form.language").await?;
+    let save_label = t(cx, "settings.account.profile.save").await?;
     let mut options = Vec::with_capacity(SUPPORTED_LOCALES.len());
     for supported in SUPPORTED_LOCALES {
-        options.push((*supported, t(cx, &format!("locale.{supported}"))?));
+        options.push((*supported, t(cx, &format!("locale.{supported}")).await?));
     }
     // The card is a gapped column of sections; `contents` keeps the
     // form transparent to that layout while it wraps both the fields
@@ -112,11 +108,8 @@ async fn account_cards(
     locale: String,
     name_error: Option<String>,
 ) -> Result {
-    // The settings gate (`super::gate`) already turned anonymous
-    // requests away; a missing account here is a wiring defect, not
-    // a user state.
-    let email = account(cx).ok_or_unauthorized()?.email.clone();
-    let email_title = t(cx, "settings.account.email.title")?;
+    let email = require_account(cx).await?.email.clone();
+    let email_title = t(cx, "settings.account.email.title").await?;
     view! {
         settings_shell(
             active: Tab::Account,
@@ -134,14 +127,14 @@ async fn account_cards(
 /// The account tab. The form shows the stored name, and the request
 /// locale as the selected language: [`request_locale`] is already
 /// "the account's stored preference when supported, else the
-/// `Accept-Language` negotiation, else English" (the root layer's
-/// `resolve_locale`), which is exactly the value the select should
-/// present — no second resolution here.
+/// `Accept-Language` negotiation, else English" (`resolve_locale`),
+/// which is exactly the value the select should present — no second
+/// resolution here.
 #[page]
 pub async fn page(cx: &Cx) -> Result {
-    let account = account(cx).ok_or_unauthorized()?;
+    let account = require_account(cx).await?;
     let name = account.name.clone();
-    let locale = request_locale(cx).to_string();
+    let locale = request_locale(cx).await?.to_string();
     view! { account_cards(name: name, locale: locale, name_error: None) }
 }
 
@@ -159,13 +152,13 @@ pub async fn page(cx: &Cx) -> Result {
 /// request, not a friendly re-render.
 #[page(POST)]
 async fn submit(cx: &Cx, Form(input): Form<ProfileUpdate>) -> Result {
-    let account_id = account(cx).ok_or_unauthorized()?.id;
+    let account_id = require_account(cx).await?.id;
     if !SUPPORTED_LOCALES.contains(&input.locale.as_str()) {
         return Err(bad_request("locale is not supported").into());
     }
     let name = input.name.trim();
     if name.is_empty() {
-        let error = t(cx, "settings.account.profile.error.name-required")?;
+        let error = t(cx, "settings.account.profile.error.name-required").await?;
         return view! {
             account_cards(
                 name: String::new(),

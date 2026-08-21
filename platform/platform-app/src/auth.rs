@@ -9,28 +9,31 @@
 //! opaque string. Raw tokens never appear on this side of the seam:
 //! everything this module touches is already hashed.
 //!
-//! Principal resolution is the root request-state layer
-//! (`resolve_request_state`): it resolves the presented token to a
-//! live session row, loads the [`Account`], and scopes the derived
-//! [`Principal`] — together with the resolved request locale
-//! ([`crate::i18n`]) — into the request context via [`Cx::with_many`].
-//! Pages read the result with [`principal`] / [`account`]; below the
-//! layer, authentication is plain data in `Cx`, per the "functions,
-//! not middlewares" idiom.
+//! Principal resolution is a set of request functions, per topcoat's
+//! "functions, not middlewares" idiom: [`account`] resolves the
+//! presented token to a live session row and loads the [`Account`],
+//! [`principal`] derives the [`Principal`] from it, and
+//! [`require_account`] fails closed with an `UnauthorizedError`.
+//! Each is `#[memoize]`d, so however many layouts, pages, and
+//! components ask during one request, the session lookup runs at
+//! most once — and a request nothing asks on (a public page) never
+//! touches session storage at all. Nothing is resolved up front and
+//! nothing is stashed in `Cx`; a handler that needs the principal
+//! asks for it where it needs it.
 //!
 //! Cross-origin protection is the router's default
 //! [`topcoat::router::OriginPolicy`] (403 on state-changing
 //! cross-origin browser requests), not anything session-specific;
 //! this module only relies on every state change being a POST.
 
+use std::sync::Arc;
+
 use platform_core::{Account, DEFAULT_SESSION_TTL, Principal};
 use topcoat::{
-    context::{Cx, try_request_context},
-    router::{Body, Next, header, layer, request, response::Response},
+    context::{Cx, memoize},
+    router::{error::RouterErrorExt, header, request},
     session::{self, SessionConfig, TokenHash},
 };
-
-use crate::i18n::{self, RequestLocale};
 
 /// The topcoat session lifetime: the same 14 days as
 /// [`DEFAULT_SESSION_TTL`], so the cookie's `Max-Age` and the stored
@@ -60,36 +63,32 @@ pub fn encode_token_hash(hash: &TokenHash) -> String {
     out
 }
 
-/// The request's resolved principal, scoped into `Cx` by the
-/// request-state layer. `None` inside means "no authenticated
-/// session"; the wrapper being absent altogether means the layer did
-/// not run (a test context, or a request the router never matched).
-pub struct CurrentPrincipal(pub Option<Principal>);
+/// A session-resolution failure as the memoized functions cache it.
+/// `#[memoize]` hands every caller in the request the same stored
+/// outcome, so the underlying error lives behind an `Arc` and each
+/// caller receives a fresh `topcoat::Error` wrapping it (the
+/// original stays reachable as the `source`).
+#[derive(Debug, Clone)]
+struct ResolutionError(Arc<topcoat::Error>);
 
-/// The account row the principal was derived from, scoped alongside
-/// [`CurrentPrincipal`]. The row was already loaded to build the
-/// principal; keeping it lets pages show account data ([`Principal`]
-/// deliberately carries only the identity core — e.g. no display
-/// name) without a second query.
-pub struct CurrentAccount(pub Option<Account>);
-
-/// The authenticated principal of this request, if any. This is the
-/// one question pages ask (P.7: everything resolves to a `Principal`
-/// before execution).
-pub fn principal(cx: &Cx) -> Option<&Principal> {
-    try_request_context::<CurrentPrincipal>(cx).and_then(|current| current.0.as_ref())
+impl std::fmt::Display for ResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.0, f)
+    }
 }
 
-/// The authenticated account row of this request, if any.
-pub fn account(cx: &Cx) -> Option<&Account> {
-    try_request_context::<CurrentAccount>(cx).and_then(|current| current.0.as_ref())
+impl std::error::Error for ResolutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        let inner: &(dyn std::error::Error + Send + Sync + 'static) = (*self.0).as_ref();
+        Some(inner)
+    }
 }
 
 /// Resolves the presented session token to its account: hash lookup
 /// via [`platform_core::find_live_session`] (expired rows are absent
 /// by construction), then the account row. A session pointing at a
 /// deleted account resolves to `None`, not an error.
-async fn load_account(cx: &Cx) -> topcoat::Result<Option<Account>> {
+async fn resolve_account(cx: &Cx) -> topcoat::Result<Option<Account>> {
     let Some(hash) = session::token_hash(cx).await? else {
         return Ok(None);
     };
@@ -106,26 +105,49 @@ async fn load_account(cx: &Cx) -> topcoat::Result<Option<Account>> {
         .await?)
 }
 
-/// The root request-state layer: resolves principal and locale once
-/// per request and scopes them for everything below. Registered by
-/// discovery; [`crate::router`] documents why it must nest inside the
-/// cookie and session layers.
-#[layer("/")]
-async fn resolve_request_state(cx: &Cx, body: Body, next: Next<'_>) -> topcoat::Result<Response> {
-    let account = load_account(cx).await?;
-    let principal = account.as_ref().map(Principal::from_account);
-    let locale = i18n::resolve_locale(
-        principal.as_ref().and_then(|p| p.locale.as_deref()),
-        request::headers(cx)
-            .get(header::ACCEPT_LANGUAGE)
-            .and_then(|value| value.to_str().ok()),
-    );
-    let cx = cx.with_many((
-        CurrentPrincipal(principal),
-        CurrentAccount(account),
-        RequestLocale(locale),
-    ));
-    next.run(&cx, body).await
+/// [`resolve_account`], once per request.
+#[memoize]
+async fn load_account(cx: &Cx) -> Result<Option<Account>, ResolutionError> {
+    resolve_account(cx)
+        .await
+        .map_err(|error| ResolutionError(Arc::new(error)))
+}
+
+/// The principal derived from [`load_account`], once per request.
+#[memoize]
+async fn load_principal(cx: &Cx) -> Result<Option<Principal>, ResolutionError> {
+    let account = load_account(cx).await.as_ref().map_err(Clone::clone)?;
+    Ok(account.as_ref().map(Principal::from_account))
+}
+
+/// The authenticated account row of this request, if any. The row
+/// was loaded to derive the principal; exposing it lets pages show
+/// account data ([`Principal`] deliberately carries only the
+/// identity core — e.g. no display name) without a second query.
+pub async fn account(cx: &Cx) -> topcoat::Result<Option<&Account>> {
+    match load_account(cx).await {
+        Ok(account) => Ok(account.as_ref()),
+        Err(error) => Err(error.clone().into()),
+    }
+}
+
+/// The authenticated principal of this request, if any. This is the
+/// one question pages ask (P.7: everything resolves to a `Principal`
+/// before execution).
+pub async fn principal(cx: &Cx) -> topcoat::Result<Option<&Principal>> {
+    match load_principal(cx).await {
+        Ok(principal) => Ok(principal.as_ref()),
+        Err(error) => Err(error.clone().into()),
+    }
+}
+
+/// The authenticated account row, or topcoat's `UnauthorizedError`
+/// (401) when the request carries no live session. The guard for
+/// signed-in handlers: calling it is what protects a page — a
+/// subtree that wants a friendlier answer than 401 maps the error in
+/// its layout (the `/settings` subtree does).
+pub async fn require_account(cx: &Cx) -> topcoat::Result<&Account> {
+    Ok(account(cx).await?.ok_or_unauthorized()?)
 }
 
 /// The request's `User-Agent`, when the client sent a valid-UTF-8

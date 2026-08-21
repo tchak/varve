@@ -2,15 +2,17 @@
 //! settings area — the [`account`] and [`security`] tabs and the
 //! shared shell they render inside.
 //!
-//! **The gate lives here, once.** [`gate`] is a module-derived layer
-//! at `/settings`, so it wraps every handler in this subtree (the
-//! prefix rule matches registered paths segment-by-segment): an
-//! anonymous request to any `/settings` path answers 303 to
-//! `/signin` before any page runs, and no page below re-checks. A
-//! layer (not a layout) because the redirect must short-circuit
-//! *before* the handler executes, not dress its output; it nests
-//! inside [`crate::auth`]'s root request-state layer (least-specific
-//! outermost), so [`principal`] is already resolved when it runs.
+//! **Every handler here guards itself** by asking for the account
+//! ([`crate::auth::require_account`]), per topcoat's "functions, not
+//! middlewares" idiom: an anonymous request fails closed with an
+//! `UnauthorizedError` before the handler does anything else. What
+//! this module adds, once, is the *friendly* answer: [`gate`] is a
+//! module-derived layout at `/settings` that turns that error into a
+//! 303 to `/signin` for every page in the subtree (layouts nest
+//! inside the root `shell` layout, so the redirect still carries the
+//! shell's status/headers plumbing). The security tab's revocation
+//! POST is a `#[route]`, which layouts do not wrap; it answers the
+//! same redirect explicitly via [`signin_location`].
 //!
 //! `/settings` itself carries no content: its [`page`] answers 303
 //! to the account tab, the area's landing place.
@@ -21,17 +23,12 @@ mod security;
 use topcoat::{
     Result,
     context::Cx,
-    router::{
-        Body, Next,
-        error::see_other,
-        href, layer, page,
-        response::{IntoResponse, Response},
-    },
+    router::{error::UnauthorizedError, href, layout, page},
     view::{View, attributes, component, view},
 };
 
 use crate::{
-    auth::principal,
+    auth::require_account,
     components::{
         page_title::page_title,
         tabs::{tabs, tabs_content, tabs_list, tabs_trigger},
@@ -47,21 +44,30 @@ enum Tab {
     Security,
 }
 
-/// The signed-in gate for the whole `/settings` subtree (module
-/// docs): anonymous requests answer 303 to `/signin` without running
-/// the handler. Checked here once — pages below assume a principal.
-#[layer]
-async fn gate(cx: &Cx, body: Body, next: Next<'_>) -> topcoat::Result<Response> {
-    if principal(cx).is_none() {
-        return see_other(href!(super::signin::page).resolve(cx)).into_response(cx);
+/// Where an anonymous request to the settings area is sent.
+pub(super) fn signin_location(cx: &Cx) -> String {
+    href!(super::signin::page).resolve(cx)
+}
+
+/// The friendly face of the signed-in guard for every page in the
+/// `/settings` subtree (module docs): a page that failed closed with
+/// `UnauthorizedError` answers 303 to `/signin` instead of a bare
+/// 401. Any other outcome passes through untouched.
+#[layout]
+async fn gate(cx: &Cx, slot: Result) -> Result {
+    match slot {
+        Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
+            super::redirect_to(cx, signin_location(cx)).await
+        }
+        other => other,
     }
-    next.run(cx, body).await
 }
 
 /// `/settings` has no content of its own: 303 to the account tab.
 /// `pub` so the shell's account menu can link here with `href!`.
 #[page]
 pub async fn page(cx: &Cx) -> Result {
+    require_account(cx).await?;
     super::redirect_to(cx, href!(account::page).resolve(cx)).await
 }
 
@@ -77,9 +83,9 @@ pub async fn page(cx: &Cx) -> Result {
 /// navigation still lands on it.
 #[component]
 async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
-    let title = t(cx, "settings.title")?;
-    let account_label = t(cx, "settings.tab.account")?;
-    let security_label = t(cx, "settings.tab.security")?;
+    let title = t(cx, "settings.title").await?;
+    let account_label = t(cx, "settings.tab.account").await?;
+    let security_label = t(cx, "settings.tab.security").await?;
     let panel_heading = match active {
         Tab::Account => account_label.clone(),
         Tab::Security => security_label.clone(),

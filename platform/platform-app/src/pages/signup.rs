@@ -37,12 +37,12 @@ struct Registration {
 /// re-render; same composition as [`signin_form`](super::signin).
 #[component]
 async fn signup_form(cx: &Cx, error: Option<String>, name: String, email: String) -> Result {
-    let title = t(cx, "signup.title")?;
-    let name_label = t(cx, "form.name")?;
-    let email_label = t(cx, "form.email")?;
-    let password_label = t(cx, "form.password")?;
-    let submit_label = t(cx, "signup.submit")?;
-    let signin_link = t(cx, "signup.signin-link")?;
+    let title = t(cx, "signup.title").await?;
+    let name_label = t(cx, "form.name").await?;
+    let email_label = t(cx, "form.email").await?;
+    let password_label = t(cx, "form.password").await?;
+    let submit_label = t(cx, "signup.submit").await?;
+    let signin_link = t(cx, "signup.signin-link").await?;
     view! {
         <div class="mx-auto flex w-full max-w-sm flex-col gap-6">
             page_title((title))
@@ -120,9 +120,9 @@ pub async fn page() -> Result {
 /// submissions cannot both pass).
 ///
 /// The new account's locale preference is this request's *resolved*
-/// locale ([`request_locale`] — the `RequestLocale` the root layer
-/// scoped, already reduced by `resolve_locale` to a supported tag or
-/// the English fallback), not the raw `Accept-Language` header.
+/// locale ([`request_locale`], already reduced by `resolve_locale`
+/// to a supported tag or the English fallback), not the raw
+/// `Accept-Language` header.
 /// Storing the resolved value is deliberate: it records the language
 /// the user actually signed up in, always names a locale the
 /// platform can serve, and — because the stored preference wins over
@@ -132,7 +132,7 @@ pub async fn page() -> Result {
 #[page(POST)]
 async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
     let mut db = db(cx);
-    let locale = request_locale(cx).to_string();
+    let locale = request_locale(cx).await?.to_string();
     match platform_core::register(
         &mut db,
         &input.email,
@@ -147,7 +147,7 @@ async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
             redirect_to(cx, href!(super::home).resolve(cx)).await
         }
         Err(RegisterError::EmailTaken) => {
-            let error = t(cx, "signup.error.email-taken")?;
+            let error = t(cx, "signup.error.email-taken").await?;
             view! {
                 signup_form(error: Some(error), name: input.name, email: input.email)
             }

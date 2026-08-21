@@ -7,9 +7,9 @@
 //! here pathlessly, and each submodule derives its URL from its
 //! name — `signin` serves `/signin`, `signup` `/signup`,
 //! `signout` `/signout`, and the `settings` subtree
-//! `/settings/{account,security}` (its signed-in gate is a
-//! module-derived layer — see the `settings` module docs). No
-//! handler carries a path string. A
+//! `/settings/{account,security}` (whose handlers guard themselves
+//! and whose layout turns the 401 into a `/signin` redirect — see
+//! the `settings` module docs). No handler carries a path string. A
 //! module's GET page is named `page` and its POST handler `submit`
 //! (both share the module's derived path); shared helpers
 //! (`redirect_to`, `one_arg`, `stylesheet_href`) sit in this
@@ -157,11 +157,11 @@ const MENU_LINK: StaticClass = class!(
 /// catch-all or any page) instead of letting it bubble to a bare 404.
 #[layout]
 async fn shell(cx: &Cx, slot: Result) -> Result {
-    let lang = request_locale(cx).to_string();
-    let title = t(cx, "app.title")?;
+    let lang = request_locale(cx).await?.to_string();
+    let title = t(cx, "app.title").await?;
     let slot = match slot {
         Err(error) if error.downcast_ref::<NotFoundError>().is_some() => {
-            let message = t(cx, "error.not-found")?;
+            let message = t(cx, "error.not-found").await?;
             view! {
                 (StatusCode::NOT_FOUND)
                 page_title((message))
@@ -169,12 +169,14 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
         }
         other => other,
     };
-    let account_email = principal(cx).map(|principal| principal.email.clone());
-    let account_menu_label = t(cx, "nav.account-menu")?;
-    let settings_label = t(cx, "settings.title")?;
-    let sign_in_label = t(cx, "nav.sign-in")?;
-    let sign_up_label = t(cx, "nav.sign-up")?;
-    let sign_out_label = t(cx, "nav.sign-out")?;
+    let account_email = principal(cx)
+        .await?
+        .map(|principal| principal.email.clone());
+    let account_menu_label = t(cx, "nav.account-menu").await?;
+    let settings_label = t(cx, "settings.title").await?;
+    let sign_in_label = t(cx, "nav.sign-in").await?;
+    let sign_up_label = t(cx, "nav.sign-up").await?;
+    let sign_out_label = t(cx, "nav.sign-out").await?;
     view! {
         <!DOCTYPE html>
         <html lang=(lang)>
@@ -256,14 +258,15 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
 }
 
 /// Home: a greeting for the signed-in account (by display name, off
-/// the account row the request-state layer already loaded), a
-/// sign-in prompt otherwise.
+/// the memoized account row), a sign-in prompt otherwise.
 #[page]
 async fn home(cx: &Cx) -> Result {
-    let title = t(cx, "home.title")?;
-    let message = match account(cx) {
-        Some(account) => t_args(cx, "home.greeting", &one_arg("name", account.name.as_str()))?,
-        None => t(cx, "home.signed-out")?,
+    let title = t(cx, "home.title").await?;
+    let message = match account(cx).await? {
+        Some(account) => {
+            t_args(cx, "home.greeting", &one_arg("name", account.name.as_str())).await?
+        }
+        None => t(cx, "home.signed-out").await?,
     };
     view! {
         <section class="flex flex-col gap-3">

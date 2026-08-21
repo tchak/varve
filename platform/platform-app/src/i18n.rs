@@ -16,16 +16,20 @@
 //! [`platform_i18n::Catalogs`] fallback chain is `[en]`: an
 //! unnormalized regional tag would silently skip the French catalog.
 //!
-//! The resolved [`Locale`] is scoped into `Cx` as [`RequestLocale`]
-//! by the request-state layer ([`crate::auth`]); [`t`] / [`t_args`]
-//! format message ids against the app's catalogs with it. Format-time
+//! [`request_locale`] resolves it on demand from the (memoized)
+//! principal and the request headers — a request function, not a
+//! layer; [`t`] / [`t_args`] format message ids against the app's
+//! catalogs with it. Format-time
 //! [`platform_i18n::Warning`]s (missing argument, unknown function)
 //! are already embedded as MF2 fallback text in the output; P0 drops
 //! the warning list rather than logging it — observability arrives
 //! with the platform's logging story.
 
 use platform_i18n::{Args, Catalogs, Locale};
-use topcoat::context::{Cx, app_context, try_request_context};
+use topcoat::{
+    context::{Cx, app_context},
+    router::{header, request},
+};
 
 /// The languages the platform ships catalogs for (P.3: English and
 /// French), by primary subtag. Order is meaningless; resolution
@@ -34,10 +38,6 @@ pub const SUPPORTED_LOCALES: &[&str] = &["en", "fr"];
 
 /// The final fallback, and the catalogs' fallback chain.
 pub const DEFAULT_LOCALE: &str = "en";
-
-/// The request's resolved locale, scoped into `Cx` by the
-/// request-state layer ([`crate::auth`]).
-pub struct RequestLocale(pub Locale);
 
 /// Parses one of the supported base tags; infallible by construction.
 fn supported_locale(tag: &str) -> Locale {
@@ -119,29 +119,40 @@ fn negotiate(header: &str) -> Option<Locale> {
         .find_map(|(_, tag)| match_supported(tag))
 }
 
-/// The locale resolved for this request. Falls back to the default
-/// when the request-state layer did not run (a bare test context) so
-/// rendering never panics over a missing locale.
-pub fn request_locale(cx: &Cx) -> Locale {
-    try_request_context::<RequestLocale>(cx)
-        .map(|locale| locale.0.clone())
-        .unwrap_or_else(default_locale)
+/// The locale resolved for this request: [`resolve_locale`] over the
+/// principal's stored preference ([`crate::auth::principal`],
+/// memoized — the session lookup is shared with everything else that
+/// asks) and the `Accept-Language` header. The resolution itself is
+/// string work, so it is not memoized.
+pub async fn request_locale(cx: &Cx) -> topcoat::Result<Locale> {
+    let principal = crate::auth::principal(cx).await?;
+    Ok(resolve_locale(
+        principal.and_then(|principal| principal.locale.as_deref()),
+        request::headers(cx)
+            .get(header::ACCEPT_LANGUAGE)
+            .and_then(|value| value.to_str().ok()),
+    ))
 }
 
 /// Formats message `id` for the request locale with no arguments.
 /// Every user-visible string in the shell's views goes through here
 /// or [`t_args`] — no bare literals in views.
-pub fn t(cx: &Cx, id: &str) -> topcoat::Result<String> {
-    t_args(cx, id, &Args::new())
+pub async fn t(cx: &Cx, id: &str) -> topcoat::Result<String> {
+    t_args(cx, id, &Args::new()).await
 }
 
-/// Formats message `id` for the request locale with `args`. An
-/// unknown id is an error (a missing *message* is a programming
-/// error; a missing *translation* falls back inside the catalogs).
-pub fn t_args(cx: &Cx, id: &str, args: &Args) -> topcoat::Result<String> {
+/// Formats message `id` for the request locale with `args`.
+pub async fn t_args(cx: &Cx, id: &str, args: &Args) -> topcoat::Result<String> {
+    format_in(cx, &request_locale(cx).await?, id, args)
+}
+
+/// Formats message `id` in an explicit `locale` against the app's
+/// catalogs. An unknown id is an error (a missing *message* is a
+/// programming error; a missing *translation* falls back inside the
+/// catalogs).
+pub fn format_in(cx: &Cx, locale: &Locale, id: &str, args: &Args) -> topcoat::Result<String> {
     let catalogs = app_context::<Catalogs>(cx);
-    let formatted = catalogs.format(&request_locale(cx), id, args)?;
-    Ok(formatted.text)
+    Ok(catalogs.format(locale, id, args)?.text)
 }
 
 #[cfg(test)]
@@ -214,35 +225,41 @@ mod tests {
         assert_eq!(tag(&resolve_locale(Some("de"), None)), "en");
     }
 
-    #[test]
-    fn t_formats_for_the_scoped_locale_with_english_fallback() {
-        let cx = CxTestBuilder::new()
+    fn catalogs_cx() -> Cx {
+        CxTestBuilder::new()
             .app_context(crate::strings::catalogs())
-            .request_context(RequestLocale(supported_locale("fr")))
-            .build();
-        assert_eq!(t(&cx, "nav.sign-out").unwrap(), "Se déconnecter");
+            .build()
+    }
+
+    #[test]
+    fn format_in_formats_for_the_given_locale() {
+        let cx = catalogs_cx();
+        let fr = supported_locale("fr");
+        assert_eq!(
+            format_in(&cx, &fr, "nav.sign-out", &Args::new()).unwrap(),
+            "Se déconnecter"
+        );
 
         let mut args = Args::new();
         args.insert("name".to_owned(), ArgValue::from("Élodie"));
         assert_eq!(
-            t_args(&cx, "home.greeting", &args).unwrap(),
+            format_in(&cx, &fr, "home.greeting", &args).unwrap(),
             "Bonjour Élodie."
         );
     }
 
     #[test]
-    fn t_defaults_to_english_without_a_scoped_locale() {
-        let cx = CxTestBuilder::new()
-            .app_context(crate::strings::catalogs())
-            .build();
-        assert_eq!(t(&cx, "nav.sign-out").unwrap(), "Sign out");
+    fn format_in_english_is_the_default_locale() {
+        let cx = catalogs_cx();
+        assert_eq!(
+            format_in(&cx, &default_locale(), "nav.sign-out", &Args::new()).unwrap(),
+            "Sign out"
+        );
     }
 
     #[test]
-    fn t_rejects_an_unknown_message_id() {
-        let cx = CxTestBuilder::new()
-            .app_context(crate::strings::catalogs())
-            .build();
-        assert!(t(&cx, "no.such.message").is_err());
+    fn format_in_rejects_an_unknown_message_id() {
+        let cx = catalogs_cx();
+        assert!(format_in(&cx, &default_locale(), "no.such.message", &Args::new()).is_err());
     }
 }
