@@ -258,6 +258,17 @@ version bump. Local rules for this repo:
   per-engine expectations explicitly (see `accepts_secure_cookie_on_
   loopback_http` in tests/e2e.rs) — never weaken an assertion for the
   engines that do accept.
+- Accessibility (PLATFORM.md P.1.5) has its own e2e subject,
+  `tests/e2e/a11y.rs`, and harness helper `check_axe(&page, label)`:
+  it injects the vendored axe-core (`tests/e2e/vendor/axe-core`) via
+  `add_script_tag` and evaluates `axe.run` — the Rust stand-in for
+  `@axe-core/playwright`. Every new page joins the sweep there. Two
+  driver limits met on the way: `to_be_focused` passes the locator's
+  selector straight to `querySelectorAll`, so use a single page-level
+  CSS selector (no role locators, no `>>` chains) for focus checks;
+  and the harness self-bundles the stylesheet (see `assets` in
+  harness.rs) because axe over unstyled pages is meaningless. The
+  `a11y` skill holds the checklist and the rule ownership per level.
 - When driving the app manually via the Playwright MCP browser,
   save screenshots into `.playwright-mcp/` (gitignored; it is an
   allowed MCP root) — never at the repo root.
