@@ -3844,6 +3844,7 @@ dependencies = [
 name = "platform-server"
 version = "0.1.0"
 dependencies = [
+ "dotenvy",
  "platform-app",
  "platform-core",
  "thiserror 2.0.20",

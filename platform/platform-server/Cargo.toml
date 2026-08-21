@@ -10,6 +10,7 @@ license.workspace = true
 # (PLATFORM.md P.3). One process to start with; the seams are already
 # crates.
 [dependencies]
+dotenvy = "0.15.7"
 platform-app = { version = "0.1.0", path = "../platform-app" }
 platform-core = { version = "0.1.0", path = "../platform-core" }
 thiserror.workspace = true

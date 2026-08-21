@@ -10,6 +10,11 @@
 //! DATABASE_URL=postgres://localhost/varve_platform cargo run -p platform-server
 //! ```
 //!
+//! or put the variables in a `.env` file (loaded from the working
+//! directory or any parent; real environment variables win; see
+//! `.env.example` at the repo root) and just `cargo run -p
+//! platform-server`.
+//!
 //! - `DATABASE_URL` (**required**): the platform PostgreSQL URL.
 //!   [`platform_core::connect`] applies pending migrations once at
 //!   boot, before serving (its documented single-process pattern).
@@ -58,6 +63,12 @@ enum ServerError {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // A `.env` in the working directory (or any parent) fills in
+    // missing variables before anything reads the environment; real
+    // environment variables always win, and no file is fine —
+    // `.env` is a dev convenience (see `.env.example`), never a
+    // deployment mechanism.
+    let _ = dotenvy::dotenv();
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
