@@ -16,6 +16,13 @@ serde = { version = "1.0.229", features = ["derive"] }
 uuid = "1"
 toasty = "0.10.0"
 topcoat = { version = "0.6.2", features = ["tailwind", "ui", "icon-iconify"] }
+# `src/ua.rs`: session-row browser display. Pinned exact — the parse
+# results the unit tests assert are a property of the parser *and*
+# the vendored `src/ua/regexes.yaml` together, so both move
+# deliberately. `serde_yaml` (the crate ua-parser's own docs load
+# regexes.yaml with) is deserialization-only here, at first use.
+ua-parser = "=0.2.2"
+serde_yaml = "0.9"
 
 [build-dependencies]
 # The Tailwind build script (`build.rs`): `BuildConfig` needs the

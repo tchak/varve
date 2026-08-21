@@ -6,6 +6,7 @@ use serde::Deserialize;
 use topcoat::{
     Result,
     context::Cx,
+    icon::{IconData, icon, iconify::iconify_icon},
     router::{
         content::Form,
         error::{RouterErrorExt, SeeOther, bad_request, see_other},
@@ -24,6 +25,7 @@ use crate::{
     },
     db,
     i18n::{t, t_args},
+    ua,
 };
 
 use super::{Tab, settings_shell};
@@ -38,8 +40,59 @@ struct Revocation {
 struct Row {
     id: String,
     current: bool,
-    user_agent: String,
+    /// The brand icon for the parsed browser family, or the generic
+    /// globe.
+    icon: IconData,
+    /// The display title: `"Chrome 129 · macOS"` from [`ua::describe`],
+    /// or the localized unknown-browser fallback.
+    title: String,
+    /// The raw stored user-agent string, carried on the title span's
+    /// `title=` attribute as a tooltip — the forensic detail the
+    /// parsed title summarizes. Absent for sessions recorded without
+    /// one.
+    user_agent: Option<String>,
     details: String,
+}
+
+/// Composes the row title from a parsed [`ua::Browser`]: family, then
+/// the major version, then the OS family, absent parts omitted —
+/// `"Chrome 129 · macOS"`, `"Safari · Mac OS X"`, `"Firefox 130"`.
+/// Proper nouns all the way down, so the composition is
+/// locale-neutral and happens outside MF2.
+fn browser_title(browser: &ua::Browser) -> String {
+    let mut title = browser.family.clone();
+    if let Some(major) = &browser.major {
+        title.push(' ');
+        title.push_str(major);
+    }
+    if let Some(os) = &browser.os {
+        title.push_str(" · ");
+        title.push_str(os);
+    }
+    title
+}
+
+/// The brand icon for a parsed browser family, keyed on the uap-core
+/// family name (which spells variants as e.g. `"Chrome Mobile iOS"`,
+/// `"Mobile Safari"`, `"Edge Mobile"`, `"Opera Mini"` — hence the
+/// substring matches). Anything unrecognized — including the
+/// unknown-browser fallback row — gets the generic feather globe.
+/// Each `iconify_icon!` id resolves against the staged set at compile
+/// time (`build.rs`), so a mistyped id fails the build.
+fn browser_icon(family: &str) -> IconData {
+    if family.contains("Chrome") || family == "Chromium" {
+        iconify_icon!("simple-icons:googlechrome")
+    } else if family.contains("Firefox") {
+        iconify_icon!("simple-icons:firefox")
+    } else if family.contains("Safari") {
+        iconify_icon!("simple-icons:safari")
+    } else if family.contains("Edge") {
+        iconify_icon!("simple-icons:microsoftedge")
+    } else if family.contains("Opera") {
+        iconify_icon!("simple-icons:opera")
+    } else {
+        iconify_icon!("feather:globe")
+    }
 }
 
 /// The id of the session row backing *this* request, when the
@@ -56,13 +109,17 @@ async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid:
 }
 
 /// The security tab: one card listing the account's live sessions,
-/// newest first — user agent and IP (each falling back to a
-/// localized "unknown", so sessions recorded before the metadata
-/// columns existed still render a full row), the created/expires
-/// dates, a "current session" badge on the row whose token hash
-/// matches this request's, and a per-session revocation POST. Each
-/// row carries `data-current="true|false"` so tests and styling can
-/// address the current row without parsing the badge text.
+/// newest first. Each row leads with the parsed browser — brand icon
+/// and "Chrome 129 · macOS" title ([`ua::describe`] at render time,
+/// the raw stored string kept as the title's tooltip), falling back
+/// to a localized "unknown browser" when the string is absent or
+/// identifies nothing — then a muted meta line (IP, falling back to
+/// the localized "unknown" so pre-metadata sessions still render a
+/// full row, with the created/expires dates), a "current session"
+/// badge on the row whose token hash matches this request's, and a
+/// per-session revocation POST. Each row carries
+/// `data-current="true|false"` so tests and styling can address the
+/// current row without parsing the badge text.
 #[page]
 pub async fn page(cx: &Cx) -> Result {
     // The settings gate (`super::gate`) already turned anonymous
@@ -78,6 +135,7 @@ pub async fn page(cx: &Cx) -> Result {
     let current_label = t(cx, "settings.security.sessions.current")?;
     let revoke_label = t(cx, "settings.security.sessions.revoke")?;
     let unknown = t(cx, "settings.security.sessions.unknown")?;
+    let unknown_browser = t(cx, "settings.security.sessions.unknown-browser")?;
 
     let mut rows = Vec::with_capacity(sessions.len());
     for session in &sessions {
@@ -92,10 +150,15 @@ pub async fn page(cx: &Cx) -> Result {
             &super::super::one_arg("date", super::super::utc_date_arg(session.expires_at)),
         )?;
         let ip = session.ip.as_deref().unwrap_or(&unknown);
+        let browser = session.user_agent.as_deref().and_then(ua::describe);
         rows.push(Row {
             id: session.id.to_string(),
             current: Some(session.id) == current_id,
-            user_agent: session.user_agent.as_deref().unwrap_or(&unknown).to_owned(),
+            icon: browser_icon(browser.as_ref().map_or("", |browser| &browser.family)),
+            title: browser
+                .as_ref()
+                .map_or_else(|| unknown_browser.clone(), browser_title),
+            user_agent: session.user_agent.clone(),
             details: format!("{ip} · {created} · {expires}"),
         });
     }
@@ -110,14 +173,25 @@ pub async fn page(cx: &Cx) -> Result {
                         for row in &rows {
                             <li
                                 data-current=(if row.current { "true" } else { "false" })
-                                class="flex flex-col gap-2 border-b border-border py-4 \
-                                       first:pt-0 last:border-b-0 last:pb-0 sm:flex-row \
-                                       sm:items-center sm:justify-between"
+                                class="flex items-center gap-3 border-b border-border \
+                                       py-4 first:pt-0 last:border-b-0 last:pb-0"
                             >
-                                <div class="flex min-w-0 flex-col gap-1">
-                                    <span class="truncate text-sm font-medium">
-                                        (row.user_agent.as_str())
-                                    </span>
+                                <div class="flex min-w-0 flex-1 flex-col gap-1">
+                                    <div class="flex min-w-0 items-center gap-2">
+                                        icon(
+                                            data: row.icon.clone(),
+                                            attrs: attributes! {
+                                                class="size-4 shrink-0 \
+                                                       text-muted-foreground"
+                                            }
+                                        )
+                                        <span
+                                            class="truncate text-sm font-medium"
+                                            title=(row.user_agent.as_deref())
+                                        >
+                                            (row.title.as_str())
+                                        </span>
+                                    </div>
                                     <span class="text-sm text-muted-foreground">
                                         (row.details.as_str())
                                     </span>

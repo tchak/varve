@@ -35,6 +35,7 @@ pub mod components;
 pub mod i18n;
 pub mod pages;
 pub mod strings;
+pub mod ua;
 
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},

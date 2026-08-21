@@ -1,8 +1,8 @@
 //! Subject: the settings area — the landing redirect, the signed-in
 //! gate, the account profile card, and the security tab's session
-//! list with per-session revocation (metadata capture, the
-//! current-session marker, account scoping, and the legacy-row
-//! fallback).
+//! list with per-session revocation (metadata capture and the parsed
+//! browser title, the current-session marker, account scoping, and
+//! the unknown-browser fallback for junk or absent user agents).
 
 use topcoat::{
     router::{StatusCode, header},
@@ -114,6 +114,12 @@ async fn account_tab_shows_the_profile_card() {
     assert!(html.contains(r#"aria-current="page""#), "{html}");
 }
 
+/// A current, real Chrome-on-macOS user agent — what the parsed row
+/// title is asserted against.
+const CHROME_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+                         AppleWebKit/537.36 (KHTML, like Gecko) \
+                         Chrome/129.0.0.0 Safari/537.36";
+
 #[tokio::test]
 async fn security_tab_lists_sessions_with_captured_metadata() {
     let Some((router, _db)) = test_app().await else {
@@ -125,7 +131,7 @@ async fn security_tab_lists_sessions_with_captured_metadata() {
         "Meta",
         &email,
         &[
-            ("user-agent", "SettingsTest/1.0 (router-level)"),
+            ("user-agent", CHROME_UA),
             ("x-forwarded-for", "203.0.113.9, 198.51.100.4"),
         ],
     )
@@ -137,11 +143,22 @@ async fn security_tab_lists_sessions_with_captured_metadata() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_text(response).await;
     assert!(html.contains("Active sessions"), "{html}");
-    // The metadata captured at sign-in: the user agent verbatim, and
-    // only the *first* X-Forwarded-For value as the client IP.
-    assert!(html.contains("SettingsTest/1.0 (router-level)"), "{html}");
+    // The row title is the *parsed* browser, composed as
+    // family + major + OS; the raw stored string survives as the
+    // title attribute's tooltip.
+    assert!(html.contains("Chrome 129 · Mac OS X"), "{html}");
+    assert!(html.contains(&format!(r#"title="{CHROME_UA}""#)), "{html}");
+    // The captured IP: only the *first* X-Forwarded-For value.
     assert!(html.contains("203.0.113.9"), "{html}");
     assert!(!html.contains("198.51.100.4"), "{html}");
+    // The meta line's dates are medium-style ("Aug 21, 2026"), both
+    // of them today's UTC date at signup: created now, and expires
+    // rendered as a calendar date too.
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date();
+    let medium = today.strftime("%b %-d, %Y").to_string();
+    assert!(html.contains(&format!("Signed in on {medium}")), "{html}");
     // This request's session is the marked one.
     assert!(html.contains(r#"data-current="true""#), "{html}");
     assert!(html.contains("Current session"), "{html}");
@@ -273,22 +290,17 @@ async fn revocation_is_scoped_to_the_account() {
 }
 
 #[tokio::test]
-async fn sessions_without_metadata_render_the_unknown_fallback() {
+async fn junk_or_absent_user_agents_render_the_unknown_browser_fallback() {
     let Some((router, db)) = test_app().await else {
         return;
     };
     let mut db = db;
     let email = unique_email("settings-legacy");
-    let cookie = signup_with_headers(
-        &router,
-        "Legacy",
-        &email,
-        &[("user-agent", "ModernBrowser/2.0")],
-    )
-    .await;
+    let cookie = signup_with_headers(&router, "Legacy", &email, &[("user-agent", CHROME_UA)]).await;
 
-    // A pre-migration-shaped row: no user agent, no IP — inserted
-    // straight through platform-core with `None` metadata.
+    // Two degenerate rows, inserted straight through platform-core:
+    // a pre-migration-shaped one (no user agent, no IP) and one whose
+    // stored user agent identifies no browser.
     let account = platform_core::Account::filter_by_email(&email)
         .first()
         .exec(&mut db)
@@ -306,6 +318,17 @@ async fn sessions_without_metadata_render_the_unknown_fallback() {
     )
     .await
     .expect("insert a legacy session");
+    platform_core::create_session(
+        &mut db,
+        account.id,
+        &format!("junk-{}", uuid::Uuid::new_v4()),
+        jiff::Timestamp::now(),
+        platform_core::DEFAULT_SESSION_TTL,
+        Some("definitely not a browser"),
+        None,
+    )
+    .await
+    .expect("insert a junk-agent session");
 
     let html = body_text(
         router
@@ -313,11 +336,19 @@ async fn sessions_without_metadata_render_the_unknown_fallback() {
             .await,
     )
     .await;
-    assert_eq!(html.matches("data-current=").count(), 2, "{html}");
-    // The legacy row renders with the localized fallback; the modern
-    // row still shows its captured agent.
+    assert_eq!(html.matches("data-current=").count(), 3, "{html}");
+    // Both degenerate rows render the localized unknown-browser
+    // title — the junk one keeping its raw string as the tooltip,
+    // the legacy one with no tooltip to offer (and the localized
+    // "Unknown" standing in for its missing IP); the real row still
+    // shows its parsed browser.
+    assert_eq!(html.matches("Unknown browser").count(), 2, "{html}");
+    assert!(
+        html.contains(r#"title="definitely not a browser""#),
+        "{html}"
+    );
     assert!(html.contains("Unknown"), "{html}");
-    assert!(html.contains("ModernBrowser/2.0"), "{html}");
+    assert!(html.contains("Chrome 129 · Mac OS X"), "{html}");
 }
 
 #[tokio::test]

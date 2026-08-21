@@ -18,8 +18,15 @@ fn main() {
     // `@iconify-json/feather` package once and caches it under
     // `<target>/topcoat/cache/iconify`; builds stay offline after
     // that.
+    // `simple-icons` is staged alongside it for the brand icons on
+    // the security tab's session rows (Chrome, Firefox, Safari, Edge,
+    // Opera — see `src/ua.rs`). Staging pulls the whole set once into
+    // the same cache; `iconify_icon!` then resolves individual ids at
+    // compile time, so a mistyped id is a build error, not a blank
+    // glyph.
     topcoat::icon::iconify::BuildConfig::new()
         .icon_set("feather")
+        .icon_set("simple-icons")
         .stage()
         .unwrap();
 }

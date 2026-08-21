@@ -68,12 +68,16 @@ pub const EN: &[(&str, &str)] = &[
     ("settings.security.sessions.revoke", "Revoke session"),
     ("settings.security.sessions.unknown", "Unknown"),
     (
+        "settings.security.sessions.unknown-browser",
+        "Unknown browser",
+    ),
+    (
         "settings.security.sessions.created",
-        "Signed in on {$date :date style=long}",
+        "Signed in on {$date :date style=medium}",
     ),
     (
         "settings.security.sessions.expires",
-        "Expires on {$date :date style=long}",
+        "Expires on {$date :date style=medium}",
     ),
     ("error.not-found", "Page not found."),
 ];
@@ -133,12 +137,16 @@ pub const FR: &[(&str, &str)] = &[
     ("settings.security.sessions.revoke", "Révoquer la session"),
     ("settings.security.sessions.unknown", "Inconnu"),
     (
+        "settings.security.sessions.unknown-browser",
+        "Navigateur inconnu",
+    ),
+    (
         "settings.security.sessions.created",
-        "Ouverte le {$date :date style=long}",
+        "Ouverte le {$date :date style=medium}",
     ),
     (
         "settings.security.sessions.expires",
-        "Expire le {$date :date style=long}",
+        "Expire le {$date :date style=medium}",
     ),
     ("error.not-found", "Page introuvable."),
 ];
