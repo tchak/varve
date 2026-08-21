@@ -163,3 +163,17 @@ let page: toasty::stmt::Page<_> = Post::all()
 
 `limit(n)`/`per_page` are upper bounds, not guarantees — post-filtering can shrink a
 page; detect the end with `has_next()`, never by page size.
+
+
+## Field notes (verified in production use, 2026-08-21)
+
+- **Updates: two shapes with different returns.** The generated
+  `update_by_*(id).field(v).exec(db)` exists (assembled in codegen —
+  plain greps over the source miss it) but returns `Result<()>` and
+  **discards the row**. To get the updated row back, use the instance
+  builder: `model.update().field(v).exec(db)` — `&mut Model` as the
+  update target reloads the row in place from RETURNING (fresh
+  `updated_at`, no second query). For `Option<_>` fields, chain the
+  setter conditionally: `None` = leave untouched.
+- The derive also generates `delete_by_*` alongside `get_by_*` /
+  `filter_by_*` / `update_by_*` / `upsert_by_*`.

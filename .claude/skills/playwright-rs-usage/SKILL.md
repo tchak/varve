@@ -261,3 +261,7 @@ version bump. Local rules for this repo:
 - When driving the app manually via the Playwright MCP browser,
   save screenshots into `.playwright-mcp/` (gitignored; it is an
   allowed MCP root) — never at the repo root.
+- First full run after a big code change can flake: test binaries
+  launching 15 browsers while cargo is still compiling other suites
+  starves launches. Rerun once before debugging; or pre-build
+  (`cargo test --no-run`) ahead of the real run.
