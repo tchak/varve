@@ -245,3 +245,11 @@ version bump. Local rules for this repo:
   fresh browser context per test; no global-count assertions.
 - Assert via locators/roles, not raw HTML; keep French assertions
   aware of U+00A0/U+202F (substring-match around them).
+- Multi-engine: e2e tests run every installed engine (chromium,
+  firefox, webkit probed via `BrowserNotInstalled`). Known divergence,
+  confirmed 2026-08-21: **WebKit refuses `Secure`/`__Host-` cookies
+  over `http://127.0.0.1`** (stores nothing); Chromium and Firefox
+  extend the trustworthy-loopback carve-out to cookies. Encode
+  per-engine expectations explicitly (see `accepts_secure_cookie_on_
+  loopback_http` in tests/e2e.rs) — never weaken an assertion for the
+  engines that do accept.

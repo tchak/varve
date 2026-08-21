@@ -1,8 +1,11 @@
 //! # Browser tests
 //!
 //! Real-browser end-to-end tests: the app is served in-process on an
-//! ephemeral port ([`topcoat::serve_until`]) and driven with headless
-//! Chromium through [`playwright-rs`](https://docs.rs/playwright-rs).
+//! ephemeral port ([`topcoat::serve_until`]) and driven headless
+//! through [`playwright-rs`](https://docs.rs/playwright-rs) on every
+//! installed engine — chromium, firefox, and webkit. Each test runs
+//! its scenario against each engine in turn (serially, with a fresh
+//! browser context per engine) and reports failures per engine.
 //!
 //! **Gating** (the settled P.3 convention — `cargo test --workspace`
 //! stays green with nothing installed): each test passes vacuously,
@@ -10,17 +13,20 @@
 //!
 //! 1. `VARVE_TEST_DATABASE_URL` is set (same scratch database as
 //!    `tests/app.rs`), and
-//! 2. the Playwright chromium build matching the bundled driver is
+//! 2. at least one Playwright engine matching the bundled driver is
 //!    installed — a miss surfaces as the crate's
-//!    [`playwright_rs::Error::BrowserNotInstalled`] at launch.
+//!    [`playwright_rs::Error::BrowserNotInstalled`] at launch. Each
+//!    missing engine prints its own `skipped:` line and is dropped
+//!    from the run; the installed ones still run.
 //!
 //! **One-time setup.** The pinned `playwright-rs` dev-dependency
 //! downloads its Playwright driver (with its own Node runtime) at
 //! build time; browsers are installed once, through the crate so the
-//! versions match, via the vendored example:
+//! versions match, via the vendored example (no arguments installs
+//! all three engines):
 //!
 //! ```text
-//! cargo run -p platform-app --example install-browsers -- chromium
+//! cargo run -p platform-app --example install-browsers
 //! ```
 //!
 //! Then run for real with e.g.:
@@ -31,10 +37,19 @@
 //! ```
 //!
 //! Tests share one database and run in parallel, so every test mints
-//! unique emails, uses a fresh browser context, and never asserts on
-//! global counts (same rules as `tests/app.rs`). On failure a
-//! Playwright trace is written under `CARGO_TARGET_TMPDIR` (the path
-//! is printed); open it at <https://trace.playwright.dev>.
+//! unique emails (unique per engine too — engines within one test
+//! share the database), uses a fresh browser context per engine, and
+//! never asserts on global counts (same rules as `tests/app.rs`). On
+//! failure a Playwright trace named after the scenario *and* engine
+//! (e.g. `signup-roundtrip.webkit.trace.zip`) is written under
+//! `CARGO_TARGET_TMPDIR` (the path is printed); open it at
+//! <https://trace.playwright.dev>.
+//!
+//! **Known engine divergence.** WebKit refuses the app's `Secure`
+//! `__Host-session` cookie over plain-http loopback, so signed-in
+//! flows cannot run there; the affected scenarios assert that
+//! refusal explicitly instead — see
+//! [`accepts_secure_cookie_on_loopback_http`].
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -49,8 +64,8 @@ use tokio::sync::oneshot;
 type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 /// A plain-`bool` assertion inside a scenario. Returns `Err` instead
-/// of panicking so the trace-on-failure cleanup in [`finish`] still
-/// runs (a panic would skip it).
+/// of panicking so the trace-on-failure cleanup in [`run_scenario`]
+/// still runs (a panic would skip it).
 fn ensure(cond: bool, message: impl Into<String>) -> TestResult {
     if cond {
         Ok(())
@@ -84,13 +99,14 @@ impl App {
 }
 
 /// The gate: connects the database, boots the app server, and
-/// launches headless Chromium. `None` (after printing why) when
-/// either the database env var is unset or the Playwright chromium
-/// build is not installed, so the test passes vacuously.
+/// launches every installed engine. `None` (after printing why) when
+/// the database env var is unset or when *no* engine is installed, so
+/// the test passes vacuously. Each missing engine prints its own
+/// `skipped:` line and drops out; the installed ones still run.
 ///
 /// The returned [`Playwright`] handle must stay alive for the whole
 /// test — dropping it tears down the driver process.
-async fn e2e() -> Option<(Playwright, Browser, App)> {
+async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
     // Connects one test at a time — see `platform-core/tests/db.rs`
     // for why (unguarded concurrent migration application in toasty
     // 0.10).
@@ -110,17 +126,24 @@ async fn e2e() -> Option<(Playwright, Browser, App)> {
             return None;
         }
     };
-    let browser = match playwright.chromium().launch().await {
-        Ok(browser) => browser,
-        Err(Error::BrowserNotInstalled { .. }) => {
-            println!(
-                "skipped: playwright chromium is not installed; run \
-                 `cargo run -p platform-app --example install-browsers -- chromium`"
-            );
-            return None;
+    let mut engines = Vec::new();
+    for (name, browser_type) in [
+        ("chromium", playwright.chromium()),
+        ("firefox", playwright.firefox()),
+        ("webkit", playwright.webkit()),
+    ] {
+        match browser_type.launch().await {
+            Ok(browser) => engines.push((name, browser)),
+            Err(Error::BrowserNotInstalled { .. }) => println!(
+                "skipped: playwright {name} is not installed; run \
+                 `cargo run -p platform-app --example install-browsers -- {name}`"
+            ),
+            Err(error) => panic!("{name} failed to launch: {error}"),
         }
-        Err(error) => panic!("chromium failed to launch: {error}"),
-    };
+    }
+    if engines.is_empty() {
+        return None;
+    }
 
     let db = {
         let _guard = CONNECT_LOCK.lock().await;
@@ -142,7 +165,7 @@ async fn e2e() -> Option<(Playwright, Browser, App)> {
 
     Some((
         playwright,
-        browser,
+        engines,
         App {
             db,
             addr,
@@ -168,25 +191,78 @@ async fn trace_start(context: &BrowserContext, name: &str) -> Tracing {
     tracing
 }
 
-/// Unconditional cleanup, trace-on-failure included (Rust has no
-/// async `Drop`, so this is explicit — the crate's canonical
-/// pattern): stop tracing (writing the zip only when the scenario
-/// failed), close the browser, stop the server, then unwrap.
-async fn finish(tracing: Tracing, browser: &Browser, app: App, name: &str, result: TestResult) {
-    let stop = if result.is_err() {
-        let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.trace.zip"));
-        println!(
-            "trace written to {} — open it at https://trace.playwright.dev",
-            path.display()
-        );
-        TracingStopOptions::default().path(path.to_string_lossy().into_owned())
-    } else {
-        TracingStopOptions::default()
+/// A fresh default context — the per-engine context factory most
+/// scenarios use.
+async fn default_context(browser: &Browser) -> playwright_rs::Result<BrowserContext> {
+    browser.new_context().await
+}
+
+/// The whole multi-engine test body: gate, then for each installed
+/// engine run `scenario` in a fresh context (from `make_context`)
+/// with trace-on-failure, then unconditional cleanup (Rust has no
+/// async `Drop`, so it is explicit — the crate's canonical pattern):
+/// stop tracing (writing `{name}.{engine}.trace.zip` only when that
+/// engine's run failed), close everything, and panic listing every
+/// failing engine.
+async fn run_scenario<C, F>(name: &str, make_context: C, scenario: F)
+where
+    C: AsyncFn(&Browser) -> playwright_rs::Result<BrowserContext>,
+    F: AsyncFn(&BrowserContext, &App, &'static str) -> TestResult,
+{
+    let Some((_playwright, engines, app)) = e2e().await else {
+        return;
     };
-    let _ = tracing.stop(Some(stop)).await;
-    let _ = browser.close().await;
+    let mut failures = Vec::new();
+    for (engine, browser) in &engines {
+        let context = match make_context(browser).await {
+            Ok(context) => context,
+            Err(error) => {
+                failures.push(format!("[{engine}] new context: {error}"));
+                continue;
+            }
+        };
+        let tracing = trace_start(&context, &format!("{name}.{engine}")).await;
+        let result = scenario(&context, &app, engine).await;
+        let stop = if result.is_err() {
+            let path =
+                Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}.{engine}.trace.zip"));
+            println!(
+                "[{engine}] trace written to {} — open it at https://trace.playwright.dev",
+                path.display()
+            );
+            TracingStopOptions::default().path(path.to_string_lossy().into_owned())
+        } else {
+            TracingStopOptions::default()
+        };
+        let _ = tracing.stop(Some(stop)).await;
+        let _ = context.close().await;
+        if let Err(error) = result {
+            failures.push(format!("[{engine}] {error}"));
+        }
+    }
+    for (_, browser) in &engines {
+        let _ = browser.close().await;
+    }
     app.stop().await;
-    result.unwrap();
+    assert!(
+        failures.is_empty(),
+        "{name} failed on {} engine(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Whether `engine` treats plain-http loopback (`http://127.0.0.1`)
+/// as a trustworthy origin for `Secure` cookies — which the
+/// `__Host-session` cookie needs to be stored at all. Chromium and
+/// Firefox extend the secure-context loopback carve-out to cookies;
+/// WebKit does not: it refuses a `Secure` cookie set over plain http
+/// even on loopback, so the session never sticks there. Verified
+/// empirically against the pinned engines; over real https all three
+/// accept the cookie, so this is a test-transport divergence, not an
+/// app bug.
+fn accepts_secure_cookie_on_loopback_http(engine: &str) -> bool {
+    engine != "webkit"
 }
 
 /// Signs a fresh account up through the real form and waits for the
@@ -218,24 +294,44 @@ async fn browser_signup(page: &Page, app: &App, name: &str, email: &str) -> Test
 
 #[tokio::test(flavor = "multi_thread")]
 async fn signup_greets_signs_out_and_reverts_the_header() {
-    let Some((_playwright, browser, app)) = e2e().await else {
-        return;
-    };
-    let context = browser.new_context().await.expect("new context");
-    let tracing = trace_start(&context, "signup-roundtrip").await;
-    let result = signup_scenario(&context, &app).await;
-    finish(tracing, &browser, app, "signup-roundtrip", result).await;
+    run_scenario("signup-roundtrip", default_context, signup_scenario).await;
 }
 
-async fn signup_scenario(context: &BrowserContext, app: &App) -> TestResult {
+async fn signup_scenario(context: &BrowserContext, app: &App, engine: &'static str) -> TestResult {
     let page = context.new_page().await?;
     // Mixed case in, normalized (trimmed, lowercased) out — the
     // header must show what platform-core stored, not what was typed.
-    let typed = format!("E2E-Roundtrip-{}@Example.Test", uuid::Uuid::new_v4());
+    let typed = format!(
+        "E2E-Roundtrip-{engine}-{}@Example.Test",
+        uuid::Uuid::new_v4()
+    );
     let normalized = typed.to_lowercase();
     browser_signup(&page, app, "Amélie", &typed).await?;
 
     let header = page.locator(locator!("header"));
+    if !accepts_secure_cookie_on_loopback_http(engine) {
+        // The engine refused the `Secure` session cookie over plain
+        // http (see [`accepts_secure_cookie_on_loopback_http`]), so
+        // the signed-in half of the round trip cannot happen here.
+        // Assert the divergent outcome explicitly: signup itself
+        // succeeded (the 303-to-home landed, awaited above), but the
+        // session did not stick — the header stays signed out.
+        println!(
+            "[{engine}] Secure session cookie refused over http://127.0.0.1; \
+             asserting the signed-out landing instead of the greeting"
+        );
+        expect(header.get_by_role(
+            AriaRole::Link,
+            Some(GetByRoleOptions::default().name("Sign in").exact(true)),
+        ))
+        .to_be_visible()
+        .await?;
+        expect(header.get_by_text("Signed in as", false))
+            .not()
+            .to_be_visible()
+            .await?;
+        return Ok(());
+    }
     expect(header.get_by_text(&format!("Signed in as {normalized}"), false))
         .to_be_visible()
         .await?;
@@ -267,28 +363,26 @@ async fn signup_scenario(context: &BrowserContext, app: &App) -> TestResult {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn wrong_password_stays_on_signin_with_one_generic_alert() {
-    let Some((_playwright, browser, app)) = e2e().await else {
-        return;
-    };
+    run_scenario("wrong-password", default_context, wrong_password_scenario).await;
+}
+
+async fn wrong_password_scenario(
+    context: &BrowserContext,
+    app: &App,
+    engine: &'static str,
+) -> TestResult {
     // Seed the account directly through platform-core — the scenario
     // under test is the failed sign-in, not registration.
-    let email = unique_email("e2e-wrong-password");
+    let email = unique_email(&format!("e2e-wrong-password-{engine}"));
     let mut db = app.db.clone();
     platform_core::register(&mut db, &email, "s3cret-enough", "Alice")
         .await
-        .expect("seed account");
+        .map_err(|error| format!("seed account: {error}"))?;
 
-    let context = browser.new_context().await.expect("new context");
-    let tracing = trace_start(&context, "wrong-password").await;
-    let result = wrong_password_scenario(&context, &app, &email).await;
-    finish(tracing, &browser, app, "wrong-password", result).await;
-}
-
-async fn wrong_password_scenario(context: &BrowserContext, app: &App, email: &str) -> TestResult {
     let page = context.new_page().await?;
     page.goto(&app.url("/signin"), None).await?;
     page.locator(locator!("#signin-email"))
-        .fill(email, None)
+        .fill(&email, None)
         .await?;
     page.locator(locator!("#signin-password"))
         .fill("not-the-password", None)
@@ -311,7 +405,7 @@ async fn wrong_password_scenario(context: &BrowserContext, app: &App, email: &st
     // password never does.
     expect_page(&page).to_have_url(&app.url("/signin")).await?;
     expect(page.locator(locator!("#signin-email")))
-        .to_have_value(email)
+        .to_have_value(&email)
         .await?;
     expect(page.locator(locator!("#signin-password")))
         .to_have_value("")
@@ -321,26 +415,23 @@ async fn wrong_password_scenario(context: &BrowserContext, app: &App, email: &st
 
 #[tokio::test(flavor = "multi_thread")]
 async fn french_context_renders_signin_in_french() {
-    let Some((_playwright, browser, app)) = e2e().await else {
-        return;
-    };
-    // A French browser context: Playwright's `locale` sets the
-    // browser's Accept-Language, which is what the app's locale
-    // resolution reads for anonymous requests.
-    let context = browser
+    run_scenario("french-signin", french_context, french_scenario).await;
+}
+
+/// A French browser context: Playwright's `locale` sets the browser's
+/// Accept-Language, which is what the app's locale resolution reads
+/// for anonymous requests.
+async fn french_context(browser: &Browser) -> playwright_rs::Result<BrowserContext> {
+    browser
         .new_context_with_options(
             BrowserContextOptions::builder()
                 .locale("fr-FR".to_owned())
                 .build(),
         )
         .await
-        .expect("new fr-FR context");
-    let tracing = trace_start(&context, "french-signin").await;
-    let result = french_scenario(&context, &app).await;
-    finish(tracing, &browser, app, "french-signin", result).await;
 }
 
-async fn french_scenario(context: &BrowserContext, app: &App) -> TestResult {
+async fn french_scenario(context: &BrowserContext, app: &App, _engine: &'static str) -> TestResult {
     let page = context.new_page().await?;
     page.goto(&app.url("/signin"), None).await?;
     expect(page.locator(locator!("main h1")))
@@ -359,26 +450,35 @@ async fn french_scenario(context: &BrowserContext, app: &App) -> TestResult {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn session_cookie_is_hardened_and_cleared_on_signout() {
-    let Some((_playwright, browser, app)) = e2e().await else {
-        return;
-    };
-    let context = browser.new_context().await.expect("new context");
-    let tracing = trace_start(&context, "session-cookie").await;
-    let result = cookie_scenario(&context, &app).await;
-    finish(tracing, &browser, app, "session-cookie", result).await;
+    run_scenario("session-cookie", default_context, cookie_scenario).await;
 }
 
-async fn cookie_scenario(context: &BrowserContext, app: &App) -> TestResult {
+async fn cookie_scenario(context: &BrowserContext, app: &App, engine: &'static str) -> TestResult {
     let page = context.new_page().await?;
-    let email = unique_email("e2e-cookie");
+    let email = unique_email(&format!("e2e-cookie-{engine}"));
     browser_signup(&page, app, "Benoît", &email).await?;
 
     // Read the session cookie back from the browser context — the
     // hardened transport (`__Host-` prefix, `HttpOnly`, `SameSite=Lax`,
-    // `Path=/`) as the browser actually stored it. Chromium accepts
-    // `Secure` cookies from http://127.0.0.1: loopback is a
-    // trustworthy origin.
+    // `Path=/`) as the browser actually stored it. Chromium and
+    // Firefox accept `Secure` cookies from http://127.0.0.1: loopback
+    // is a trustworthy origin for them.
     let cookies = context.cookies(None).await?;
+    if !accepts_secure_cookie_on_loopback_http(engine) {
+        // WebKit refuses the `Secure` cookie over plain http (see
+        // [`accepts_secure_cookie_on_loopback_http`]). Assert that
+        // divergence explicitly — the refusal must be total, not a
+        // downgraded (non-Secure or renamed) cookie sneaking in.
+        println!(
+            "[{engine}] Secure session cookie refused over http://127.0.0.1; \
+             asserting the refusal instead of the hardened attributes"
+        );
+        ensure(
+            !cookies.iter().any(|cookie| cookie.name.contains("session")),
+            format!("expected {engine} to refuse the Secure session cookie, got {cookies:?}"),
+        )?;
+        return Ok(());
+    }
     let session: Vec<_> = cookies
         .iter()
         .filter(|cookie| cookie.name.contains("session"))

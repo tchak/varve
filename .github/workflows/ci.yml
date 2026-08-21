@@ -54,8 +54,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ms-playwright-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ms-playwright-${{ runner.os }}-
-      - name: install playwright chromium
-        run: cargo run -p platform-app --example install-browsers --locked -- chromium
+      - name: install playwright browsers
+        # No args = all three engines (chromium, firefox, webkit —
+        # tests/e2e.rs runs every installed engine); on Linux the
+        # example installs required system libraries alongside.
+        # Cache entry is ~1.1–1.3 GB.
+        run: cargo run -p platform-app --example install-browsers --locked
       - run: cargo test --workspace --locked
 
   lint:
