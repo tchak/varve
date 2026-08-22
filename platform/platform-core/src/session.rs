@@ -20,6 +20,9 @@
 //! sweep having run.
 
 use jiff::{SignedDuration, Timestamp};
+use toasty::Deferred;
+
+use crate::account::Account;
 
 /// Provisional default session lifetime: 14 days.
 ///
@@ -47,6 +50,10 @@ pub struct Session {
     /// [`delete_account_sessions`] ("sign out everywhere").
     #[index]
     pub account_id: uuid::Uuid,
+
+    /// The account this session authenticates (relation).
+    #[belongs_to]
+    pub account: Deferred<Account>,
 
     /// When the session was created — the caller's `now`, stored
     /// explicitly rather than `#[auto]` so a single clock reading

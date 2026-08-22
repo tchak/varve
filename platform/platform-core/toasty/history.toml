@@ -14,3 +14,8 @@ snapshot_name = "0001_snapshot.toml"
 id = 2066704883652149974
 name = "0002_organizations_teams.sql"
 snapshot_name = "0002_snapshot.toml"
+
+[[migrations]]
+id = 3894584656004657910
+name = "0003_drop_redundant_membership_indexes.sql"
+snapshot_name = "0003_snapshot.toml"

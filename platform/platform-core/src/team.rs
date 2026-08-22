@@ -27,7 +27,7 @@ pub struct Team {
     pub organization_id: uuid::Uuid,
 
     /// The owning organization (relation).
-    #[belongs_to(key = organization_id, references = id)]
+    #[belongs_to]
     pub organization: Deferred<Organization>,
 
     /// Display name, unique within the organization.
@@ -54,12 +54,12 @@ pub struct Team {
 #[derive(Debug, toasty::Model)]
 #[key(team_id, account_id)]
 pub struct TeamMembership {
-    /// The team.
-    #[index]
+    /// The team. The leading key column needs no separate index: the
+    /// composite primary key already serves that prefix.
     pub team_id: uuid::Uuid,
 
     /// The team (relation).
-    #[belongs_to(key = team_id, references = id)]
+    #[belongs_to]
     pub team: Deferred<Team>,
 
     /// The member account.
@@ -67,7 +67,7 @@ pub struct TeamMembership {
     pub account_id: uuid::Uuid,
 
     /// The member account (relation).
-    #[belongs_to(key = account_id, references = id)]
+    #[belongs_to]
     pub account: Deferred<Account>,
 
     /// Set on insert.

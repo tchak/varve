@@ -22,7 +22,7 @@ pub struct Procedure {
     pub organization_id: uuid::Uuid,
 
     /// The owning organization (relation).
-    #[belongs_to(key = organization_id, references = id)]
+    #[belongs_to]
     pub organization: Deferred<Organization>,
 
     /// Title shown to applicants and reviewers.

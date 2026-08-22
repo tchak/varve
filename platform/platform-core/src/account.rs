@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 use toasty::Deferred;
 
 use crate::organization::{Organization, OrganizationMembership};
+use crate::session::Session;
 use crate::team::{Team, TeamMembership};
 
 use argon2::{
@@ -64,6 +65,11 @@ pub struct Account {
     /// Set on insert and on every update.
     #[auto]
     pub updated_at: jiff::Timestamp,
+
+    /// Live and expired browser sessions. Mutate through
+    /// [`crate::session`], whose functions own expiry and scoping.
+    #[has_many]
+    pub sessions: Deferred<Vec<Session>>,
 
     /// Organization memberships (P.4: membership = administers every
     /// procedure the organization owns). Mutate through
