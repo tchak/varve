@@ -9,7 +9,10 @@ license.workspace = true
 # document execution, components with colocated fragments
 # (design/platform.md P.3, P.7).
 [dependencies]
+# The typed client's operation builders (`QueryBuilder`, `MutationBuilder`).
+cynic = "3.14"
 jiff = "0.2"
+platform-client = { version = "0.1.0", path = "../platform-client" }
 platform-core = { version = "0.1.0", path = "../platform-core" }
 # `pages::graphql`: the `/graphql` transport over the in-process schema;
 # `async-graphql` directly for the request/response wire types only.

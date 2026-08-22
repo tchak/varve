@@ -136,6 +136,54 @@ async fn axe_scenario(
         .to_be_visible()
         .await?;
     check_axe(&page, "/settings/security (token created)").await?;
+
+    // Organizations: the empty list with the creation form, the form
+    // in its error state (an invalid identifier, the name kept), then
+    // the organization page reached by creating one.
+    page.goto(&app.url("/organizations"), None).await?;
+    check_axe(&page, "/organizations (empty)").await?;
+    page.locator(locator!("#organization-name"))
+        .fill("Axe Org", None)
+        .await?;
+    page.locator(locator!("#organization-slug"))
+        .fill("not valid!", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Create organization")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#organization-slug[aria-invalid='true']")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations (slug error)").await?;
+    page.locator(locator!("#organization-slug"))
+        .fill(&format!("axe-{}", uuid::Uuid::new_v4()), None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Create organization")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.get_by_role(
+        AriaRole::Heading,
+        Some(GetByRoleOptions::default().name("Axe Org").exact(true)),
+    ))
+    .to_be_visible()
+    .await?;
+    check_axe(&page, "/organizations/{id}").await?;
+    page.goto(&app.url("/organizations"), None).await?;
+    check_axe(&page, "/organizations (populated)").await?;
     Ok(())
 }
 
@@ -145,7 +193,8 @@ fn account_menu_trigger(page: &Page) -> playwright_rs::protocol::Locator {
 
 /// Tab order through the header of the signed-in home, and the
 /// account menu driven by keys alone: brand link, then the menu
-/// trigger; Enter opens it; Tab walks its items; Enter on the last
+/// trigger; Enter opens it; Tab walks its items (organizations,
+/// settings, sign out); Enter on the last
 /// one signs out.
 ///
 /// The menu is a `<details>` element, so Escape does not close it —
@@ -192,6 +241,11 @@ async fn keyboard_scenario(
         Some(GetByRoleOptions::default().name("Settings").exact(true)),
     );
     expect(settings_link.clone()).to_be_visible().await?;
+
+    keyboard.press("Tab", None).await?;
+    expect(page.locator(locator!("header a[href='/organizations']")))
+        .to_be_focused()
+        .await?;
 
     keyboard.press("Tab", None).await?;
     expect(page.locator(locator!("header a[href='/settings']")))

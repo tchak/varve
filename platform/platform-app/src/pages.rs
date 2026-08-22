@@ -6,10 +6,11 @@
 //! the layout, the home page, and the `not_found!` catch-all live
 //! here pathlessly, and each submodule derives its URL from its
 //! name — `signin` serves `/signin`, `signup` `/signup`,
-//! `signout` `/signout`, and the `settings` subtree
-//! `/settings/{account,security}` (whose handlers guard themselves
-//! and whose layout turns the 401 into a `/signin` redirect — see
-//! the `settings` module docs). No handler carries a path string. A
+//! `signout` `/signout`, and the signed-in subtrees — `settings`
+//! (`/settings/{account,security}`) and `organizations`
+//! (`/organizations`, `/organizations/{id}`) — whose handlers guard
+//! themselves and whose layouts turn the 401 into a `/signin`
+//! redirect (see the `settings` module docs). No handler carries a path string. A
 //! module's GET page is named `page` and its POST handler `submit`
 //! (both share the module's derived path); shared helpers
 //! (`redirect_to`, `one_arg`, `stylesheet_href`) sit in this
@@ -40,6 +41,7 @@
 //! the by-design panic on rendering an unbundled asset.
 
 mod graphql;
+mod organizations;
 mod settings;
 mod signin;
 mod signout;
@@ -174,6 +176,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
         .await?
         .map(|principal| principal.email.clone());
     let account_menu_label = t(cx, "nav.account-menu").await?;
+    let organizations_label = t(cx, "organizations.title").await?;
     let settings_label = t(cx, "settings.title").await?;
     let sign_in_label = t(cx, "nav.sign-in").await?;
     let sign_up_label = t(cx, "nav.sign-up").await?;
@@ -211,6 +214,13 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                             dropdown_menu_content(
                                 attrs: attributes! { class="right-0 left-auto" },
                                 dropdown_menu_label((account_email))
+                                <a href=(href!(organizations::page)) class=(MENU_LINK)>
+                                    icon(
+                                        data: iconify_icon!("feather:briefcase"),
+                                        attrs: attributes! { class="size-4" }
+                                    )
+                                    (organizations_label)
+                                </a>
                                 <a href=(href!(settings::page)) class=(MENU_LINK)>
                                     icon(
                                         data: iconify_icon!("feather:settings"),

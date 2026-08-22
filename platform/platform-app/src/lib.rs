@@ -42,7 +42,7 @@ use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     context::{Cx, app_context},
     cookie::{Key, RouterBuilderCookieExt},
-    router::{Router, RouterBuilderDiscoverExt},
+    router::{Router, RouterBuilderDiscoverExt, error::RouterErrorExt},
     session::RouterBuilderSessionExt,
 };
 
@@ -102,4 +102,19 @@ pub fn router(db: toasty::Db, cookie_key: Key, assets: Option<AssetBundle>) -> R
 /// startup wiring bug, not a runtime condition.
 pub fn db(cx: &Cx) -> toasty::Db {
     app_context::<toasty::Db>(cx).clone()
+}
+
+/// The typed GraphQL client of this request, executing in-process as
+/// the signed-in principal (design/platform.md P.1 rule 4: the app
+/// is integrator #1, through the same schema and principal context
+/// as `/graphql`). `UnauthorizedError` (401) for an anonymous
+/// request — the same guard as [`auth::require_account`], so a page
+/// reading through the client is protected by the read itself.
+pub async fn client(cx: &Cx) -> topcoat::Result<platform_graphql::InProcess> {
+    let principal = auth::principal(cx).await?.ok_or_unauthorized()?;
+    Ok(platform_graphql::InProcess::new(
+        app_context::<platform_graphql::PlatformSchema>(cx).clone(),
+        db(cx),
+        principal.clone(),
+    ))
 }
