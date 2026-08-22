@@ -119,6 +119,23 @@ async fn axe_scenario(
         .to_be_visible()
         .await?;
     check_axe(&page, "/settings/account (name error)").await?;
+
+    // The security tab right after creating an API token: the
+    // one-time secret notice and the populated token list.
+    page.goto(&app.url("/settings/security"), None).await?;
+    page.locator(locator!("#api-token-name"))
+        .fill("Axe sweep", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Create token").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#api-token-secret")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/settings/security (token created)").await?;
     Ok(())
 }
 

@@ -1,6 +1,14 @@
 //! `/settings/security`, derived from this module's name: the
-//! security tab of the settings area — the active-sessions list and
-//! the per-session revocation POST.
+//! security tab of the settings area — the active-sessions card with
+//! per-session revocation ([`submit`]), and the API tokens card
+//! (creation and revocation live in the [`tokens`] subtree:
+//! `/settings/security/tokens` and `/settings/security/tokens/revoke`).
+//!
+//! Both cards render through [`security_cards`], the one composition
+//! of the tab, so the POST that re-renders it with a freshly created
+//! token shows exactly what the GET shows.
+
+mod tokens;
 
 use serde::Deserialize;
 use topcoat::{
@@ -13,15 +21,17 @@ use topcoat::{
         href, page, route,
     },
     session,
-    view::{attributes, view},
+    view::{attributes, component, view},
 };
 
 use crate::{
     auth::{account, encode_token_hash, require_account},
     components::{
+        alert::{AlertVariant, alert, alert_description, alert_title},
         badge::{BadgeVariant, badge},
         button::{ButtonSize, ButtonVariant, button},
-        card::{card, card_content, card_header, card_title},
+        card::{card, card_content, card_description, card_header, card_title},
+        field::field,
     },
     db,
     i18n::{t, t_args},
@@ -96,8 +106,8 @@ fn browser_icon(family: &str) -> IconData {
 }
 
 /// The id of the session row backing *this* request, when the
-/// presented token resolves to one — the row [`page`] marks as the
-/// current session and [`submit`] treats as a full sign-out.
+/// presented token resolves to one — the row the sessions card marks
+/// as current and [`submit`] treats as a full sign-out.
 async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid::Uuid>> {
     let Some(hash) = session::token_hash(cx).await? else {
         return Ok(None);
@@ -108,11 +118,11 @@ async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid:
     Ok(row.map(|row| row.id))
 }
 
-/// The security tab: one card listing the account's live sessions,
-/// newest first. Each row leads with the parsed browser — brand icon
-/// and "Chrome 129 · macOS" title ([`ua::describe`] at render time,
-/// the raw stored string kept as the title's tooltip), falling back
-/// to a localized "unknown browser" when the string is absent or
+/// The sessions card: the account's live sessions, newest first.
+/// Each row leads with the parsed browser — brand icon and
+/// "Chrome 129 · macOS" title ([`ua::describe`] at render time, the
+/// raw stored string kept as the title's tooltip), falling back to a
+/// localized "unknown browser" when the string is absent or
 /// identifies nothing — then a muted meta line (IP, falling back to
 /// the localized "unknown" so pre-metadata sessions still render a
 /// full row, with the created/expires dates), a "current session"
@@ -120,8 +130,8 @@ async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid:
 /// per-session revocation POST. Each row carries
 /// `data-current="true|false"` so tests and styling can address the
 /// current row without parsing the badge text.
-#[page]
-pub async fn page(cx: &Cx) -> Result {
+#[component]
+async fn sessions_card(cx: &Cx) -> Result {
     let account = require_account(cx).await?;
     let mut db = db(cx);
     let sessions =
@@ -163,66 +173,280 @@ pub async fn page(cx: &Cx) -> Result {
     }
 
     view! {
-        settings_shell(
-            active: Tab::Security,
-            card(
-                card_header(card_title((sessions_title)))
-                card_content(
-                    <ul class="flex flex-col">
-                        for row in &rows {
-                            <li
-                                data-current=(if row.current { "true" } else { "false" })
-                                class="flex items-center gap-3 border-b border-border \
-                                       py-4 first:pt-0 last:border-b-0 last:pb-0"
-                            >
-                                <div class="flex min-w-0 flex-1 flex-col gap-1">
-                                    <div class="flex min-w-0 items-center gap-2">
-                                        icon(
-                                            data: row.icon.clone(),
-                                            attrs: attributes! {
-                                                class="size-4 shrink-0 \
-                                                       text-muted-foreground"
-                                            }
-                                        )
-                                        <span
-                                            class="truncate text-sm font-medium"
-                                            title=(row.user_agent.as_deref())
-                                        >
-                                            (row.title.as_str())
-                                        </span>
-                                    </div>
-                                    <span class="text-sm text-muted-foreground">
-                                        (row.details.as_str())
+        card(
+            card_header(card_title((sessions_title)))
+            card_content(
+                <ul class="flex flex-col">
+                    for row in &rows {
+                        <li
+                            data-current=(if row.current { "true" } else { "false" })
+                            class="flex items-center gap-3 border-b border-border \
+                                   py-4 first:pt-0 last:border-b-0 last:pb-0"
+                        >
+                            <div class="flex min-w-0 flex-1 flex-col gap-1">
+                                <div class="flex min-w-0 items-center gap-2">
+                                    icon(
+                                        data: row.icon.clone(),
+                                        attrs: attributes! {
+                                            class="size-4 shrink-0 \
+                                                   text-muted-foreground"
+                                        }
+                                    )
+                                    <span
+                                        class="truncate text-sm font-medium"
+                                        title=(row.user_agent.as_deref())
+                                    >
+                                        (row.title.as_str())
                                     </span>
                                 </div>
-                                <div class="flex shrink-0 items-center gap-2">
-                                    if row.current {
-                                        badge(
-                                            variant: BadgeVariant::Secondary,
-                                            (current_label.as_str())
-                                        )
-                                    }
-                                    <form method="post" action=(href!(submit))>
+                                <span class="text-sm text-muted-foreground">
+                                    (row.details.as_str())
+                                </span>
+                            </div>
+                            <div class="flex shrink-0 items-center gap-2">
+                                if row.current {
+                                    badge(
+                                        variant: BadgeVariant::Secondary,
+                                        (current_label.as_str())
+                                    )
+                                }
+                                <form method="post" action=(href!(submit))>
+                                    <input
+                                        type="hidden"
+                                        name="session_id"
+                                        value=(row.id.as_str())
+                                    >
+                                    button(
+                                        variant: ButtonVariant::Destructive,
+                                        size: ButtonSize::Sm,
+                                        attrs: attributes! { type="submit" },
+                                        (revoke_label.as_str())
+                                    )
+                                </form>
+                            </div>
+                        </li>
+                    }
+                </ul>
+            )
+        )
+    }
+}
+
+/// What the tokens card shows besides the list: the creation form's
+/// state, and — right after a creation — the secret, once.
+#[derive(Default)]
+struct TokensForm {
+    /// The name the form shows (the submitted one on a failed
+    /// creation, empty otherwise).
+    name: String,
+    /// The name field's error, when the last submission was blank.
+    name_error: Option<String>,
+    /// The token just created, as (name, secret): rendered in a
+    /// confirmation notice this once — the secret is never stored and
+    /// never shown again ([`platform_core::api_token`]).
+    issued: Option<(String, String)>,
+}
+
+/// One token row, localized ahead of the view.
+struct TokenRow {
+    id: String,
+    name: String,
+    prefix: String,
+    details: String,
+    revoke_name: String,
+}
+
+/// The API tokens card: the one-time secret notice when a token was
+/// just created (`role="status"` — a confirmation, not an
+/// interruption), the creation form (name field, [`tokens::submit`]),
+/// then the account's live tokens newest first — name, the non-secret
+/// prefix in monospace, created/expires dates, and a per-token
+/// revocation POST ([`tokens::revoke::submit`]) whose button is named
+/// after the token for assistive tech. Each row carries
+/// `data-token-id` for tests.
+#[component]
+async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
+    let account = require_account(cx).await?;
+    let mut db = db(cx);
+    let tokens =
+        platform_core::list_live_api_tokens(&mut db, account.id, jiff::Timestamp::now()).await?;
+
+    let title = t(cx, "settings.security.tokens.title").await?;
+    let description = t_args(
+        cx,
+        "settings.security.tokens.description",
+        &super::super::one_arg(
+            "months",
+            i64::from(platform_core::API_TOKEN_LIFETIME_MONTHS),
+        ),
+    )
+    .await?;
+    let name_label = t(cx, "settings.security.tokens.name").await?;
+    let create_label = t(cx, "settings.security.tokens.create").await?;
+    let empty_label = t(cx, "settings.security.tokens.empty").await?;
+    let revoke_label = t(cx, "settings.security.tokens.revoke").await?;
+    let issued_hint = t(cx, "settings.security.tokens.issued.hint").await?;
+    let issued = match &form.issued {
+        Some((name, secret)) => Some((
+            t_args(
+                cx,
+                "settings.security.tokens.issued.title",
+                &super::super::one_arg("name", name.as_str()),
+            )
+            .await?,
+            secret.as_str(),
+        )),
+        None => None,
+    };
+
+    let mut rows = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        let created = t_args(
+            cx,
+            "settings.security.tokens.created",
+            &super::super::one_arg("date", super::super::utc_date_arg(token.created_at)),
+        )
+        .await?;
+        let expires = t_args(
+            cx,
+            "settings.security.tokens.expires",
+            &super::super::one_arg("date", super::super::utc_date_arg(token.expires_at)),
+        )
+        .await?;
+        let revoke_name = t_args(
+            cx,
+            "settings.security.tokens.revoke-named",
+            &super::super::one_arg("name", token.name.as_str()),
+        )
+        .await?;
+        rows.push(TokenRow {
+            id: token.id.to_string(),
+            name: token.name.clone(),
+            prefix: format!("{}…", token.prefix),
+            details: format!("{created} · {expires}"),
+            revoke_name,
+        });
+    }
+
+    view! {
+        card(
+            card_header(
+                card_title((title))
+                card_description((description))
+            )
+            card_content(
+                <div class="flex flex-col gap-6">
+                    if let Some((issued_title, secret)) = &issued {
+                        alert(
+                            variant: AlertVariant::Neutral,
+                            attrs: attributes! { role="status" },
+                            alert_title((issued_title.as_str()))
+                            alert_description(
+                                <p>(issued_hint.as_str())</p>
+                                <code
+                                    id="api-token-secret"
+                                    class="mt-2 block rounded-md bg-foreground/5 px-2 py-1 \
+                                           font-mono text-sm break-all select-all"
+                                >
+                                    (*secret)
+                                </code>
+                            )
+                        )
+                    }
+                    <form
+                        method="post"
+                        action=(href!(tokens::submit))
+                        class="flex flex-col gap-4 sm:flex-row sm:items-end"
+                    >
+                        <div class="flex-1">
+                            field(
+                                id: "api-token-name",
+                                label: name_label,
+                                error: form.name_error,
+                                attrs: attributes! {
+                                    type="text"
+                                    name="name"
+                                    value=(form.name.as_str())
+                                    required=""
+                                    maxlength=(platform_core::MAX_API_TOKEN_NAME_CHARS
+                                        .to_string())
+                                    autocomplete="off"
+                                }
+                            )
+                        </div>
+                        button(attrs: attributes! { type="submit" }, (create_label))
+                    </form>
+                    if rows.is_empty() {
+                        <p class="text-sm text-muted-foreground">(empty_label)</p>
+                    } else {
+                        <ul class="flex flex-col">
+                            for row in &rows {
+                                <li
+                                    data-token-id=(row.id.as_str())
+                                    class="flex items-center gap-3 border-b border-border \
+                                           py-4 first:pt-0 last:border-b-0 last:pb-0"
+                                >
+                                    <div class="flex min-w-0 flex-1 flex-col gap-1">
+                                        <div class="flex min-w-0 items-center gap-2">
+                                            <span class="truncate text-sm font-medium">
+                                                (row.name.as_str())
+                                            </span>
+                                            <code
+                                                class="shrink-0 font-mono text-xs text-muted-foreground"
+                                            >
+                                                (row.prefix.as_str())
+                                            </code>
+                                        </div>
+                                        <span class="text-sm text-muted-foreground">
+                                            (row.details.as_str())
+                                        </span>
+                                    </div>
+                                    <form method="post" action=(href!(tokens::revoke::submit))>
                                         <input
                                             type="hidden"
-                                            name="session_id"
+                                            name="token_id"
                                             value=(row.id.as_str())
                                         >
                                         button(
                                             variant: ButtonVariant::Destructive,
                                             size: ButtonSize::Sm,
-                                            attrs: attributes! { type="submit" },
+                                            attrs: attributes! { type="submit" aria-label=(row.revoke_name.as_str()) },
                                             (revoke_label.as_str())
                                         )
                                     </form>
-                                </div>
-                            </li>
-                        }
-                    </ul>
-                )
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
             )
         )
     }
+}
+
+/// The security tab's cards inside the settings shell: sessions, then
+/// API tokens. Shared by the GET [`page`] and [`tokens::submit`]'s
+/// re-render.
+#[component]
+async fn security_cards(cx: &Cx, tokens_form: TokensForm) -> Result {
+    // Guard here too, so the composition fails closed even before
+    // the cards' own guards run (the layout maps it to the redirect).
+    require_account(cx).await?;
+    view! {
+        settings_shell(
+            active: Tab::Security,
+            <div class="flex flex-col gap-6">
+                sessions_card()
+                api_tokens_card(form: tokens_form)
+            </div>
+        )
+    }
+}
+
+/// The security tab.
+#[page]
+pub async fn page() -> Result {
+    view! { security_cards(tokens_form: TokensForm::default()) }
 }
 
 /// Revokes one session. The destroy is the *scoped*

@@ -2,7 +2,9 @@
 //! gate, the account profile card, and the security tab's session
 //! list with per-session revocation (metadata capture and the parsed
 //! browser title, the current-session marker, account scoping, and
-//! the unknown-browser fallback for junk or absent user agents).
+//! the unknown-browser fallback for junk or absent user agents) and
+//! API tokens card (one-time secret, listing, validation, scoped
+//! revocation).
 
 use topcoat::{
     router::{StatusCode, header},
@@ -510,4 +512,233 @@ async fn forged_locale_is_a_bad_request() {
         ))
         .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Creates a token through the form and returns the page that shows
+/// the secret once, asserting the creation contract (200, status
+/// notice, the secret in its `<code>`).
+async fn create_token(router: &topcoat::router::Router, cookie: &str, name: &str) -> String {
+    let response = router
+        .handle(post(
+            "/settings/security/tokens",
+            &[("cookie", cookie)],
+            form_body(&[("name", name)]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    body_text(response).await
+}
+
+/// The secret out of a creation response.
+fn secret_in(html: &str) -> String {
+    let start = html
+        .find(r#"id="api-token-secret""#)
+        .expect("the secret code block");
+    let rest = &html[start..];
+    let open = rest.find('>').unwrap() + 1;
+    let close = rest.find("</code>").unwrap();
+    rest[open..close].trim().to_owned()
+}
+
+#[tokio::test]
+async fn api_token_is_created_shown_once_and_listed() {
+    let Some((router, db)) = test_app().await else {
+        return;
+    };
+    let mut db = db;
+    let cookie = crate::harness::signup(
+        &router,
+        "Tokens",
+        &unique_email("settings-tokens"),
+        "s3cret-enough",
+    )
+    .await;
+
+    // Empty state.
+    let html = body_text(
+        router
+            .handle(get("/settings/security", &[("cookie", &cookie)]))
+            .await,
+    )
+    .await;
+    assert!(html.contains("API tokens"), "{html}");
+    assert!(html.contains("No API tokens."), "{html}");
+    assert!(html.contains("6 months"), "{html}");
+
+    // Creation shows the secret once, in a status notice.
+    let html = create_token(&router, &cookie, "  CI deploy ").await;
+    assert!(html.contains(r#"role="status""#), "{html}");
+    assert!(html.contains("Token “CI deploy” created"), "{html}");
+    assert!(html.contains("it will not be shown again"), "{html}");
+    let secret = secret_in(&html);
+    assert!(secret.starts_with("varve_"), "{secret}");
+    assert_eq!(secret.len(), 49, "{secret}");
+    // The same response already lists the token, by name and by its
+    // non-secret prefix, with the revoke button named after it.
+    assert!(html.contains("data-token-id="), "{html}");
+    assert!(html.contains(&format!("{}…", &secret[..12])), "{html}");
+    assert!(
+        html.contains(r#"aria-label="Revoke token CI deploy""#),
+        "{html}"
+    );
+    let today = jiff::Timestamp::now()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .date();
+    let medium = today.strftime("%b %-d, %Y").to_string();
+    assert!(html.contains(&format!("Created on {medium}")), "{html}");
+
+    // The secret resolves in storage — and the storage holds a hash,
+    // never the secret.
+    let now = jiff::Timestamp::now();
+    let token = platform_core::find_live_api_token(&mut db, &secret, now)
+        .await
+        .expect("lookup")
+        .expect("the shown secret authenticates");
+    assert_eq!(token.name, "CI deploy");
+    assert_ne!(token.token_hash, secret);
+    assert!(
+        !token.token_hash.contains(&secret[6..]),
+        "hash must not embed the secret"
+    );
+
+    // A plain GET lists the token but never the secret again.
+    let html = body_text(
+        router
+            .handle(get("/settings/security", &[("cookie", &cookie)]))
+            .await,
+    )
+    .await;
+    assert!(html.contains("CI deploy"), "{html}");
+    assert!(!html.contains(&secret), "{html}");
+    assert!(!html.contains("api-token-secret"), "{html}");
+    assert!(!html.contains("No API tokens."), "{html}");
+}
+
+#[tokio::test]
+async fn blank_token_name_rerenders_with_an_error_and_creates_nothing() {
+    let Some((router, db)) = test_app().await else {
+        return;
+    };
+    let mut db = db;
+    let email = unique_email("settings-tokens-blank");
+    let cookie = crate::harness::signup(&router, "Blank", &email, "s3cret-enough").await;
+
+    let html = create_token(&router, &cookie, "   ").await;
+    assert!(html.contains("Please enter a token name."), "{html}");
+    assert!(
+        html.contains(r#"aria-describedby="api-token-name-error""#),
+        "{html}"
+    );
+    assert!(!html.contains("api-token-secret"), "{html}");
+
+    let account = platform_core::verify_credentials(&mut db, &email, "s3cret-enough")
+        .await
+        .expect("verify")
+        .expect("account");
+    assert!(
+        platform_core::list_live_api_tokens(&mut db, account.id, jiff::Timestamp::now())
+            .await
+            .expect("list")
+            .is_empty()
+    );
+
+    // Over the length limit: a forged request (the input has
+    // `maxlength`), answered 400.
+    let response = router
+        .handle(post(
+            "/settings/security/tokens",
+            &[("cookie", &cookie)],
+            form_body(&[("name", &"x".repeat(101))]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn token_revocation_is_scoped_to_the_account() {
+    let Some((router, db)) = test_app().await else {
+        return;
+    };
+    let mut db = db;
+    let owner_cookie = crate::harness::signup(
+        &router,
+        "Owner",
+        &unique_email("settings-tokens-owner"),
+        "s3cret-enough",
+    )
+    .await;
+    let other_cookie = crate::harness::signup(
+        &router,
+        "Other",
+        &unique_email("settings-tokens-other"),
+        "s3cret-enough",
+    )
+    .await;
+
+    let html = create_token(&router, &owner_cookie, "Mine").await;
+    let secret = secret_in(&html);
+    let start = html.find(r#"data-token-id=""#).unwrap() + r#"data-token-id=""#.len();
+    let token_id = &html[start..start + 36];
+
+    // Another account's revocation: same 303, nothing deleted.
+    let response = router
+        .handle(post(
+            "/settings/security/tokens/revoke",
+            &[("cookie", &other_cookie)],
+            form_body(&[("token_id", token_id)]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings/security");
+    assert!(
+        platform_core::find_live_api_token(&mut db, &secret, jiff::Timestamp::now())
+            .await
+            .expect("lookup")
+            .is_some()
+    );
+
+    // The owner's revocation: 303 back to the tab, the token is gone
+    // and no longer authenticates.
+    let response = router
+        .handle(post(
+            "/settings/security/tokens/revoke",
+            &[("cookie", &owner_cookie)],
+            form_body(&[("token_id", token_id)]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings/security");
+    assert!(
+        platform_core::find_live_api_token(&mut db, &secret, jiff::Timestamp::now())
+            .await
+            .expect("lookup")
+            .is_none()
+    );
+    let html = body_text(
+        router
+            .handle(get("/settings/security", &[("cookie", &owner_cookie)]))
+            .await,
+    )
+    .await;
+    assert!(!html.contains("data-token-id="), "{html}");
+
+    // A junk id is a 400; an anonymous revocation is the signin
+    // redirect, like every other settings POST.
+    let response = router
+        .handle(post(
+            "/settings/security/tokens/revoke",
+            &[("cookie", &owner_cookie)],
+            form_body(&[("token_id", "nope")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response = router
+        .handle(post(
+            "/settings/security/tokens/revoke",
+            &[],
+            form_body(&[("token_id", token_id)]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/signin");
 }

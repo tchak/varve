@@ -81,6 +81,41 @@ pub const EN: &[(&str, &str)] = &[
         "settings.security.sessions.expires",
         "Expires on {$date :date style=medium}",
     ),
+    ("settings.security.tokens.title", "API tokens"),
+    (
+        "settings.security.tokens.description",
+        "Tokens authenticate API clients as your account. Each token expires {$months} months after it is created.",
+    ),
+    ("settings.security.tokens.name", "Token name"),
+    ("settings.security.tokens.create", "Create token"),
+    (
+        "settings.security.tokens.error.name-required",
+        "Please enter a token name.",
+    ),
+    (
+        "settings.security.tokens.issued.title",
+        "Token “{$name}” created",
+    ),
+    (
+        "settings.security.tokens.issued.hint",
+        "Copy it now: it will not be shown again.",
+    ),
+    ("settings.security.tokens.empty", "No API tokens."),
+    ("settings.security.tokens.revoke", "Revoke"),
+    // The per-row button's accessible name (`aria-label`): keeps the
+    // visible "Revoke" as its head (WCAG 2.5.3) and names the token.
+    (
+        "settings.security.tokens.revoke-named",
+        "Revoke token {$name}",
+    ),
+    (
+        "settings.security.tokens.created",
+        "Created on {$date :date style=medium}",
+    ),
+    (
+        "settings.security.tokens.expires",
+        "Expires on {$date :date style=medium}",
+    ),
     ("error.not-found", "Page not found."),
 ];
 
@@ -149,6 +184,40 @@ pub const FR: &[(&str, &str)] = &[
     ),
     (
         "settings.security.sessions.expires",
+        "Expire le {$date :date style=medium}",
+    ),
+    ("settings.security.tokens.title", "Jetons d’API"),
+    (
+        "settings.security.tokens.description",
+        "Les jetons authentifient les clients de l’API au nom de votre compte. Chaque jeton expire {$months} mois après sa création.",
+    ),
+    ("settings.security.tokens.name", "Nom du jeton"),
+    ("settings.security.tokens.create", "Créer un jeton"),
+    (
+        "settings.security.tokens.error.name-required",
+        "Veuillez saisir un nom de jeton.",
+    ),
+    (
+        "settings.security.tokens.issued.title",
+        "Jeton «\u{a0}{$name}\u{a0}» créé",
+    ),
+    (
+        "settings.security.tokens.issued.hint",
+        "Copiez-le maintenant\u{a0}: il ne sera plus affiché.",
+    ),
+    ("settings.security.tokens.empty", "Aucun jeton d’API."),
+    ("settings.security.tokens.revoke", "Révoquer"),
+    // See the English table: the per-row button's `aria-label`.
+    (
+        "settings.security.tokens.revoke-named",
+        "Révoquer le jeton {$name}",
+    ),
+    (
+        "settings.security.tokens.created",
+        "Créé le {$date :date style=medium}",
+    ),
+    (
+        "settings.security.tokens.expires",
         "Expire le {$date :date style=medium}",
     ),
     ("error.not-found", "Page introuvable."),
