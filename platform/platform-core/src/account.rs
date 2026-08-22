@@ -20,7 +20,7 @@ use std::sync::OnceLock;
 use toasty::Deferred;
 
 use crate::api_token::ApiToken;
-use crate::organization::{Organization, OrganizationMembership};
+use crate::organization::{Member, Organization, OrganizationMembership};
 use crate::session::Session;
 use crate::team::{Team, TeamMembership};
 
@@ -31,6 +31,34 @@ use argon2::{
         rand_core::OsRng,
     },
 };
+
+/// Resolves `(account id, joined at)` pairs to [`Member`]s in one
+/// query, preserving the input order. Shared by the organization and
+/// team member listings.
+pub(crate) async fn members_of(
+    db: &mut toasty::Db,
+    joined: Vec<(uuid::Uuid, jiff::Timestamp)>,
+) -> toasty::Result<Vec<Member>> {
+    if joined.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<uuid::Uuid> = joined.iter().map(|(id, _)| *id).collect();
+    let mut accounts: std::collections::HashMap<uuid::Uuid, Account> =
+        Account::filter(Account::fields().id().in_list(ids))
+            .exec(db)
+            .await?
+            .into_iter()
+            .map(|a| (a.id, a))
+            .collect();
+    Ok(joined
+        .into_iter()
+        .filter_map(|(id, joined_at)| {
+            accounts
+                .remove(&id)
+                .map(|account| Member { account, joined_at })
+        })
+        .collect())
+}
 
 /// A platform account: the unit both browser sessions and API tokens
 /// authenticate as (P.7).

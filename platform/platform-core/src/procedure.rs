@@ -56,6 +56,32 @@ pub async fn create_procedure(
         .await
 }
 
+/// Looks a procedure up by id.
+pub async fn find_procedure(
+    db: &mut toasty::Db,
+    id: uuid::Uuid,
+) -> toasty::Result<Option<Procedure>> {
+    Procedure::filter_by_id(id).first().exec(db).await
+}
+
+/// The procedures `account_id` administers — those owned by any
+/// organization the account is a member of — oldest first.
+pub async fn list_account_procedures(
+    db: &mut toasty::Db,
+    account_id: uuid::Uuid,
+) -> toasty::Result<Vec<Procedure>> {
+    Procedure::filter(
+        Procedure::fields().organization().memberships().any(
+            crate::organization::OrganizationMembership::fields()
+                .account_id()
+                .eq(account_id),
+        ),
+    )
+    .order_by(Procedure::fields().created_at().asc())
+    .exec(db)
+    .await
+}
+
 /// The procedures an organization owns, oldest first.
 pub async fn list_organization_procedures(
     db: &mut toasty::Db,

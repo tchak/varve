@@ -128,6 +128,14 @@ pub async fn create_organization(
     created.ok_or(CreateOrganizationError::SlugTaken)
 }
 
+/// Looks an organization up by id.
+pub async fn find_organization(
+    db: &mut toasty::Db,
+    id: uuid::Uuid,
+) -> toasty::Result<Option<Organization>> {
+    Organization::filter_by_id(id).first().exec(db).await
+}
+
 /// Looks an organization up by its (normalized) slug.
 pub async fn find_organization_by_slug(
     db: &mut toasty::Db,
@@ -137,6 +145,25 @@ pub async fn find_organization_by_slug(
         .first()
         .exec(db)
         .await
+}
+
+/// Creates an organization **and makes `creator_id` its first
+/// member** — the use case behind "create organization": without
+/// that second write the organization is reachable by nobody
+/// (membership is the only right, P.4). Two writes, not one
+/// transaction: P.9 Q10 (transactions across the platform tables)
+/// is open; a crash between them leaves an orphan organization whose
+/// slug is taken, which is recoverable by an operator and never
+/// grants anything.
+pub async fn create_organization_for(
+    db: &mut toasty::Db,
+    slug: &str,
+    name: &str,
+    creator_id: uuid::Uuid,
+) -> Result<Organization, CreateOrganizationError> {
+    let organization = create_organization(db, slug, name).await?;
+    add_organization_member(db, organization.id, creator_id).await?;
+    Ok(organization)
 }
 
 /// Adds an account to an organization. Idempotent: an existing
@@ -183,6 +210,68 @@ pub async fn is_organization_member(
         .await?
         .is_some(),
     )
+}
+
+/// The members of an organization, oldest membership first, each
+/// with the instant the membership was created. Two queries (the
+/// join rows, then the accounts in one `IN` list), never one per
+/// member.
+pub async fn list_organization_members(
+    db: &mut toasty::Db,
+    organization_id: uuid::Uuid,
+) -> toasty::Result<Vec<Member>> {
+    let memberships = OrganizationMembership::filter_by_organization_id(organization_id)
+        .order_by(OrganizationMembership::fields().created_at().asc())
+        .exec(db)
+        .await?;
+    let joined: Vec<(uuid::Uuid, jiff::Timestamp)> = memberships
+        .into_iter()
+        .map(|m| (m.account_id, m.created_at))
+        .collect();
+    crate::account::members_of(db, joined).await
+}
+
+/// How many procedures the organization owns.
+pub async fn count_organization_procedures(
+    db: &mut toasty::Db,
+    organization_id: uuid::Uuid,
+) -> toasty::Result<u64> {
+    Procedure::filter_by_organization_id(organization_id)
+        .count()
+        .exec(db)
+        .await
+}
+
+/// How many teams the organization has.
+pub async fn count_organization_teams(
+    db: &mut toasty::Db,
+    organization_id: uuid::Uuid,
+) -> toasty::Result<u64> {
+    Team::filter_by_organization_id(organization_id)
+        .count()
+        .exec(db)
+        .await
+}
+
+/// How many members the organization has.
+pub async fn count_organization_members(
+    db: &mut toasty::Db,
+    organization_id: uuid::Uuid,
+) -> toasty::Result<u64> {
+    OrganizationMembership::filter_by_organization_id(organization_id)
+        .count()
+        .exec(db)
+        .await
+}
+
+/// One account's membership in a container (organization or team),
+/// as read APIs expose it: the account plus when it joined.
+#[derive(Debug)]
+pub struct Member {
+    /// The member account.
+    pub account: Account,
+    /// When the membership was created.
+    pub joined_at: jiff::Timestamp,
 }
 
 /// The organizations `account_id` is a member of, oldest first.

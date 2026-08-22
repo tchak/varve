@@ -89,6 +89,61 @@ pub async fn create_team(
         .await
 }
 
+/// Looks a team up by id.
+pub async fn find_team(db: &mut toasty::Db, id: uuid::Uuid) -> toasty::Result<Option<Team>> {
+    Team::filter_by_id(id).first().exec(db).await
+}
+
+/// Whether `account_id` is a member of `team_id` — i.e. reviews for it.
+pub async fn is_team_member(
+    db: &mut toasty::Db,
+    team_id: uuid::Uuid,
+    account_id: uuid::Uuid,
+) -> toasty::Result<bool> {
+    Ok(
+        TeamMembership::filter_by_team_id_and_account_id(team_id, account_id)
+            .first()
+            .exec(db)
+            .await?
+            .is_some(),
+    )
+}
+
+/// Whether `account_id` reviews for any team of `organization_id`.
+pub async fn is_organization_reviewer(
+    db: &mut toasty::Db,
+    organization_id: uuid::Uuid,
+    account_id: uuid::Uuid,
+) -> toasty::Result<bool> {
+    Ok(Team::filter_by_organization_id(organization_id)
+        .filter(
+            Team::fields()
+                .memberships()
+                .any(TeamMembership::fields().account_id().eq(account_id)),
+        )
+        .first()
+        .exec(db)
+        .await?
+        .is_some())
+}
+
+/// The members of a team, oldest membership first (see
+/// [`crate::list_organization_members`] for the query shape).
+pub async fn list_team_members(
+    db: &mut toasty::Db,
+    team_id: uuid::Uuid,
+) -> toasty::Result<Vec<crate::organization::Member>> {
+    let memberships = TeamMembership::filter_by_team_id(team_id)
+        .order_by(TeamMembership::fields().created_at().asc())
+        .exec(db)
+        .await?;
+    let joined: Vec<(uuid::Uuid, jiff::Timestamp)> = memberships
+        .into_iter()
+        .map(|m| (m.account_id, m.created_at))
+        .collect();
+    crate::account::members_of(db, joined).await
+}
+
 /// Adds an account to a team. Idempotent (insert-or-ignore on the
 /// composite key).
 pub async fn add_team_member(
