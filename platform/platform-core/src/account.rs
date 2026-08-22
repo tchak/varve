@@ -19,6 +19,7 @@ use std::sync::OnceLock;
 
 use toasty::Deferred;
 
+use crate::api_token::ApiToken;
 use crate::organization::{Organization, OrganizationMembership};
 use crate::session::Session;
 use crate::team::{Team, TeamMembership};
@@ -65,6 +66,11 @@ pub struct Account {
     /// Set on insert and on every update.
     #[auto]
     pub updated_at: jiff::Timestamp,
+
+    /// API tokens (P.7's integrator transport). Mutate through
+    /// [`crate::api_token`].
+    #[has_many]
+    pub api_tokens: Deferred<Vec<ApiToken>>,
 
     /// Live and expired browser sessions. Mutate through
     /// [`crate::session`], whose functions own expiry and scoping.

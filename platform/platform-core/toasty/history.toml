@@ -19,3 +19,8 @@ snapshot_name = "0002_snapshot.toml"
 id = 3894584656004657910
 name = "0003_drop_redundant_membership_indexes.sql"
 snapshot_name = "0003_snapshot.toml"
+
+[[migrations]]
+id = 8727607206337974332
+name = "0004_api_tokens.sql"
+snapshot_name = "0004_snapshot.toml"

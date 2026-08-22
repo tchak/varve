@@ -13,13 +13,14 @@
 
 use jiff::{SignedDuration, Timestamp};
 use platform_core::{
-    CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, RegisterError,
-    add_organization_member, add_team_member, connect, create_organization, create_procedure,
-    create_session, create_team, delete_account_sessions, delete_session, destroy_session,
-    find_live_session, find_organization_by_slug, is_organization_member,
-    list_account_organizations, list_account_teams, list_live_sessions,
-    list_organization_procedures, list_organization_teams, register, remove_organization_member,
-    remove_team_member, sweep_expired, update_profile, verify_credentials,
+    CreateApiTokenError, CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS,
+    RegisterError, add_organization_member, add_team_member, connect, create_api_token,
+    create_organization, create_procedure, create_session, create_team, delete_account_sessions,
+    delete_session, destroy_api_token, destroy_session, find_live_api_token, find_live_session,
+    find_organization_by_slug, is_organization_member, list_account_organizations,
+    list_account_teams, list_live_api_tokens, list_live_sessions, list_organization_procedures,
+    list_organization_teams, register, remove_organization_member, remove_team_member,
+    sweep_expired, sweep_expired_api_tokens, update_profile, verify_credentials,
 };
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -710,5 +711,132 @@ async fn organization_owns_procedures() {
     assert_eq!(
         second.organization().exec(&mut db).await.unwrap().id,
         org.id
+    );
+}
+
+#[tokio::test]
+async fn api_token_lifecycle() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("token"), "pw", "Tok", None)
+        .await
+        .expect("register");
+    let now = jiff::Timestamp::now();
+
+    let issued = create_api_token(&mut db, account.id, "  CI deploy ", now)
+        .await
+        .expect("create");
+    assert_eq!(issued.token.name, "CI deploy");
+    assert!(issued.secret.starts_with("varve_"), "{}", issued.secret);
+    assert!(issued.token.prefix.len() < issued.secret.len());
+    assert!(issued.secret.starts_with(&issued.token.prefix));
+    // Nothing recoverable is stored: the row holds the hash only.
+    assert_ne!(issued.token.token_hash, issued.secret);
+    assert_eq!(issued.token.created_at, now);
+    assert_eq!(
+        issued.token.expires_at,
+        now.to_zoned(jiff::tz::TimeZone::UTC)
+            .checked_add(jiff::Span::new().months(6))
+            .unwrap()
+            .timestamp()
+    );
+
+    // The secret resolves while live, not once expired, and a wrong
+    // secret resolves to nothing.
+    let found = find_live_api_token(&mut db, &issued.secret, now)
+        .await
+        .expect("find")
+        .expect("live token resolves");
+    assert_eq!(found.id, issued.token.id);
+    assert_eq!(found.account_id, account.id);
+    assert!(
+        find_live_api_token(&mut db, &issued.secret, issued.token.expires_at)
+            .await
+            .expect("find")
+            .is_none()
+    );
+    assert!(
+        find_live_api_token(&mut db, "varve_not-a-real-secret", now)
+            .await
+            .expect("find")
+            .is_none()
+    );
+
+    // Listing is newest first and live-only.
+    let later = now.checked_add(jiff::SignedDuration::from_secs(1)).unwrap();
+    let second = create_api_token(&mut db, account.id, "Second", later)
+        .await
+        .expect("create");
+    let ids: Vec<_> = list_live_api_tokens(&mut db, account.id, later)
+        .await
+        .expect("list")
+        .iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, vec![second.token.id, issued.token.id]);
+    assert!(
+        list_live_api_tokens(&mut db, account.id, issued.token.expires_at)
+            .await
+            .expect("list")
+            .iter()
+            .all(|t| t.id == second.token.id)
+    );
+
+    // Revocation is scoped to the owning account.
+    let other = register(&mut db, &unique_email("token-other"), "pw", "Other", None)
+        .await
+        .expect("register");
+    assert!(
+        !destroy_api_token(&mut db, other.id, issued.token.id)
+            .await
+            .expect("destroy")
+    );
+    assert!(
+        destroy_api_token(&mut db, account.id, issued.token.id)
+            .await
+            .expect("destroy")
+    );
+    assert!(
+        find_live_api_token(&mut db, &issued.secret, now)
+            .await
+            .expect("find")
+            .is_none()
+    );
+
+    // The sweep collects only expired rows.
+    sweep_expired_api_tokens(&mut db, second.token.expires_at)
+        .await
+        .expect("sweep");
+    assert!(
+        list_live_api_tokens(&mut db, account.id, later)
+            .await
+            .expect("list")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn api_token_name_is_validated() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("token-name"), "pw", "Tok", None)
+        .await
+        .expect("register");
+    let now = jiff::Timestamp::now();
+    let err = create_api_token(&mut db, account.id, "   ", now)
+        .await
+        .expect_err("empty name");
+    assert!(matches!(err, CreateApiTokenError::EmptyName), "{err:?}");
+    let err = create_api_token(&mut db, account.id, &"x".repeat(101), now)
+        .await
+        .expect_err("long name");
+    assert!(matches!(err, CreateApiTokenError::NameTooLong), "{err:?}");
+    assert!(
+        list_live_api_tokens(&mut db, account.id, now)
+            .await
+            .expect("list")
+            .is_empty()
     );
 }

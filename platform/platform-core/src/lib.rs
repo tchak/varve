@@ -28,6 +28,7 @@
 #![forbid(unsafe_code)]
 
 pub mod account;
+pub mod api_token;
 pub mod db;
 pub mod organization;
 pub mod principal;
@@ -37,6 +38,11 @@ pub mod team;
 
 pub use account::{
     Account, AuthError, RegisterError, register, update_profile, verify_credentials,
+};
+pub use api_token::{
+    API_TOKEN_LIFETIME_MONTHS, ApiToken, CreateApiTokenError, IssuedToken,
+    MAX_API_TOKEN_NAME_CHARS, api_token_lifetime, create_api_token, destroy_api_token,
+    find_live_api_token, list_live_api_tokens, sweep_expired_api_tokens,
 };
 pub use db::{MIGRATIONS, connect};
 pub use organization::{
