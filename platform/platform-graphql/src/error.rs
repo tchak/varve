@@ -22,7 +22,8 @@ pub enum Code {
 }
 
 impl Code {
-    fn as_str(self) -> &'static str {
+    /// The serialized form.
+    pub fn as_str(self) -> &'static str {
         match self {
             Code::InvalidInput => "INVALID_INPUT",
             Code::Forbidden => "FORBIDDEN",

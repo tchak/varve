@@ -7,6 +7,7 @@ use platform_core::CreateOrganizationError;
 use crate::error::{Code, coded, forbidden, internal, invalid_input};
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::Procedure;
+use crate::slug::Slug;
 use crate::team::Team;
 use crate::{parse_id, session};
 
@@ -16,8 +17,8 @@ pub struct Mutation;
 /// `createOrganization` input.
 #[derive(InputObject)]
 pub struct CreateOrganizationInput {
-    /// URL/API handle; stored trimmed and lowercased.
-    pub slug: String,
+    /// URL/API handle; normalized and validated by the scalar.
+    pub slug: Slug,
     /// Display name.
     pub name: String,
 }
@@ -41,25 +42,6 @@ pub struct CreateProcedureInput {
     /// Free-text description.
     #[graphql(default)]
     pub description: String,
-}
-
-/// The slug characters the API accepts: `[a-z0-9-]`, non-empty. Runs
-/// on the *normalized* slug ([`platform_core::normalize_slug`], the
-/// form the store keeps), so what is validated is exactly what is
-/// stored. Validation belongs to the caller of `platform-core` (P.3);
-/// the schema is that caller.
-fn validate_slug(slug: &str) -> async_graphql::Result<()> {
-    let ok = !slug.is_empty()
-        && slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if ok {
-        Ok(())
-    } else {
-        Err(invalid_input(
-            "slug must be non-empty and contain only a-z, 0-9, and '-'",
-        ))
-    }
 }
 
 fn validate_non_empty(field: &str, value: &str) -> async_graphql::Result<()> {
@@ -100,12 +82,10 @@ impl Mutation {
         input: CreateOrganizationInput,
     ) -> async_graphql::Result<Organization> {
         let (principal, mut db) = session(ctx)?;
-        let slug = platform_core::normalize_slug(&input.slug);
-        validate_slug(&slug)?;
         validate_non_empty("name", &input.name)?;
         match platform_core::create_organization_for(
             &mut db,
-            &slug,
+            input.slug.as_str(),
             &input.name,
             principal.account_id,
         )

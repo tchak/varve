@@ -6,6 +6,7 @@ use crate::error::internal;
 use crate::member::Member;
 use crate::procedure::ProcedureRef;
 use crate::session;
+use crate::slug::Slug;
 use crate::team::TeamRef;
 
 /// The full organization: scalars, bounded child lists as Refs,
@@ -18,9 +19,9 @@ impl Organization {
         ID::from(self.0.id)
     }
 
-    /// Normalized URL/API handle, unique across the platform.
-    async fn slug(&self) -> &str {
-        &self.0.slug
+    /// URL/API handle, unique across the platform.
+    async fn slug(&self) -> Slug {
+        Slug::from(&self.0)
     }
 
     async fn name(&self) -> &str {
@@ -98,7 +99,7 @@ pub struct OrganizationCounts {
 #[derive(Clone)]
 pub struct OrganizationRef {
     id: uuid::Uuid,
-    slug: String,
+    slug: Slug,
     name: String,
 }
 
@@ -106,7 +107,7 @@ impl From<&platform_core::Organization> for OrganizationRef {
     fn from(organization: &platform_core::Organization) -> Self {
         Self {
             id: organization.id,
-            slug: organization.slug.clone(),
+            slug: Slug::from(organization),
             name: organization.name.clone(),
         }
     }
@@ -118,7 +119,7 @@ impl OrganizationRef {
         ID::from(self.id)
     }
 
-    async fn slug(&self) -> &str {
+    async fn slug(&self) -> &Slug {
         &self.slug
     }
 

@@ -386,6 +386,8 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "createTeam(input: CreateTeamInput!): Team!",
         "createProcedure(input: CreateProcedureInput!): Procedure!",
         "scalar DateTime",
+        "scalar Slug",
+        "slug: Slug!",
         "members: [Member!]!",
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");

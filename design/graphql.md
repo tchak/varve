@@ -191,8 +191,9 @@ for "authorization is surface assignment" until surfaces arrive.
    `AccountRef` carries `id`, `name`, `email`: co-members see each
    other's addresses, as DN shows reviewers to each other.
 4. **Errors carry `extensions.code`** (G.2.7 made concrete):
-   `INVALID_INPUT` (malformed id, empty name/title, bad slug
-   characters — `[a-z0-9-]` after normalization), `FORBIDDEN`,
+   `INVALID_INPUT` (malformed id, empty name/title, and a bad slug —
+   `[a-z0-9-]` after normalization, enforced by the `Slug` scalar's
+   parse, so a resolver never sees an invalid one), `FORBIDDEN`,
    `SLUG_TAKEN`, and `INTERNAL` for a platform failure (store error,
    wiring bug): the cause is logged server-side and the message is a
    fixed `internal error` — a store's own error text names constraints,

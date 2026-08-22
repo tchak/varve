@@ -29,6 +29,7 @@ pub mod mutation;
 pub mod organization;
 pub mod procedure;
 pub mod query;
+pub mod slug;
 pub mod team;
 
 use async_graphql::{Context, EmptySubscription, Schema};
