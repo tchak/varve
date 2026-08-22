@@ -2,6 +2,7 @@
 
 use async_graphql::{Context, ID, Object};
 
+use crate::error::internal;
 use crate::member::Member;
 use crate::organization::OrganizationRef;
 use crate::session;
@@ -40,7 +41,9 @@ impl Team {
     /// The reviewers (P.4: team membership *is* being a reviewer).
     async fn members(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<Member>> {
         let (_, mut db) = session(ctx)?;
-        let members = platform_core::list_team_members(&mut db, self.team.id).await?;
+        let members = platform_core::list_team_members(&mut db, self.team.id)
+            .await
+            .map_err(internal)?;
         Ok(members.into_iter().map(Member).collect())
     }
 }

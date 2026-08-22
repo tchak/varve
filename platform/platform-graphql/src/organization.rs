@@ -2,6 +2,7 @@
 
 use async_graphql::{Context, ID, Object};
 
+use crate::error::internal;
 use crate::member::Member;
 use crate::procedure::ProcedureRef;
 use crate::session;
@@ -37,7 +38,9 @@ impl Organization {
     /// The organization's teams, oldest first (bounded, G.2.4).
     async fn teams(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<TeamRef>> {
         let (_, mut db) = session(ctx)?;
-        let teams = platform_core::list_organization_teams(&mut db, self.0.id).await?;
+        let teams = platform_core::list_organization_teams(&mut db, self.0.id)
+            .await
+            .map_err(internal)?;
         Ok(teams
             .into_iter()
             .map(|team| TeamRef::new(team, OrganizationRef::from(&self.0)))
@@ -47,7 +50,9 @@ impl Organization {
     /// The procedures the organization owns, oldest first.
     async fn procedures(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ProcedureRef>> {
         let (_, mut db) = session(ctx)?;
-        let procedures = platform_core::list_organization_procedures(&mut db, self.0.id).await?;
+        let procedures = platform_core::list_organization_procedures(&mut db, self.0.id)
+            .await
+            .map_err(internal)?;
         Ok(procedures
             .into_iter()
             .map(|procedure| ProcedureRef::new(procedure, OrganizationRef::from(&self.0)))
@@ -58,7 +63,9 @@ impl Organization {
     /// organization owns (P.4).
     async fn members(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<Member>> {
         let (_, mut db) = session(ctx)?;
-        let members = platform_core::list_organization_members(&mut db, self.0.id).await?;
+        let members = platform_core::list_organization_members(&mut db, self.0.id)
+            .await
+            .map_err(internal)?;
         Ok(members.into_iter().map(Member).collect())
     }
 
@@ -66,9 +73,15 @@ impl Organization {
     async fn counts(&self, ctx: &Context<'_>) -> async_graphql::Result<OrganizationCounts> {
         let (_, mut db) = session(ctx)?;
         Ok(OrganizationCounts {
-            procedures: platform_core::count_organization_procedures(&mut db, self.0.id).await?,
-            teams: platform_core::count_organization_teams(&mut db, self.0.id).await?,
-            members: platform_core::count_organization_members(&mut db, self.0.id).await?,
+            procedures: platform_core::count_organization_procedures(&mut db, self.0.id)
+                .await
+                .map_err(internal)?,
+            teams: platform_core::count_organization_teams(&mut db, self.0.id)
+                .await
+                .map_err(internal)?,
+            members: platform_core::count_organization_members(&mut db, self.0.id)
+                .await
+                .map_err(internal)?,
         })
     }
 }

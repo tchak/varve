@@ -4219,6 +4219,7 @@ dependencies = [
  "serde_json",
  "toasty",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

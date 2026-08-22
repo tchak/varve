@@ -109,24 +109,6 @@ pub async fn is_team_member(
     )
 }
 
-/// Whether `account_id` reviews for any team of `organization_id`.
-pub async fn is_organization_reviewer(
-    db: &mut toasty::Db,
-    organization_id: uuid::Uuid,
-    account_id: uuid::Uuid,
-) -> toasty::Result<bool> {
-    Ok(Team::filter_by_organization_id(organization_id)
-        .filter(
-            Team::fields()
-                .memberships()
-                .any(TeamMembership::fields().account_id().eq(account_id)),
-        )
-        .first()
-        .exec(db)
-        .await?
-        .is_some())
-}
-
 /// The members of a team, oldest membership first (see
 /// [`crate::list_organization_members`] for the query shape).
 pub async fn list_team_members(

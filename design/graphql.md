@@ -193,7 +193,11 @@ for "authorization is surface assignment" until surfaces arrive.
 4. **Errors carry `extensions.code`** (G.2.7 made concrete):
    `INVALID_INPUT` (malformed id, empty name/title, bad slug
    characters — `[a-z0-9-]` after normalization), `FORBIDDEN`,
-   `SLUG_TAKEN`. Kernel type errors join the set with the kernel edge.
+   `SLUG_TAKEN`, and `INTERNAL` for a platform failure (store error,
+   wiring bug): the cause is logged server-side and the message is a
+   fixed `internal error` — a store's own error text names constraints,
+   tables, and hosts, which are for operators, never for a client.
+   Kernel type errors join the set with the kernel edge.
 5. **`createOrganization` makes the caller the first member.** With
    membership the only right, an organization nobody belongs to is
    unreachable; the use case is the two writes together

@@ -15,6 +15,10 @@ pub enum Code {
     Forbidden,
     /// `createOrganization`: the slug is already taken.
     SlugTaken,
+    /// The platform failed, not the request: a store error or a
+    /// wiring bug. The cause is logged server-side and never
+    /// serialized — a client learns nothing about the database.
+    Internal,
 }
 
 impl Code {
@@ -23,6 +27,7 @@ impl Code {
             Code::InvalidInput => "INVALID_INPUT",
             Code::Forbidden => "FORBIDDEN",
             Code::SlugTaken => "SLUG_TAKEN",
+            Code::Internal => "INTERNAL",
         }
     }
 }
@@ -41,4 +46,29 @@ pub fn invalid_input(message: impl Into<String>) -> Error {
 /// missing target and a foreign one read the same.
 pub fn forbidden() -> Error {
     coded(Code::Forbidden, "forbidden")
+}
+
+/// The one [`Code::Internal`] error. `cause` is logged at `error`
+/// level with its full source chain and replaced by a fixed message:
+/// `toasty::Error`'s `Display` walks the driver chain (constraint and
+/// table names, connection details), which is for operators only.
+pub fn internal(cause: impl std::fmt::Display) -> Error {
+    tracing::error!(error = %cause, "graphql resolver failed");
+    coded(Code::Internal, "internal error")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_masks_the_cause() {
+        let error = internal("connection to server at \"db.internal\" failed");
+        assert_eq!(error.message, "internal error");
+        let extensions = error.extensions.expect("extensions");
+        assert_eq!(
+            extensions.get("code"),
+            Some(&async_graphql::Value::from("INTERNAL"))
+        );
+    }
 }

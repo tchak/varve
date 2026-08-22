@@ -62,10 +62,16 @@ pub async fn execute(
 /// The principal and a database handle, as every resolver reads them
 /// from the request data. Both are present by construction —
 /// [`execute`] is the only entry point and always attaches them; a
-/// miss is a wiring bug, reported as an error rather than a panic.
+/// miss is a wiring bug, reported as [`error::Code::Internal`] rather
+/// than a panic.
 pub(crate) fn session<'a>(ctx: &Context<'a>) -> async_graphql::Result<(&'a Principal, toasty::Db)> {
-    let principal = ctx.data::<Principal>()?;
-    let db = ctx.data::<toasty::Db>()?.clone();
+    let principal = ctx
+        .data::<Principal>()
+        .map_err(|e| error::internal(e.message))?;
+    let db = ctx
+        .data::<toasty::Db>()
+        .map_err(|e| error::internal(e.message))?
+        .clone();
     Ok((principal, db))
 }
 

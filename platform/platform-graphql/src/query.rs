@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use async_graphql::{Context, ID, Object};
 use platform_core::Principal;
 
+use crate::error::internal;
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::{Procedure, ProcedureRef};
 use crate::team::Team;
@@ -33,11 +34,15 @@ impl Query {
     ) -> async_graphql::Result<Option<Organization>> {
         let (principal, mut db) = session(ctx)?;
         let id = parse_id(&id)?;
-        if !platform_core::is_organization_member(&mut db, id, principal.account_id).await? {
+        if !platform_core::is_organization_member(&mut db, id, principal.account_id)
+            .await
+            .map_err(internal)?
+        {
             return Ok(None);
         }
         Ok(platform_core::find_organization(&mut db, id)
-            .await?
+            .await
+            .map_err(internal)?
             .map(Organization))
     }
 
@@ -48,7 +53,9 @@ impl Query {
     ) -> async_graphql::Result<Vec<OrganizationRef>> {
         let (principal, mut db) = session(ctx)?;
         let organizations =
-            platform_core::list_account_organizations(&mut db, principal.account_id).await?;
+            platform_core::list_account_organizations(&mut db, principal.account_id)
+                .await
+                .map_err(internal)?;
         Ok(organizations.iter().map(OrganizationRef::from).collect())
     }
 
@@ -57,21 +64,28 @@ impl Query {
     async fn team(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<Team>> {
         let (principal, mut db) = session(ctx)?;
         let id = parse_id(&id)?;
-        let Some(team) = platform_core::find_team(&mut db, id).await? else {
+        let Some(team) = platform_core::find_team(&mut db, id)
+            .await
+            .map_err(internal)?
+        else {
             return Ok(None);
         };
-        let visible = platform_core::is_team_member(&mut db, team.id, principal.account_id).await?
+        let visible = platform_core::is_team_member(&mut db, team.id, principal.account_id)
+            .await
+            .map_err(internal)?
             || platform_core::is_organization_member(
                 &mut db,
                 team.organization_id,
                 principal.account_id,
             )
-            .await?;
+            .await
+            .map_err(internal)?;
         if !visible {
             return Ok(None);
         }
-        let Some(organization) =
-            platform_core::find_organization(&mut db, team.organization_id).await?
+        let Some(organization) = platform_core::find_organization(&mut db, team.organization_id)
+            .await
+            .map_err(internal)?
         else {
             return Ok(None);
         };
@@ -90,7 +104,10 @@ impl Query {
     ) -> async_graphql::Result<Option<Procedure>> {
         let (principal, mut db) = session(ctx)?;
         let id = parse_id(&id)?;
-        let Some(procedure) = platform_core::find_procedure(&mut db, id).await? else {
+        let Some(procedure) = platform_core::find_procedure(&mut db, id)
+            .await
+            .map_err(internal)?
+        else {
             return Ok(None);
         };
         if !platform_core::is_organization_member(
@@ -98,12 +115,15 @@ impl Query {
             procedure.organization_id,
             principal.account_id,
         )
-        .await?
+        .await
+        .map_err(internal)?
         {
             return Ok(None);
         }
         let Some(organization) =
-            platform_core::find_organization(&mut db, procedure.organization_id).await?
+            platform_core::find_organization(&mut db, procedure.organization_id)
+                .await
+                .map_err(internal)?
         else {
             return Ok(None);
         };
@@ -121,12 +141,14 @@ impl Query {
         // no query per procedure.
         let organizations: HashMap<uuid::Uuid, OrganizationRef> =
             platform_core::list_account_organizations(&mut db, principal.account_id)
-                .await?
+                .await
+                .map_err(internal)?
                 .iter()
                 .map(|o| (o.id, OrganizationRef::from(o)))
                 .collect();
-        let procedures =
-            platform_core::list_account_procedures(&mut db, principal.account_id).await?;
+        let procedures = platform_core::list_account_procedures(&mut db, principal.account_id)
+            .await
+            .map_err(internal)?;
         Ok(procedures
             .into_iter()
             .filter_map(|procedure| {

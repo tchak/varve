@@ -12,6 +12,7 @@ license.workspace = true
 [dependencies]
 async-graphql = { version = "8.0.0-rc.5", features = ["uuid", "jiff"] }
 jiff = "0.2"
+tracing = "0.1"
 platform-core = { version = "0.1.0", path = "../platform-core" }
 toasty = { version = "0.10.0", features = ["postgresql", "jiff"] }
 uuid = "1"

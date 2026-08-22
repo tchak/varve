@@ -4,7 +4,7 @@
 use async_graphql::{Context, ID, InputObject, Object};
 use platform_core::CreateOrganizationError;
 
-use crate::error::{Code, coded, forbidden, invalid_input};
+use crate::error::{Code, coded, forbidden, internal, invalid_input};
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::Procedure;
 use crate::team::Team;
@@ -43,11 +43,12 @@ pub struct CreateProcedureInput {
     pub description: String,
 }
 
-/// The slug characters the API accepts: `[a-z0-9-]`, non-empty, after
-/// the store's trim/lowercase. Validation belongs to the caller of
-/// `platform-core` (P.3); the schema is that caller.
+/// The slug characters the API accepts: `[a-z0-9-]`, non-empty. Runs
+/// on the *normalized* slug ([`platform_core::normalize_slug`], the
+/// form the store keeps), so what is validated is exactly what is
+/// stored. Validation belongs to the caller of `platform-core` (P.3);
+/// the schema is that caller.
 fn validate_slug(slug: &str) -> async_graphql::Result<()> {
-    let slug = slug.trim();
     let ok = !slug.is_empty()
         && slug
             .chars()
@@ -78,11 +79,15 @@ async fn administered_organization(
     id: &ID,
 ) -> async_graphql::Result<platform_core::Organization> {
     let id = parse_id(id)?;
-    if !platform_core::is_organization_member(db, id, account_id).await? {
+    if !platform_core::is_organization_member(db, id, account_id)
+        .await
+        .map_err(internal)?
+    {
         return Err(forbidden());
     }
     platform_core::find_organization(db, id)
-        .await?
+        .await
+        .map_err(internal)?
         .ok_or_else(forbidden)
 }
 
@@ -95,11 +100,12 @@ impl Mutation {
         input: CreateOrganizationInput,
     ) -> async_graphql::Result<Organization> {
         let (principal, mut db) = session(ctx)?;
-        validate_slug(&input.slug.to_lowercase())?;
+        let slug = platform_core::normalize_slug(&input.slug);
+        validate_slug(&slug)?;
         validate_non_empty("name", &input.name)?;
         match platform_core::create_organization_for(
             &mut db,
-            &input.slug,
+            &slug,
             &input.name,
             principal.account_id,
         )
@@ -110,7 +116,7 @@ impl Mutation {
                 Code::SlugTaken,
                 "an organization with this slug already exists",
             )),
-            Err(CreateOrganizationError::Db(e)) => Err(e.into()),
+            Err(CreateOrganizationError::Db(e)) => Err(internal(e)),
         }
     }
 
@@ -125,7 +131,9 @@ impl Mutation {
         let organization =
             administered_organization(&mut db, principal.account_id, &input.organization_id)
                 .await?;
-        let team = platform_core::create_team(&mut db, organization.id, &input.name).await?;
+        let team = platform_core::create_team(&mut db, organization.id, &input.name)
+            .await
+            .map_err(internal)?;
         Ok(Team {
             team,
             organization: OrganizationRef::from(&organization),
@@ -150,7 +158,8 @@ impl Mutation {
             &input.title,
             &input.description,
         )
-        .await?;
+        .await
+        .map_err(internal)?;
         Ok(Procedure {
             procedure,
             organization: OrganizationRef::from(&organization),

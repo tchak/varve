@@ -107,7 +107,7 @@ pub enum CreateOrganizationError {
 /// Normalizes a slug for storage and lookup: trim, lowercase. What
 /// characters a slug may contain is the caller's validation (P.3);
 /// this crate only guarantees the stored form is canonical.
-fn normalize_slug(slug: &str) -> String {
+pub fn normalize_slug(slug: &str) -> String {
     slug.trim().to_lowercase()
 }
 

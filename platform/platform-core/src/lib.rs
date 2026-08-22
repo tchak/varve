@@ -49,7 +49,7 @@ pub use organization::{
     CreateOrganizationError, Member, Organization, OrganizationMembership, add_organization_member,
     count_organization_members, count_organization_procedures, count_organization_teams,
     create_organization, create_organization_for, find_organization, find_organization_by_slug,
-    is_organization_member, list_account_organizations, list_organization_members,
+    is_organization_member, list_account_organizations, list_organization_members, normalize_slug,
     remove_organization_member,
 };
 pub use principal::Principal;
@@ -62,7 +62,6 @@ pub use session::{
     delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,
 };
 pub use team::{
-    Team, TeamMembership, add_team_member, create_team, find_team, is_organization_reviewer,
-    is_team_member, list_account_teams, list_organization_teams, list_team_members,
-    remove_team_member,
+    Team, TeamMembership, add_team_member, create_team, find_team, is_team_member,
+    list_account_teams, list_organization_teams, list_team_members, remove_team_member,
 };
