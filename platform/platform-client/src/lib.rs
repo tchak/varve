@@ -23,6 +23,7 @@ use std::future::Future;
 use serde::de::DeserializeOwned;
 
 pub mod organization;
+pub mod procedure;
 pub mod team;
 pub mod viewer;
 
