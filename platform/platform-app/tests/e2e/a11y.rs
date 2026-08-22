@@ -182,6 +182,46 @@ async fn axe_scenario(
     .to_be_visible()
     .await?;
     check_axe(&page, "/organizations/{id}").await?;
+
+    // The organization's teams: empty, the form in its error state
+    // (a blank name — whitespace, since the field is `required`),
+    // then populated.
+    page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("Manage teams").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#team-name")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/teams (empty)").await?;
+    page.locator(locator!("#team-name"))
+        .fill("   ", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Create team").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#team-name[aria-invalid='true']")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/teams (name error)").await?;
+    page.locator(locator!("#team-name"))
+        .fill("Axe reviewers", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Create team").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("li[data-team-id]")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/teams (populated)").await?;
     page.goto(&app.url("/organizations"), None).await?;
     check_axe(&page, "/organizations (populated)").await?;
     Ok(())

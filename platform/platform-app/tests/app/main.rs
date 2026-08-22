@@ -36,3 +36,4 @@ mod i18n;
 mod organizations;
 mod settings;
 mod shell;
+mod teams;

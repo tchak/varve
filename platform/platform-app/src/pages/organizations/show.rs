@@ -8,13 +8,17 @@
 //! page keeps that property at the URL — a non-member learns nothing
 //! from the status code. A non-UUID segment is 404 too (`error =
 //! not_found`), never a 400 that would distinguish it.
+//!
+//! The [`teams`] submodule is `/organizations/{id}/teams`.
+
+pub(super) mod teams;
 
 use cynic::QueryBuilder;
 use platform_client::organization::{Organization, OrganizationQuery, OrganizationVariables};
 use topcoat::{
     Result,
     context::Cx,
-    router::{error::RouterErrorExt, page, path_param},
+    router::{error::RouterErrorExt, href, page, path_param},
     view::{component, view},
 };
 
@@ -70,6 +74,8 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
     )
     .await?;
     let teams_empty = t(cx, "organization.teams.empty").await?;
+    let teams_manage = t(cx, "organization.teams.manage").await?;
+    let organization_id: uuid::Uuid = organization.id.inner().parse()?;
     let procedures_heading = t_args(
         cx,
         "organization.procedures.title",
@@ -110,7 +116,17 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
                 )
             )
             card(
-                card_header(<h2 class="leading-none font-semibold">(teams_heading)</h2>)
+                card_header(
+                    <div class="flex items-center justify-between gap-3">
+                        <h2 class="leading-none font-semibold">(teams_heading)</h2>
+                        <a
+                            href=(href!(teams::page, OrganizationId(organization_id)))
+                            class="text-sm font-medium underline-offset-4 hover:underline"
+                        >
+                            (teams_manage)
+                        </a>
+                    </div>
+                )
                 card_content(
                     if organization.teams.is_empty() {
                         <p class="text-sm text-muted-foreground">(teams_empty)</p>
