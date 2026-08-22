@@ -33,8 +33,10 @@ form builders exist. It is the versioning kernel underneath:
   a revision: what breaks, what loses information, and exactly which
   records fail — the artifact no form platform offers.
 
-`DESIGN.md` is the full design document and single source of truth,
-including every decision's rationale and the open questions.
+`design/kernel.md` is the full kernel design document and single source
+of truth, including every decision's rationale and the open questions;
+`design/platform.md` designs the platform above it and
+`design/graphql.md` the public schema.
 
 ## Status
 
@@ -74,7 +76,7 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
 - `tools/m0` — the corpus harness (oracle over the public DN dataset)
 - `fuzz/` — cargo-fuzz targets (see below)
 - `corpus/` — corpus analyses and results
-- `DESIGN.md` — the design document
+- `design/` — the design documents: `kernel.md`, `platform.md`, `graphql.md`
 
 Everything below the storage tier is deterministic: no IO, no clock, no
 async — timestamps and salts are inputs.

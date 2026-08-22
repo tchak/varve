@@ -1,4 +1,4 @@
-//! M0 expressibility harness (§8 of DESIGN.md).
+//! M0 expressibility harness (§8 of design/kernel.md).
 //!
 //! Reads the DN corpus (data.gouv.fr "descriptif des démarches publiées")
 //! and attempts to express every procedure in the proposed kernel model.

@@ -6,7 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 # The public GraphQL schema and its resolvers, executed in-process
-# over a `Principal` (PLATFORM.md P.3, P.5). Knows nothing of
+# over a `Principal` (design/platform.md P.3, P.5). Knows nothing of
 # sessions or tokens: the transport (`platform-app`'s `/graphql`
 # route) resolves the principal and hands it in as request data.
 [dependencies]

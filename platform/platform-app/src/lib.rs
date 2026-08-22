@@ -1,4 +1,4 @@
-//! The Topcoat app shell (PLATFORM.md P.3): browser sessions adapted
+//! The Topcoat app shell (design/platform.md P.3): browser sessions adapted
 //! onto `platform-core`'s session storage, principal resolution, locale
 //! resolution, and the P0 pages — home, signin, signup, signout.
 //!

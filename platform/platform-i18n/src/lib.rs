@@ -1,5 +1,5 @@
 //! The MF2 message runtime over ICU4X, and the catalog machinery the
-//! English + French catalogs will load into (PLATFORM.md P.3; the
+//! English + French catalogs will load into (design/platform.md P.3; the
 //! catalogs themselves ship with the first UI strings, not here).
 //!
 //! Messages are **MessageFormat 2** (Unicode's successor to classic
@@ -37,7 +37,7 @@
 //! it): a `:time` function and `:datetime`'s `timeStyle` (the
 //! formatter is built on ICU4X's date-only YMD fieldsets, so
 //! time-of-day cannot render at all; adding it also inherits the
-//! time-zone question, PLATFORM.md P.9 Q11 — this crate formats the
+//! time-zone question, design/platform.md P.9 Q11 — this crate formats the
 //! civil date/time it is handed and must stay zone-ignorant);
 //! **markup placeholders** (`{#b}...{/b}` is a
 //! [`CompileError::Unsupported`] — a message cannot carry an inline

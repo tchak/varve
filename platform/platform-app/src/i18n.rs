@@ -1,6 +1,6 @@
 //! Request locale resolution and the string-formatting helpers.
 //!
-//! PLATFORM.md P.3: locale is resolved **here** and nowhere else —
+//! design/platform.md P.3: locale is resolved **here** and nowhere else —
 //! no crate below `platform-app` knows what a locale is. The order,
 //! per P.7's principal model:
 //!

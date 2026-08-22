@@ -1,12 +1,14 @@
-# PLATFORM.md — the platform above the kernel
+# platform.md — the platform above the kernel
 
 Design document for the platform: the DN-successor web application and
-HTTP API built on the varve kernel. `DESIGN.md` remains the single
-source of truth for the kernel (tiers 0–5); this document owns
-`platform/`. DESIGN §13 fixes the boundary between the two and is
-authoritative where they overlap.
+HTTP API built on the varve kernel. `design/kernel.md` (DESIGN) remains
+the single source of truth for the kernel (tiers 0–5); this document
+owns `platform/`; `design/graphql.md` owns the public schema (split out
+2026-08-22 — the platform document is the umbrella, and sections leave
+it for their own file as they grow). DESIGN §13 fixes the boundary
+between kernel and platform and is authoritative where they overlap.
 
-**Conventions** — the same as DESIGN.md: open questions are never
+**Conventions** — the same as `design/kernel.md`: open questions are never
 deleted (struck through with a **Resolved** note and a pointer);
 decisions record *how* they were settled; unknowns that touch the
 kernel route to DESIGN §10 (open questions) or §12 (corpus questions),
@@ -234,30 +236,12 @@ Deliberately not kernel data — the log is cells, not chat (DESIGN
 
 ## P.5 GraphQL schema
 
-- **One static schema for all procedures.** Record values are generic:
-  `cells: [Cell!]`, a union/interface over the value types, addressed
-  by column id (enum options by identity, DESIGN §2.11; group rows as
-  nested cell lists). GraphQL types the transport; the revision types
-  the domain.
-- **Filtering** = varve-logic AST as a structured input (DESIGN §13.3),
-  kernel-typechecked against the querying party's surface-scoped
-  (aggregate) revision; kernel type errors surface as structured
-  GraphQL errors, not empty result sets.
-- **Connections** for all lists; depth/complexity limits from day one
-  (P.9 Q5).
-- **Mutations are use cases**, not kernel primitives: createProcedure,
-  editRevision (draft), publishRevision (returns the impact report /
-  confirms), createCaseFile, updateCells (a batch of cell writes folded
-  into one kernel patch — legal in `DRAFT` and `SUBMITTED`, hence not
-  named after a state), submitCaseFile, startReview, acceptCaseFile,
-  refuseCaseFile, closeWithoutDecision, returnToApplicant,
-  reopenReview, sendMessage, requestExport (returns an artifact URL —
-  wire, or tabular CSV/XLSX with surface-scoped columns, DESIGN §5),
-  createUploadSlot.
-- **Attachments bypass GraphQL**: a mutation mints an upload slot
-  backed by `varve-files`, the client PUTs bytes, then references the
-  blob id in a cell write; the DESIGN §2.15 scan lifecycle gates
-  admissibility as usual. No bytes through the executor, ever.
+**Moved to `design/graphql.md` (2026-08-22).** The schema design grew
+past a section; it has its own document with its own numbering (G.x).
+This heading stays so every `P.5` cross-reference keeps resolving —
+read them as pointers to `design/graphql.md` G.1, which carries the
+original content verbatim. P.6 (read models) stays here: it is about
+what resolvers read, not what the schema says.
 
 ## P.6 Read models
 
@@ -354,7 +338,10 @@ everything shipped exists in DN and nothing shipped that doesn't.
    edit profile) will size it. The alternative — a platform-side draft
    buffer folded into one entry at submit — trades away provenance.
    Decide with §12.8 data in hand.
-5. **Public API armor.** Depth/complexity limits ship at P0; whether
+5. **Public API armor.** (`design/graphql.md` G.2 bounds query depth
+   structurally — full objects only at root, lists of Refs — which
+   narrows this to page-size caps and per-list cost.) Depth/complexity
+   limits ship at P0; whether
    persisted queries and cost-based rate limiting are needed before the
    API opens to third parties.
 6. **Webhook payload shape.** GraphQL-shaped JSON vs wire lines — the

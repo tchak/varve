@@ -7,7 +7,7 @@ license.workspace = true
 
 # The Topcoat app: sessions, principal resolution, in-process
 # document execution, components with colocated fragments
-# (PLATFORM.md P.3, P.7).
+# (design/platform.md P.3, P.7).
 [dependencies]
 jiff = "0.2"
 platform-core = { version = "0.1.0", path = "../platform-core" }

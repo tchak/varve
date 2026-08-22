@@ -1,5 +1,5 @@
 //! `/graphql`, derived from this module's name: the public API's
-//! transport (PLATFORM.md P.3 — "`/graphql` is an ordinary topcoat
+//! transport (design/platform.md P.3 — "`/graphql` is an ordinary topcoat
 //! `#[route]`; execution is `schema.execute` in-process").
 //!
 //! **Bearer only.** This route authenticates with `Authorization:

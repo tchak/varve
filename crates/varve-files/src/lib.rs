@@ -6,7 +6,7 @@
 //! The trait is plaintext-streaming on both sides; encryption is an
 //! implementation's concern (§13.2). Implementations that encrypt take
 //! a [`Keyring`] — one X25519 identity per blob, sole recipient
-//! (PLATFORM.md P.10, P.9 Q7: shreddable) — the same dependency
+//! (design/platform.md P.10, P.9 Q7: shreddable) — the same dependency
 //! inversion as `TableSink`: the platform implements it over its
 //! database; this crate never sees one.
 //!

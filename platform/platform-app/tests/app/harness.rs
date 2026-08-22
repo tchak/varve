@@ -81,7 +81,7 @@ pub fn form_body(fields: &[(&str, &str)]) -> String {
 
 /// Reads the body as text. Every `text/html` response also passes
 /// the accessibility baseline ([`a11y_baseline`]) — the static share
-/// of PLATFORM.md P.1.5 that router tests own — so no page test can
+/// of design/platform.md P.1.5 that router tests own — so no page test can
 /// forget it. A page that fails is fixed, never exempted.
 pub async fn body_text(response: Response) -> String {
     let (parts, body) = response.into_parts();

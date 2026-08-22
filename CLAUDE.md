@@ -13,10 +13,14 @@ as long-lived case files, a pure typed logic language, impact reports),
 not the form builder. (A varve is an annual sediment layer — history read
 back layer by layer.)
 
-`DESIGN.md` is the design document and single source of truth for the
-kernel; `PLATFORM.md` (same conventions, P.x numbering) designs the
-platform above it — the DN-successor web app and GraphQL API (§13
-fixes the boundary; platform crates will live in `platform/`). The
+Design documents live in `design/`: `kernel.md` (DESIGN — the single
+source of truth for the kernel, § numbering), `platform.md` (same
+conventions, P.x numbering) for the platform above it — the
+DN-successor web app — and `graphql.md` (G.x) for the public schema.
+`platform.md` is the umbrella: a section that outgrows it moves to its
+own file, leaving a pointer under its old number (P.5 → `graphql.md`
+was the first). DESIGN §13 fixes the kernel/platform boundary; platform
+crates live in `platform/`. The
 workspace holds the deterministic kernel crates (`varve-core`,
 `-schema`, `-value`, `-logic`, `-projection`, `-impact`, `-record`,
 `-surface`, `-revision`, `-wire`), the Tier 5 crates
@@ -74,7 +78,7 @@ only when e2e adds real-browser semantics; never re-assert details a
 lower level already owns. DB-backed and browser tests gate on
 `VARVE_TEST_DATABASE_URL` (+ installed engines) and skip vacuously.
 
-**Accessibility is a core value** (PLATFORM.md P.1.5: RGAA 4.1 /
+**Accessibility is a core value** (design/platform.md P.1.5: RGAA 4.1 /
 WCAG 2.2 AA) and each level owns part of the proof. Component tests
 assert aria wiring (label↔control, `aria-describedby`/`aria-invalid`
 on errors, names on icon-only controls). Router tests run the static
@@ -93,7 +97,7 @@ Use `jj` commands: `jj commit -m`, `jj describe`, `jj log`, `jj diff`,
 `jj git push`. The working copy is always a mutable change; `jj commit`
 finalizes it and opens a new one.
 
-## Conventions in DESIGN.md
+## Conventions in design/kernel.md
 
 - **Open questions are never deleted.** A resolved §10 question keeps its
   number, gets struck through (`~~...~~`) with a bold **Resolved** note and a
@@ -127,7 +131,7 @@ rule holds in full.
 
 ## Design invariants already decided (do not re-litigate casually)
 
-From DESIGN.md — these constrain any code written here:
+From design/kernel.md — these constrain any code written here:
 
 - Strict crate DAG (§7): Tiers 0–4 are deterministic — no IO, no async, no
   clock (timestamps are inputs). IO first appears in Tier 5.

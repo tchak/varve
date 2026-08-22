@@ -1,7 +1,7 @@
 //! Message catalogs: id → compiled template per locale, and the
 //! locale-fallback walk over them.
 //!
-//! Deliberately absent: a container file format. PLATFORM.md P.3
+//! Deliberately absent: a container file format. design/platform.md P.3
 //! ships English and French catalogs *later* (no UI strings exist
 //! yet); how they are stored on disk (TOML, JSON, directories of
 //! `.mf2` files, ...) is an open design point, so loading takes plain
@@ -106,7 +106,7 @@ fn failing_ids(errors: &[(String, CompileError)]) -> String {
 /// The chain is a suffix appended to every request: with fallback
 /// `[fr, en]`, a request for `fr-CH` walks `fr-CH → fr → en` and the
 /// first catalog holding the id wins. Nothing is inferred from locale
-/// structure — the platform decides its own chain (PLATFORM.md P.3:
+/// structure — the platform decides its own chain (design/platform.md P.3:
 /// locale is a plain argument; this crate does not negotiate).
 ///
 /// A message found in a fallback locale is formatted **with that

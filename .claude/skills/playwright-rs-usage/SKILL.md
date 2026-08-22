@@ -258,7 +258,7 @@ version bump. Local rules for this repo:
   per-engine expectations explicitly (see `accepts_secure_cookie_on_
   loopback_http` in tests/e2e.rs) — never weaken an assertion for the
   engines that do accept.
-- Accessibility (PLATFORM.md P.1.5) has its own e2e subject,
+- Accessibility (design/platform.md P.1.5) has its own e2e subject,
   `tests/e2e/a11y.rs`, and harness helper `check_axe(&page, label)`:
   it injects the vendored axe-core (`tests/e2e/vendor/axe-core`) via
   `add_script_tag` and evaluates `axe.run` — the Rust stand-in for

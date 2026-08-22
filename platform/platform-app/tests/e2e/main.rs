@@ -60,7 +60,7 @@
 //! `cargo test --test e2e auth::`. A new subject is a new module —
 //! never grow one file past its subject.
 //!
-//! **Accessibility** (PLATFORM.md P.1.5) is its own subject, `a11y`:
+//! **Accessibility** (design/platform.md P.1.5) is its own subject, `a11y`:
 //! the axe-core rule engine (vendored under `vendor/axe-core`, run
 //! through [`harness::check_axe`]) over every page the app renders,
 //! and the keyboard journeys only a browser can prove. Other

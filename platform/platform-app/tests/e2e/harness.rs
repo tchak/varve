@@ -333,7 +333,7 @@ pub struct AxeNode {
 /// Runs the axe-core rule engine (vendored, `tests/e2e/vendor/axe-core`)
 /// over the page as currently rendered — WCAG 2.x A/AA tags plus the
 /// best-practice set — and fails with every violation listed. The
-/// dynamic share of PLATFORM.md P.1.5 (contrast, computed roles and
+/// dynamic share of design/platform.md P.1.5 (contrast, computed roles and
 /// names, focusability) that the router tests' static baseline
 /// cannot decide; `label` names the page in the failure.
 ///

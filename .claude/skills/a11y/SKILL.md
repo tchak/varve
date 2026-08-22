@@ -1,13 +1,13 @@
 ---
 name: a11y
-description: Accessibility contract for the varve platform web app (PLATFORM.md P.1.5 — RGAA 4.1 / WCAG 2.2 AA). ALWAYS load before writing or reviewing any page, component, form, or e2e test under platform/ — it states which test level owns which accessibility proof, the markup checklist every page meets, how the automated baseline (router-level HTML lint + axe-core in e2e) is run and extended, and what stays manual. Also load when a lint or axe failure needs fixing, or when touching vendored topcoat-ui components.
+description: Accessibility contract for the varve platform web app (design/platform.md P.1.5 — RGAA 4.1 / WCAG 2.2 AA). ALWAYS load before writing or reviewing any page, component, form, or e2e test under platform/ — it states which test level owns which accessibility proof, the markup checklist every page meets, how the automated baseline (router-level HTML lint + axe-core in e2e) is run and extended, and what stays manual. Also load when a lint or axe failure needs fixing, or when touching vendored topcoat-ui components.
 ---
 
 # Accessibility in `platform/` — the contract
 
 Varve's platform succeeds a French public-service site: accessibility is
 a legal duty (RGAA 4.1 — loi 2005-102, décret 2019-768), not polish.
-Target **RGAA 4.1 / WCAG 2.2 AA** on every page. Principle: PLATFORM.md
+Target **RGAA 4.1 / WCAG 2.2 AA** on every page. Principle: design/platform.md
 P.1.5; open items (contrast audit, manual audit, declaration, the
 details-menu Escape gap): P.9 Q12.
 

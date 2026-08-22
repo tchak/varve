@@ -5,7 +5,7 @@
 //! The kernel records *that* a lookup was requested and *how it ended*;
 //! everything between — attempts, transient errors, backoff, deadlines —
 //! is Tier 5 scheduler state and never reaches the record (§2.8,
-//! PLATFORM.md P.12). The kernel contributes pure enumeration
+//! design/platform.md P.12). The kernel contributes pure enumeration
 //! (`FoldResult::pending_resolutions`) and pure validation
 //! (`validate_after_checkpoint`); it knows nothing of queues or clocks.
 

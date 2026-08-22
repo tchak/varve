@@ -1,4 +1,4 @@
-//! Subject: accessibility in a real browser (PLATFORM.md P.1.5) —
+//! Subject: accessibility in a real browser (design/platform.md P.1.5) —
 //! the axe-core rule engine over every page the app renders, in
 //! both locales and in the states a journey reaches (validation
 //! errors, the open account menu), and the keyboard journey through

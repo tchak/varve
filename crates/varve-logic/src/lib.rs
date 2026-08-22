@@ -1,4 +1,4 @@
-//! Tier 2 (§7): the logic language — §4 of DESIGN.md.
+//! Tier 2 (§7): the logic language — §4 of design/kernel.md.
 //!
 //! Pure, total, no recursion in evaluation beyond the expression tree.
 //! Predicates only in v1; computed values (§4.2) and the satisfiability

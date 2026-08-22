@@ -1,4 +1,4 @@
-//! Platform crate (PLATFORM.md P.3): Toasty models for platform-owned
+//! Platform crate (design/platform.md P.3): Toasty models for platform-owned
 //! data and the use-case services over them — each use case will
 //! compose one `varve-service` operation with its platform side
 //! effects in exactly one place.

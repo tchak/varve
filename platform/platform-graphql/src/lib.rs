@@ -1,4 +1,4 @@
-//! The public GraphQL schema (PLATFORM.md P.5), executed in-process.
+//! The public GraphQL schema (`design/graphql.md`), executed in-process.
 //!
 //! **The schema never sees the transport** (P.7): every execution
 //! receives an already-resolved [`Principal`] as request data — from

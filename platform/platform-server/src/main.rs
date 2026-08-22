@@ -1,4 +1,4 @@
-//! The platform binary (PLATFORM.md P.3): connects the database,
+//! The platform binary (design/platform.md P.3): connects the database,
 //! builds the `platform-app` router, and serves it. Later phases
 //! mount `/graphql` and the upload/download `#[route]` handlers and
 //! start the `platform-jobs` runners here — one process to start

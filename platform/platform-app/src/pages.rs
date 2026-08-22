@@ -1,4 +1,4 @@
-//! The P0 pages (PLATFORM.md P.8: the walking skeleton's shell):
+//! The P0 pages (design/platform.md P.8: the walking skeleton's shell):
 //! layout, home, signin, signup, signout, and a branded not-found.
 //!
 //! **This module tree is the route table.** `builder` calls

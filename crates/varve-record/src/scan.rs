@@ -1,7 +1,7 @@
 //! §2.15: the scan lifecycle beside attachment cells — mirroring
 //! resolutions (§2.8), and aligned with them (2026-08-19): a **fold of
 //! lifecycle ops carried by ordinary chained entries**, per attachment
-//! element. The scanner is Tier 5 (PLATFORM.md P.11); the kernel
+//! element. The scanner is Tier 5 (design/platform.md P.11); the kernel
 //! records *that* an element's bytes were submitted for scanning and
 //! *how it ended*, and provides the pure pending-enumeration so surfaces
 //! can gate on it. Attempts, transient scanner errors, backoff and

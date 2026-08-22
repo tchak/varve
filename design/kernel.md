@@ -423,7 +423,7 @@ The record carries what is meaningful — *when* the lookup was requested
 are *meaning* (which mapping resolves) and travel; deadlines are
 *policy* and do not. The kernel has no clock and cannot guarantee
 termination; "pending-forever is a leak" therefore becomes an explicit
-**platform obligation** (PLATFORM.md P.12): every instance runs an
+**platform obligation** (design/platform.md P.12): every instance runs an
 abandonment policy, whose parameters — and whether a long outage should
 abandon at all rather than wait — are what §12.7 fixes. `deadline`
 leaves the `Resolution` struct (done); the Tier 5 scheduler owns it,
@@ -452,7 +452,7 @@ steps (attempt pending resolutions under a policy; run a sweep) plus
 the policy types (backoff, abandonment) — never an event loop, a queue
 schema, a worker runtime, or a clock. The loop, the tick, and the
 tables persisting attempt history belong to the host that drives the
-steps: the platform's background-work infrastructure (PLATFORM.md
+steps: the platform's background-work infrastructure (design/platform.md
 P.13) for integrator #1, and whatever job system other integrators
 already run. This is the embeddability thesis applied to time:
 hardwiring a queue into Tier 5 would make every integrator inherit
@@ -1986,7 +1986,7 @@ up.*
   step, deferred until the first resolver-backed field), `varve-export`
   (tabular `TableSink` impls: CSV, XLSX, ODS later — §5). The platform above
   Tier 5 lives in this workspace under `platform/` (§13.5) and is
-  designed in `PLATFORM.md`.
+  designed in `design/platform.md`.
 
 ## 8. Milestones — corpus-first
 
@@ -2086,7 +2086,7 @@ Only then: `surface`, `store`, service.
    exactly this activity; *étude d'impact* is a formal French
    administrative instrument, so the name is domain-authentic to its
    actual audience (the nomenclature/varve argument again); and the
-   crate is named after its artifact — DESIGN.md calls the flagship
+   crate is named after its artifact — this document calls the flagship
    deliverable "the impact report" throughout, and renaming the crate
    away from its own output would be a permanent seam. Considered and
    rejected: `preflight` (best challenger — right tense, but connotes a
@@ -2423,7 +2423,7 @@ Only after that: start `varve-core` and `varve-schema`.
 
 Worked from the other end: what does the platform — the DN-successor web
 application and HTTP API — need from Tier 5? The platform's own design
-lives in `PLATFORM.md`; this section records only what binds the kernel
+lives in `design/platform.md`; this section records only what binds the kernel
 workspace: the Tier 5 crate set (amending §7), `varve-logic` as the
 query language, the wire format's place at the API edge, and the
 workspace layout. The platform stack is `topcoat` + `toasty` (both
@@ -2503,7 +2503,7 @@ make.
   invariants are only as strong as the sloppiest one. **Steps, not
   loops (settled 2026-08-19, §2.8):** every scheduled duty here is a
   callable step plus its policy types; the loop, tick, queue, and
-  attempt-history tables belong to the host (PLATFORM.md P.13).
+  attempt-history tables belong to the host (design/platform.md P.13).
 - `varve-files` — as planned (§2.15): blob trait + content-addressed
   manifest. *Refined in implementation:* one generic impl over
   `object_store` backends — local filesystem and in-memory for dev and
@@ -2512,7 +2512,7 @@ make.
   storage only — the scan sweep is scheduling and lives in
   `varve-service`. The S3
   impl stores ciphertext only: platform-side streaming encryption (age
-  format, per-blob envelope keys — settled 2026-08-19, PLATFORM.md
+  format, per-blob envelope keys — settled 2026-08-19, design/platform.md
   P.10); blob addresses stay plaintext hashes (§2.15), key custody is
   Tier 5 (§2.10). Full contract: §13.6.
 - `varve-resolve` — the resolver host: the trait external resolvers
@@ -2568,13 +2568,13 @@ The interaction contract (the API) and the interop/storage contract
 (the wire) are different contracts, and conflating them would make
 every integrator speak the storage layer. The API is GraphQL, executed
 in-process by the app and over HTTP by integrators (platform decision —
-`PLATFORM.md`): "submit a case file" is a platform use case (kernel
+`design/platform.md`): "submit a case file" is a platform use case (kernel
 append + notifications + webhooks + system message), not a wire-patch
 POST. The wire keeps the edges where byte-stability is the point: bulk
 export/import (§5, minted as artifacts and linked, never inlined),
 signed record-log download (only the wire carries what the chain
 commits to, §2.13), the §2.15 blob sidecar, and possibly webhook
-payloads (open — `PLATFORM.md` P.9).
+payloads (open — `design/platform.md` P.9).
 
 ### 13.5 One workspace, layering by CI
 
@@ -2630,7 +2630,7 @@ The blob trait is async and **plaintext-streaming on both sides**
 platform implements it over its database; `varve-files` never sees a
 database. Policy settled shreddable — sole recipient, uniform across
 blob classes; recoverability owned by database backups; shred
-completes as backups age out (PLATFORM.md P.9 Q7, P.10). The local-fs
+completes as backups age out (design/platform.md P.9 Q7, P.10). The local-fs
 impl shares the age pipeline for parity; only test fixtures go plain.
 
 **Sweep semantics — three decisions.** (1) The **grace window**

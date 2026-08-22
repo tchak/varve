@@ -49,7 +49,7 @@ pub use memory::MemoryStore;
 /// Names one schema lineage — one revision DAG (§2.1) — in a store
 /// holding many. The kernel has no "procedure": this is a storage
 /// scoping key the host mints (the platform maps its procedure to it,
-/// PLATFORM.md P.4), which is why it lives here and not in
+/// design/platform.md P.4), which is why it lives here and not in
 /// `varve-core`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LineageId(String);

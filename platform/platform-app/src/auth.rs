@@ -1,4 +1,4 @@
-//! The session adapter and principal resolution (PLATFORM.md P.7).
+//! The session adapter and principal resolution (design/platform.md P.7).
 //!
 //! Topcoat owns the session *mechanics* — token generation, cookie
 //! transport, lifecycle — and hands this crate a SHA-256

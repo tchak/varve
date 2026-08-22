@@ -6,7 +6,7 @@
 //! (`platform_i18n::catalog` module docs), which is why
 //! `platform-i18n` loads plain pairs and nothing else. These tables
 //! are the P0 stopgap; once the format settles, the catalogs
-//! themselves move to `platform-i18n` (PLATFORM.md P.3: "the MF2
+//! themselves move to `platform-i18n` (design/platform.md P.3: "the MF2
 //! catalogs (English + French)" belong there) and this module keeps
 //! only the loading call.
 //!

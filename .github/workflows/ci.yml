@@ -19,7 +19,7 @@ jobs:
   test:
     name: test (stable)
     runs-on: ubuntu-latest
-    # Platform DB tests gate on VARVE_TEST_DATABASE_URL (PLATFORM.md
+    # Platform DB tests gate on VARVE_TEST_DATABASE_URL (design/platform.md
     # P.3): without it they pass vacuously, so local `cargo test
     # --workspace` needs no database — CI provides one so they run
     # for real here.
@@ -76,7 +76,7 @@ jobs:
       - run: cargo doc --workspace --no-deps --locked
 
   layering:
-    # DESIGN.md §13.5: no runtime / ORM / web / storage crate in the
+    # design/kernel.md §13.5: no runtime / ORM / web / storage crate in the
     # dependency closure of any Tier 0–4 crate; serde only where §9 allows.
     name: layering guard (§13.5)
     runs-on: ubuntu-latest

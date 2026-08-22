@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# The MF2 message runtime over ICU4X (PLATFORM.md P.3, P.9 Q8). Parse
+# The MF2 message runtime over ICU4X (design/platform.md P.3, P.9 Q8). Parse
 # with ox_mf2_parser (MIT, spec-final CST), format with ICU4X compiled
 # data. Locale is a plain argument resolved in `platform-app`; no crate
 # below this one knows what a locale is.
