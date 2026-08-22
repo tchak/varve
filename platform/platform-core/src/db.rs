@@ -45,7 +45,7 @@ pub static MIGRATIONS: toasty::migration::MigrationSet = toasty::embed_migration
 /// no lock around creating `__toasty_migrations` or checking what is
 /// pending, so two callers migrating a fresh database at once would
 /// collide. `connect` therefore holds a session-level advisory lock
-/// ([`MIGRATION_LOCK`]) on a pinned connection for the duration of
+/// (`MIGRATION_LOCK`) on a pinned connection for the duration of
 /// the apply: concurrent callers — multi-replica boot, test
 /// processes sharing one database — queue on it and each finds the
 /// schema complete. The lock is released before returning; it never
