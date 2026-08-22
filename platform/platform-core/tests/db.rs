@@ -439,6 +439,36 @@ async fn destroy_session_is_scoped_to_the_account() {
 }
 
 #[tokio::test]
+async fn register_trims_the_name_and_rejects_empty_fields() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let account = register(&mut db, &unique_email("trim"), "pw", "  Élodie \n", None)
+        .await
+        .expect("register");
+    assert_eq!(account.name, "Élodie");
+
+    // Empty after normalization/trimming, or an empty password: a
+    // typed error, no row.
+    for (email, password, name) in [
+        ("   ", "pw", "Name"),
+        (&unique_email("noname"), "pw", "  "),
+        (&unique_email("nopw"), "", "Name"),
+    ] {
+        let err = register(&mut db, email, password, name, None)
+            .await
+            .expect_err("empty field must fail");
+        assert!(matches!(err, RegisterError::EmptyField), "got: {err:?}");
+    }
+    assert!(
+        verify_credentials(&mut db, "", "pw")
+            .await
+            .expect("verify")
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn register_stores_the_locale() {
     let Some(mut db) = test_db().await else {
         return;

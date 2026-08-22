@@ -116,6 +116,12 @@ pub enum RegisterError {
     /// [`register`]).
     #[error("an account with this email already exists")]
     EmailTaken,
+    /// The normalized email, the trimmed name, or the password is
+    /// empty. A typed outcome so the app can answer a forged request
+    /// with a 400 rather than create an unusable account (the forms'
+    /// `required` keeps real browsers from ever reaching this).
+    #[error("email, name, and password must not be empty")]
+    EmptyField,
     /// Infrastructure failure.
     #[error(transparent)]
     Auth(#[from] AuthError),
@@ -161,8 +167,11 @@ fn dummy_hash() -> &'static str {
     })
 }
 
-/// Registers a new account: normalizes the email, hashes the
-/// password, inserts.
+/// Registers a new account: normalizes the email, trims the name
+/// (the same discipline as [`update_profile`]), hashes the password,
+/// inserts. An empty normalized email, trimmed name, or password is
+/// [`RegisterError::EmptyField`]; any further validation (address
+/// syntax, password strength) is the caller's (P.3).
 ///
 /// `locale` is stored as-is on the new account when present — an
 /// opaque preference string here, like the model's `locale` column
@@ -182,6 +191,10 @@ pub async fn register(
     locale: Option<&str>,
 ) -> Result<Account, RegisterError> {
     let email = normalize_email(email);
+    let name = name.trim();
+    if email.is_empty() || name.is_empty() || password.is_empty() {
+        return Err(RegisterError::EmptyField);
+    }
     let password_hash = hash_password(password).map_err(AuthError::from)?;
     let mut builder = Account::upsert_by_email(&email)
         .name(name)

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use topcoat::{
     Result,
     context::Cx,
-    router::{content::Form, href, page},
+    router::{content::Form, error::bad_request, href, page},
     view::{attributes, component, view},
 };
 
@@ -117,7 +117,10 @@ pub async fn page() -> Result {
 /// Registers the account and logs it straight in. A duplicate email
 /// re-renders with a message ([`platform_core::register`] settles
 /// the race on the database's unique index, so two concurrent
-/// submissions cannot both pass).
+/// submissions cannot both pass). An empty field is a 400: the form's
+/// `required` attributes keep browsers from submitting one, so it can
+/// only come from a forged request — the same posture as
+/// `/settings/account` takes for an unsupported locale.
 ///
 /// The new account's locale preference is this request's *resolved*
 /// locale ([`request_locale`], already reduced by `resolve_locale`
@@ -151,6 +154,9 @@ async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
             view! {
                 signup_form(error: Some(error), name: input.name, email: input.email)
             }
+        }
+        Err(RegisterError::EmptyField) => {
+            Err(bad_request("email, name, and password are required").into())
         }
         Err(RegisterError::Auth(error)) => Err(error.into()),
     }
