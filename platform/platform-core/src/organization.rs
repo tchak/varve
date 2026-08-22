@@ -113,9 +113,11 @@ pub fn normalize_slug(slug: &str) -> String {
 
 /// Creates an organization. Duplicate slugs are a typed error: the
 /// insert is insert-or-ignore against the `slug` unique index, so two
-/// concurrent creations cannot both succeed.
+/// concurrent creations cannot both succeed. Generic over the
+/// executor so it runs inside a caller's transaction
+/// ([`create_organization_for`]).
 pub async fn create_organization(
-    db: &mut toasty::Db,
+    db: &mut impl toasty::Executor,
     slug: &str,
     name: &str,
 ) -> Result<Organization, CreateOrganizationError> {
@@ -150,26 +152,29 @@ pub async fn find_organization_by_slug(
 /// Creates an organization **and makes `creator_id` its first
 /// member** — the use case behind "create organization": without
 /// that second write the organization is reachable by nobody
-/// (membership is the only right, P.4). Two writes, not one
-/// transaction: P.9 Q10 (transactions across the platform tables)
-/// is open; a crash between them leaves an orphan organization whose
-/// slug is taken, which is recoverable by an operator and never
-/// grants anything.
+/// (membership is the only right, P.4). One transaction (the shape
+/// P.9 Q10 settled): either both rows exist or neither, so an
+/// organization whose slug is taken but that nobody can reach cannot
+/// come out of a crash. An early return (duplicate slug, store error)
+/// drops the transaction, which rolls it back.
 pub async fn create_organization_for(
     db: &mut toasty::Db,
     slug: &str,
     name: &str,
     creator_id: uuid::Uuid,
 ) -> Result<Organization, CreateOrganizationError> {
-    let organization = create_organization(db, slug, name).await?;
-    add_organization_member(db, organization.id, creator_id).await?;
+    let mut tx = db.transaction().await?;
+    let organization = create_organization(&mut tx, slug, name).await?;
+    add_organization_member(&mut tx, organization.id, creator_id).await?;
+    tx.commit().await?;
     Ok(organization)
 }
 
 /// Adds an account to an organization. Idempotent: an existing
 /// membership is left as is (insert-or-ignore on the composite key).
+/// Generic over the executor like [`create_organization`].
 pub async fn add_organization_member(
-    db: &mut toasty::Db,
+    db: &mut impl toasty::Executor,
     organization_id: uuid::Uuid,
     account_id: uuid::Uuid,
 ) -> toasty::Result<()> {

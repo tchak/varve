@@ -15,12 +15,13 @@ use jiff::{SignedDuration, Timestamp};
 use platform_core::{
     CreateApiTokenError, CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS,
     RegisterError, add_organization_member, add_team_member, connect, create_api_token,
-    create_organization, create_procedure, create_session, create_team, delete_account_sessions,
-    delete_session, destroy_api_token, destroy_session, find_live_api_token, find_live_session,
-    find_organization_by_slug, is_organization_member, list_account_organizations,
-    list_account_teams, list_live_api_tokens, list_live_sessions, list_organization_procedures,
-    list_organization_teams, register, remove_organization_member, remove_team_member,
-    sweep_expired, sweep_expired_api_tokens, update_profile, verify_credentials,
+    create_organization, create_organization_for, create_procedure, create_session, create_team,
+    delete_account_sessions, delete_session, destroy_api_token, destroy_session,
+    find_live_api_token, find_live_session, find_organization_by_slug, is_organization_member,
+    list_account_organizations, list_account_teams, list_live_api_tokens, list_live_sessions,
+    list_organization_procedures, list_organization_teams, register, remove_organization_member,
+    remove_team_member, sweep_expired, sweep_expired_api_tokens, update_profile,
+    verify_credentials,
 };
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -838,5 +839,46 @@ async fn api_token_name_is_validated() {
             .await
             .expect("list")
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn create_organization_for_is_one_transaction() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let creator = register(
+        &mut db,
+        &unique_email("creator"),
+        "s3cret-enough",
+        "Creator",
+        None,
+    )
+    .await
+    .expect("register");
+
+    // The creator is the first member.
+    let slug = unique_slug("org");
+    let org = create_organization_for(&mut db, &slug, "Org", creator.id)
+        .await
+        .expect("create");
+    assert!(
+        is_organization_member(&mut db, org.id, creator.id)
+            .await
+            .expect("member")
+    );
+
+    // The rollback half has no oracle yet: nothing in the schema can
+    // make the second write fail (no foreign keys are emitted, so an
+    // unknown creator id is accepted). The transaction is the code's
+    // shape, not something this test can observe.
+
+    // A duplicate slug is still the typed error, and adds no membership.
+    let err = create_organization_for(&mut db, &org.slug, "Again", creator.id)
+        .await
+        .expect_err("duplicate slug must fail");
+    assert!(
+        matches!(err, CreateOrganizationError::SlugTaken),
+        "got: {err:?}"
     );
 }
