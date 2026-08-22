@@ -21,6 +21,12 @@
 //! nothing is stashed in `Cx`; a handler that needs the principal
 //! asks for it where it needs it.
 //!
+//! API tokens are the second transport (P.7): [`bearer_principal`]
+//! resolves `Authorization: Bearer` through
+//! `platform-core::api_token` to the same [`Principal`], and is asked
+//! by the `/graphql` route alone — see that module for why the two
+//! transports never substitute for each other.
+//!
 //! Cross-origin protection is the router's default
 //! [`topcoat::router::OriginPolicy`] (403 on state-changing
 //! cross-origin browser requests), not anything session-specific;
@@ -136,6 +142,66 @@ pub async fn account(cx: &Cx) -> topcoat::Result<Option<&Account>> {
 /// before execution).
 pub async fn principal(cx: &Cx) -> topcoat::Result<Option<&Principal>> {
     match load_principal(cx).await {
+        Ok(principal) => Ok(principal.as_ref()),
+        Err(error) => Err(error.clone().into()),
+    }
+}
+
+/// The API token presented as `Authorization: Bearer <secret>`, when
+/// the header is present, well-formed, and carries a `varve_`-shaped
+/// secret. Anything else — absent, another scheme, empty, not our
+/// format — is `None`; the caller's answer to `None` is the same
+/// 401 whatever the cause, so the shape check only spares the
+/// database a hash lookup for obviously foreign credentials.
+fn bearer_secret(cx: &Cx) -> Option<&str> {
+    let value = request::headers(cx)
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    let (scheme, secret) = value.trim().split_once(' ')?;
+    let secret = secret.trim();
+    (scheme.eq_ignore_ascii_case("bearer")
+        && secret.starts_with(platform_core::api_token::SECRET_PREFIX))
+    .then_some(secret)
+}
+
+/// Resolves the presented bearer token to its account:
+/// [`platform_core::find_live_api_token`] (hash lookup; expired rows
+/// are absent by construction), then the account row. A token whose
+/// account is gone resolves to `None`, not an error.
+async fn resolve_bearer_account(cx: &Cx) -> topcoat::Result<Option<Account>> {
+    let Some(secret) = bearer_secret(cx) else {
+        return Ok(None);
+    };
+    let mut db = crate::db(cx);
+    let now = jiff::Timestamp::now();
+    let Some(token) = platform_core::find_live_api_token(&mut db, secret, now).await? else {
+        return Ok(None);
+    };
+    Ok(Account::filter_by_id(token.account_id)
+        .first()
+        .exec(&mut db)
+        .await?)
+}
+
+/// [`resolve_bearer_account`] → [`Principal`], once per request.
+#[memoize]
+async fn load_bearer_principal(cx: &Cx) -> Result<Option<Principal>, ResolutionError> {
+    resolve_bearer_account(cx)
+        .await
+        .map(|account| account.as_ref().map(Principal::from_account))
+        .map_err(|error| ResolutionError(Arc::new(error)))
+}
+
+/// The principal of the request's **bearer token**, if a live one
+/// was presented — the API transport's counterpart of [`principal`],
+/// deliberately separate from it: the `/graphql` route asks this and
+/// only this, so a session cookie never authenticates an API call
+/// (no CSRF surface) and a bearer token never authenticates a page.
+/// Both produce the same [`Principal`] (P.7); which transport it
+/// came from is invisible below the route.
+pub async fn bearer_principal(cx: &Cx) -> topcoat::Result<Option<&Principal>> {
+    match load_bearer_principal(cx).await {
         Ok(principal) => Ok(principal.as_ref()),
         Err(error) => Err(error.clone().into()),
     }

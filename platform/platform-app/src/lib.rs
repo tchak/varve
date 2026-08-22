@@ -89,6 +89,7 @@ pub fn router(db: toasty::Db, cookie_key: Key, assets: Option<AssetBundle>) -> R
         .sessions(auth::session_config())
         .app_context(db)
         .app_context(cookie_key)
+        .app_context(platform_graphql::schema())
         .app_context(strings::catalogs());
     match assets {
         Some(bundle) => builder.assets(bundle).build(),

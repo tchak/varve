@@ -29,6 +29,7 @@
 //! subject with e.g. `cargo test --test app auth::`. A new subject is
 //! a new module — never grow one file past its subject.
 
+mod api;
 mod auth;
 mod harness;
 mod i18n;

@@ -39,6 +39,7 @@
 //! router-level tests (no bundle next to a test binary) never trip
 //! the by-design panic on rendering an unbundled asset.
 
+mod graphql;
 mod settings;
 mod signin;
 mod signout;

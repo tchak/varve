@@ -276,6 +276,20 @@ surface assignments, platform roles) before execution; the schema never
 sees the transport. FranceConnect / AgentConnect are session concerns,
 invisible below `platform-app`.
 
+**Transports never substitute for each other (settled 2026-08-22).**
+`/graphql` authenticates with `Authorization: Bearer <token>` only;
+the session cookie is ignored there, and a bearer token never
+authenticates a page. Rationale: a route no cookie can authenticate
+has no CSRF surface, so the bearer guard is the whole of the API's
+security and the router's `OriginPolicy` stays a page concern; the
+app's own components execute documents in-process, not over HTTP, so
+nothing legitimate needs cookie-authenticated `/graphql`. Tokens are
+stored as `SHA-256(secret)` only (never encrypted — nothing on the
+server can recover a secret), shown once at creation, and expire six
+months after it; the secret's fixed `varve_` prefix exists for leak
+scanning. Per-procedure scoping (the DN shape above) is P2 work on
+top of the account-level token.
+
 ## P.8 Milestones
 
 - **P0 — walking skeleton.** `varve-store` traits + Toasty impl
