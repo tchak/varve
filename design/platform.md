@@ -546,6 +546,24 @@ everything shipped exists in DN and nothing shipped that doesn't.
     so a large administration's procedures do not each see every
     team. Deferred until procedures and routing exist (P1); the
     membership tables are shaped so adding it is one join model.
+14. **Who may create an organization?** (opened 2026-08-22, when
+    `/organizations` made it visible.) Today `createOrganization` is
+    open to any signed-in account — the viewer becomes the first
+    member — and the app's creation form exposes exactly that. DN
+    gated the equivalent (a new administration) on an operator: an
+    administration is a legal entity that answers for its procedures,
+    and self-service creation invites impersonation of public bodies.
+    Candidates, from loosest to tightest: (a) open, as now, with the
+    organization unverified until an operator confirms it; (b) an
+    allowlist of email domains (`*.gouv.fr`, institutional domains
+    on file) that may self-serve, an operator for the rest; (c)
+    invitation-only — operators create organizations, which then
+    invite members. The kernel is indifferent (§2.9: authorization is
+    surface assignment; this is platform-only authorization over a
+    platform-only resource). Decide before any non-test account can
+    reach the form; until then the open behavior is a P0 convenience,
+    not a settled policy, and the schema's error vocabulary is ready
+    for it (`FORBIDDEN`, G.2.7).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
