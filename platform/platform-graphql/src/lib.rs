@@ -7,110 +7,71 @@
 //! P.3 seam: `platform-app` owns transports and principal resolution;
 //! this crate owns types and resolvers.
 //!
-//! **Current scope: the walking skeleton's edge.** One query,
-//! `viewer`, echoing the principal — enough to prove the transport
-//! and the guard end to end through HTTP. The procedure / case-file
-//! types arrive with the kernel edge (P0's last step, `varve-service`).
+//! **Current scope: the P0 slice** (G.6) — organizations, teams,
+//! procedures, and their members, with the three `create*` mutations.
+//! The type graph follows G.2: full objects only at root
+//! ([`organization::Organization`], [`team::Team`],
+//! [`procedure::Procedure`]), `*Ref` types everywhere a list or a
+//! parent is named, `Member` as the account⟷container link. The
+//! case-file types arrive with the kernel edge (P0's last step,
+//! `varve-service`).
+//!
+//! Visibility is membership (G.6): every root lookup answers `null`
+//! for an absent *or invisible* object, so an id never reveals
+//! whether it exists; mutations fail with the structured errors in
+//! [`error`].
 
 #![forbid(unsafe_code)]
 
-use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema};
+pub mod error;
+pub mod member;
+pub mod mutation;
+pub mod organization;
+pub mod procedure;
+pub mod query;
+pub mod team;
+
+use async_graphql::{Context, EmptySubscription, Schema};
 use platform_core::Principal;
 
+pub use mutation::Mutation;
+pub use query::Query;
+
 /// The executable schema.
-pub type PlatformSchema = Schema<Query, EmptyMutation, EmptySubscription>;
+pub type PlatformSchema = Schema<Query, Mutation, EmptySubscription>;
 
 /// Builds the schema. One per process, registered as app context by
 /// `platform-app`.
 pub fn schema() -> PlatformSchema {
-    Schema::build(Query, EmptyMutation, EmptySubscription).finish()
+    Schema::build(Query, Mutation, EmptySubscription).finish()
 }
 
-/// Executes `request` as `principal`. The one execution entry point:
-/// the principal rides in as request data, so a request can never
-/// reach a resolver unauthenticated — the type of this function is
-/// the guard's last line.
+/// Executes `request` as `principal` over `db`. The one execution
+/// entry point: the principal rides in as request data, so a request
+/// can never reach a resolver unauthenticated — the type of this
+/// function is the guard's last line.
 pub async fn execute(
     schema: &PlatformSchema,
     request: async_graphql::Request,
     principal: Principal,
+    db: toasty::Db,
 ) -> async_graphql::Response {
-    schema.execute(request.data(principal)).await
+    schema.execute(request.data(principal).data(db)).await
 }
 
-/// The query root.
-pub struct Query;
-
-#[Object]
-impl Query {
-    /// The authenticated account the request executes as.
-    async fn viewer<'a>(&self, ctx: &Context<'a>) -> async_graphql::Result<Viewer<'a>> {
-        // Present by construction — `execute` is the only entry point
-        // and it always attaches a principal. A miss is a wiring bug.
-        let principal = ctx.data::<Principal>()?;
-        Ok(Viewer { principal })
-    }
+/// The principal and a database handle, as every resolver reads them
+/// from the request data. Both are present by construction —
+/// [`execute`] is the only entry point and always attaches them; a
+/// miss is a wiring bug, reported as an error rather than a panic.
+pub(crate) fn session<'a>(ctx: &Context<'a>) -> async_graphql::Result<(&'a Principal, toasty::Db)> {
+    let principal = ctx.data::<Principal>()?;
+    let db = ctx.data::<toasty::Db>()?.clone();
+    Ok((principal, db))
 }
 
-/// The principal as the schema exposes it (P0: the account-level
-/// core — id, email, locale preference).
-pub struct Viewer<'a> {
-    principal: &'a Principal,
-}
-
-#[Object]
-impl Viewer<'_> {
-    /// The account id.
-    async fn account_id(&self) -> uuid::Uuid {
-        self.principal.account_id
-    }
-
-    /// The account's normalized email.
-    async fn email(&self) -> &str {
-        &self.principal.email
-    }
-
-    /// The account's locale preference, when one was chosen.
-    async fn locale(&self) -> Option<&str> {
-        self.principal.locale.as_deref()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn principal() -> Principal {
-        Principal {
-            account_id: uuid::Uuid::nil(),
-            email: "viewer@example.test".to_owned(),
-            locale: Some("fr".to_owned()),
-        }
-    }
-
-    #[tokio::test]
-    async fn viewer_echoes_the_principal() {
-        let schema = schema();
-        let request = async_graphql::Request::new("{ viewer { accountId email locale } }");
-        let response = execute(&schema, request, principal()).await;
-        assert!(response.errors.is_empty(), "{:?}", response.errors);
-        let data = serde_json::to_value(response.data).unwrap();
-        assert_eq!(
-            data,
-            serde_json::json!({
-                "viewer": {
-                    "accountId": "00000000-0000-0000-0000-000000000000",
-                    "email": "viewer@example.test",
-                    "locale": "fr"
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn sdl_names_the_viewer() {
-        let sdl = schema().sdl();
-        assert!(sdl.contains("type Viewer"), "{sdl}");
-        assert!(sdl.contains("viewer: Viewer!"), "{sdl}");
-    }
+/// Parses a GraphQL `ID` as a UUID; malformed ids are
+/// [`error::Code::InvalidInput`].
+pub(crate) fn parse_id(id: &async_graphql::ID) -> async_graphql::Result<uuid::Uuid> {
+    uuid::Uuid::parse_str(id.as_str())
+        .map_err(|_| error::invalid_input(format!("malformed id {:?}", id.as_str())))
 }

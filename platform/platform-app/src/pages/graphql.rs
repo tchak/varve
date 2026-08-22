@@ -49,6 +49,7 @@ pub async fn submit(
             .into_response(cx);
     };
     let schema = app_context::<platform_graphql::PlatformSchema>(cx);
-    let response = platform_graphql::execute(schema, request, principal.clone()).await;
+    let response =
+        platform_graphql::execute(schema, request, principal.clone(), crate::db(cx)).await;
     Json(response).into_response(cx)
 }

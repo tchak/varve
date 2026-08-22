@@ -10,10 +10,14 @@ license.workspace = true
 # sessions or tokens: the transport (`platform-app`'s `/graphql`
 # route) resolves the principal and hands it in as request data.
 [dependencies]
-async-graphql = { version = "8.0.0-rc.5", features = ["uuid"] }
+async-graphql = { version = "8.0.0-rc.5", features = ["uuid", "jiff"] }
+jiff = "0.2"
 platform-core = { version = "0.1.0", path = "../platform-core" }
+toasty = { version = "0.10.0", features = ["postgresql", "jiff"] }
 uuid = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 serde_json = "1"
+# v4 only for minting unique test fixtures.
+uuid = { version = "1", features = ["v4"] }
