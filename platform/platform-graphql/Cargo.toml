@@ -10,7 +10,7 @@ license.workspace = true
 # sessions or tokens: the transport (`platform-app`'s `/graphql`
 # route) resolves the principal and hands it in as request data.
 [dependencies]
-async-graphql = { version = "7", features = ["uuid"] }
+async-graphql = { version = "8.0.0-rc.5", features = ["uuid"] }
 platform-core = { version = "0.1.0", path = "../platform-core" }
 uuid = "1"
 

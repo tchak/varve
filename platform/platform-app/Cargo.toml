@@ -14,7 +14,7 @@ platform-core = { version = "0.1.0", path = "../platform-core" }
 # `pages::graphql`: the `/graphql` transport over the in-process schema;
 # `async-graphql` directly for the request/response wire types only.
 platform-graphql = { version = "0.1.0", path = "../platform-graphql" }
-async-graphql = "7"
+async-graphql = "8.0.0-rc.5"
 platform-i18n = { version = "0.1.0", path = "../platform-i18n" }
 serde = { version = "1.0.229", features = ["derive"] }
 uuid = "1"
