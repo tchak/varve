@@ -38,10 +38,11 @@ use crate::{
     },
     db, flash,
     i18n::{t, t_args},
+    pages::{home, one_arg, utc_date_arg},
     ua,
 };
 
-use super::{Tab, settings_shell};
+use super::{Tab, settings_shell, signin_location};
 
 /// A per-session revocation submission: the session row to destroy.
 #[derive(Deserialize)]
@@ -152,13 +153,13 @@ async fn sessions_card(cx: &Cx) -> Result {
         let created = t_args(
             cx,
             "settings.security.sessions.created",
-            &super::super::one_arg("date", super::super::utc_date_arg(session.created_at)),
+            &one_arg("date", utc_date_arg(session.created_at)),
         )
         .await?;
         let expires = t_args(
             cx,
             "settings.security.sessions.expires",
-            &super::super::one_arg("date", super::super::utc_date_arg(session.expires_at)),
+            &one_arg("date", utc_date_arg(session.expires_at)),
         )
         .await?;
         let ip = session.ip.as_deref().unwrap_or(&unknown);
@@ -290,7 +291,7 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
     let description = t_args(
         cx,
         "settings.security.tokens.description",
-        &super::super::one_arg(
+        &one_arg(
             "months",
             i64::from(platform_core::API_TOKEN_LIFETIME_MONTHS),
         ),
@@ -306,7 +307,7 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
             t_args(
                 cx,
                 "settings.security.tokens.issued.title",
-                &super::super::one_arg("name", name.as_str()),
+                &one_arg("name", name.as_str()),
             )
             .await?,
             secret.as_str(),
@@ -319,19 +320,19 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
         let created = t_args(
             cx,
             "settings.security.tokens.created",
-            &super::super::one_arg("date", super::super::utc_date_arg(token.created_at)),
+            &one_arg("date", utc_date_arg(token.created_at)),
         )
         .await?;
         let expires = t_args(
             cx,
             "settings.security.tokens.expires",
-            &super::super::one_arg("date", super::super::utc_date_arg(token.expires_at)),
+            &one_arg("date", utc_date_arg(token.expires_at)),
         )
         .await?;
         let revoke_name = t_args(
             cx,
             "settings.security.tokens.revoke-named",
-            &super::super::one_arg("name", token.name.as_str()),
+            &one_arg("name", token.name.as_str()),
         )
         .await?;
         rows.push(TokenRow {
@@ -485,7 +486,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Revocation>) -> topcoat::Result<S
     // A `#[route]`, so the settings layout's redirect does not
     // apply: answer the anonymous case the same way explicitly.
     let Some(account) = account(cx).await? else {
-        return Ok(see_other(super::signin_location(cx)));
+        return Ok(see_other(signin_location(cx)));
     };
     let account_id = account.id;
     let session_id: uuid::Uuid = input
@@ -499,7 +500,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Revocation>) -> topcoat::Result<S
     }
     platform_core::destroy_session(&mut db, account_id, session_id).await?;
     if revoking_current {
-        Ok(see_other(href!(super::super::home).resolve(cx)))
+        Ok(see_other(href!(home).resolve(cx)))
     } else {
         Ok(see_other(href!(page).resolve(cx)))
     }

@@ -90,6 +90,17 @@ journeys (focus order, Escape, focus return) and the axe-core rule
 engine. A violation inside a vendored registry component is an
 upstream fix, not a local patch.
 
+## Module paths: `crate::`, not `super` chains
+
+`super` is allowed only one level deep, and only in `use` statements,
+`#[cfg(test)]` modules (`use super::*`), or `href!` where "my parent or
+sibling route" is the relation being expressed (route tree = module
+tree). Everything else is an absolute `crate::…` path imported once at
+the top of the file; call sites stay unqualified. Never `super::super`,
+and never a qualified `super::thing(...)` at a call site — a reader
+should not need the file's depth to decode a path, and `crate::` paths
+survive moving the referring module.
+
 ## Version control: jj, not git
 
 This is a colocated jj (Jujutsu) repository; `.git` exists for tool interop.

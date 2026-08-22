@@ -11,7 +11,11 @@ use topcoat::{
     },
 };
 
-use crate::{auth::account, db};
+use crate::{
+    auth::account,
+    db,
+    pages::settings::{security, signin_location},
+};
 
 /// A revocation submission: the token row to destroy.
 #[derive(Deserialize)]
@@ -29,7 +33,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Revocation>) -> topcoat::Result<S
     // A `#[route]`, so the settings layout's redirect does not
     // apply: answer the anonymous case the same way explicitly.
     let Some(account) = account(cx).await? else {
-        return Ok(see_other(super::super::super::signin_location(cx)));
+        return Ok(see_other(signin_location(cx)));
     };
     let account_id = account.id;
     let token_id: uuid::Uuid = input
@@ -38,5 +42,5 @@ pub async fn submit(cx: &Cx, Form(input): Form<Revocation>) -> topcoat::Result<S
         .map_err(|_| bad_request("token_id is not a UUID"))?;
     let mut db = db(cx);
     platform_core::destroy_api_token(&mut db, account_id, token_id).await?;
-    Ok(see_other(href!(super::super::page).resolve(cx)))
+    Ok(see_other(href!(security::page).resolve(cx)))
 }

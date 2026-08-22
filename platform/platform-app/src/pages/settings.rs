@@ -34,6 +34,7 @@ use crate::{
         tabs::{tabs, tabs_content, tabs_list, tabs_trigger},
     },
     i18n::t,
+    pages::{redirect_to, signin},
 };
 
 /// Which settings tab a page renders under, for the shared shell's
@@ -46,7 +47,7 @@ enum Tab {
 
 /// Where an anonymous request to the settings area is sent.
 pub(super) fn signin_location(cx: &Cx) -> String {
-    href!(super::signin::page).resolve(cx)
+    href!(signin::page).resolve(cx)
 }
 
 /// The friendly face of the signed-in guard for every page in the
@@ -57,7 +58,7 @@ pub(super) fn signin_location(cx: &Cx) -> String {
 async fn gate(cx: &Cx, slot: Result) -> Result {
     match slot {
         Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
-            super::redirect_to(cx, signin_location(cx)).await
+            redirect_to(cx, signin_location(cx)).await
         }
         other => other,
     }
@@ -68,7 +69,7 @@ async fn gate(cx: &Cx, slot: Result) -> Result {
 #[page]
 pub async fn page(cx: &Cx) -> Result {
     require_account(cx).await?;
-    super::redirect_to(cx, href!(account::page).resolve(cx)).await
+    redirect_to(cx, href!(account::page).resolve(cx)).await
 }
 
 /// The shared settings shell: the page title, the Account | Security

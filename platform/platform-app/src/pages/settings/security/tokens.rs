@@ -14,7 +14,7 @@ use topcoat::{
     view::view,
 };
 
-use crate::{auth::require_account, db, flash, i18n::t};
+use crate::{auth::require_account, db, flash, i18n::t, pages::redirect_to};
 
 use super::{ISSUED_FLASH, IssuedFlash, TokensForm, security_cards};
 
@@ -52,7 +52,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
                     secret: issued.secret,
                 },
             )?;
-            super::super::super::redirect_to(cx, href!(super::page).resolve(cx)).await
+            redirect_to(cx, href!(super::page).resolve(cx)).await
         }
         Err(CreateApiTokenError::EmptyName) => {
             let error = t(cx, "settings.security.tokens.error.name-required").await?;

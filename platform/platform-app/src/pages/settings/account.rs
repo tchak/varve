@@ -22,6 +22,7 @@ use crate::{
     },
     db,
     i18n::{SUPPORTED_LOCALES, request_locale, t},
+    pages::redirect_to,
 };
 
 use super::{Tab, settings_shell};
@@ -169,5 +170,5 @@ async fn submit(cx: &Cx, Form(input): Form<ProfileUpdate>) -> Result {
     }
     let mut db = db(cx);
     platform_core::update_profile(&mut db, account_id, name, Some(&input.locale)).await?;
-    super::super::redirect_to(cx, href!(page).resolve(cx)).await
+    redirect_to(cx, href!(page).resolve(cx)).await
 }
