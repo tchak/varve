@@ -200,10 +200,10 @@ for "authorization is surface assignment" until surfaces arrive.
    Kernel type errors join the set with the kernel edge.
 5. **`createOrganization` makes the caller the first member.** With
    membership the only right, an organization nobody belongs to is
-   unreachable; the use case is the two writes together
-   (`platform-core`'s `create_organization_for`), not atomically —
-   platform P.9 Q10 is open; an orphan from a crash between them
-   grants nothing.
+   unreachable; the use case is the two writes in one transaction
+   (`platform-core`'s `create_organization_for`, the first use of the
+   transaction shape platform P.9 Q10 settled): no orphan
+   organization can exist.
 6. **Counts are live `COUNT(*)` for now**, not read models: nothing
    is materialized yet (P.6 / DESIGN Q18), and three bounded counts
    per root fetch is the cost of waiting for the real thing.

@@ -136,7 +136,17 @@ by new members.
   suite reruns here against Postgres. This crate is P.2's "swap the
   ORM" hedge made concrete and the subject of the Q1 spike (DESIGN
   Q19): if toasty cannot carry the substrate, the replacement is this
-  one crate. Cross-table atomicity with platform writes is P.9 Q10.
+  one crate. **Cross-table atomicity with platform writes (settled,
+  was P.9 Q10):** the store is a *scoped* value, not a service — a
+  use case in `platform-core` opens one toasty transaction, constructs
+  the `platform-store` impl over `&mut` that transaction, runs its
+  platform-model writes and its kernel writes (through the store)
+  against the same transaction, and commits once. Two consequences:
+  the impl holds its executor behind an async mutex, because the
+  `varve-store` traits take `&self` and toasty's `exec` takes `&mut
+  dyn Executor`; and no store handle ever lives in app context,
+  because `Transaction<'a>` borrows the `Db`. The traits stay
+  executor-free; the binding happens at construction, per use case.
 - `platform-i18n` — the MF2 catalogs (English + French) and their
   runtime over ICU4X (correction, found in the Q8 spike: parse with
   `ox_mf2_parser` — the originally named `mf2_parser` is GPL-3 and
@@ -417,7 +427,10 @@ everything shipped exists in DN and nothing shipped that doesn't.
    underway itself survives only as outbox-plus-drain. The spike
    confirms against compiled code and checks whether newer toasty
    ships pool/connection sharing before P2's queue work.
-10. **One transaction across the kernel/platform table boundary.** The
+10. ~~One transaction across the kernel/platform table boundary.~~
+    **Resolved (2026-08-22): (a) — one toasty transaction, with
+    `platform-store` a per-use-case value scoped inside it; the shape
+    is settled under P.3 `platform-store`.** The
     `varve-store` traits are per-method atomic and expose no
     transaction handle (deliberately — the trait must not name a
     backend), yet the use-case composition in `platform-core` — kernel
@@ -443,7 +456,28 @@ everything shipped exists in DN and nothing shipped that doesn't.
     (a scoped store constructed inside the txn, or store methods
     over an executor argument). Reconciling that with the
     executor-free `varve-store` trait signatures is now the crux of
-    the spike.
+    the spike. **How it was resolved:** design argument on the same
+    source reading, before `platform-store` exists — the first
+    use-case service this was to be decided with is not written, so
+    the resolution is a shape, and the conformance suite against
+    Postgres (P.3) is what will confirm it. The argument: both sides
+    execute through toasty's `Executor`, and `Transaction<'a>`
+    *is* one, so feasibility was never in doubt once the store is
+    toasty; the two remaining wrinkles are shape, and each has one
+    answer. (1) `varve-store` methods take `&self` while every toasty
+    `exec` wants `&mut dyn Executor`: the impl bridges with an async
+    mutex around the executor — serializing kernel-store calls within
+    one use case costs nothing, a transaction is one connection and
+    already serial. (2) `Transaction<'a>` cannot outlive the `&mut
+    Db` borrow: the store is therefore never a handle in app context
+    but a value the use case constructs inside its transaction. The
+    traits stay executor-free and the kernel learns nothing of
+    toasty (DESIGN §13 boundary untouched). (b) is rejected for the
+    reason already given — it forfeits the "exactly one place"
+    atomicity that motivates the use-case services. Platform-only
+    multi-write use cases (the first: `create_organization_for`,
+    organization row + creator membership) use the same transaction
+    and need no store at all.
 11. **Whose time zone renders an instant?** Every timestamp the UI
     shows must become a civil date/time in *some* zone; the platform
     models none, so `platform-app` renders UTC as a documented
