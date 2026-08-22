@@ -137,6 +137,11 @@ session cookie never authenticates the API and a token never
 authenticates a page (platform P.7). Attachments bypass the executor
 (G.1).
 
+The SDL is a checked-in artifact, `platform/platform-client/schema.graphql`
+— the contract integrators build against and the input `cynic`
+validates the client's operations against; a `platform-graphql` test
+keeps it equal to `schema().sdl()` (platform P.9 Q2).
+
 ## G.4 Naming
 
 `DateTime` (RFC 3339, UTC) not `DateTimeISO`; `Id` filters not `ID`

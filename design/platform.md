@@ -162,9 +162,14 @@ by new members.
   `Context { principal }`; knows nothing of sessions or tokens.
 - `platform-app` — the Topcoat app: sessions, principal resolution,
   in-process document execution, components with colocated fragments.
-- `platform-client` — typed client generated from the SDL, for Rust
-  integrators and for integration tests that exercise the real HTTP
-  path.
+- `platform-client` — the typed client, a **leaf crate** (depends on
+  no other platform crate): the checked-in SDL (`schema.graphql`, the
+  published contract), operations and fragments as `cynic` derives
+  validated against that SDL at build time, and a `Transport` trait
+  over GraphQL-over-JSON documents. Two transports: in-process
+  (implemented in `platform-graphql`, used by the app's components and
+  by resolver tests) and HTTP (bearer token, `http` feature, for Rust
+  integrators and the P2 HTTP-path tests). See P.9 Q2.
 - `platform-jobs` — both shapes of background work (P.13): the
   hand-rolled sweeps (tick + advisory-lock lease + per-resolver
   circuit state) driving `varve-service` steps — resolution retries,
@@ -306,8 +311,9 @@ top of the account-level token.
   Q18/Q19 land here, spike first), reviewer table with varve-logic
   filters, the checkpoint state machine, teams + routing.
 - **P2 — collaboration.** Messaging, notifications, webhooks, exports
-  (wire / tabular artifacts, `varve-export`), `platform-client` + HTTP-path integration
-  tests, API tokens.
+  (wire / tabular artifacts, `varve-export`), `platform-client`'s
+  HTTP transport + HTTP-path integration tests (the crate itself and
+  its in-process transport land in P0 — P.9 Q2), API tokens.
 - **P3 — resolvers.** `varve-resolve`, SIRET/BAN blocks, prefill
   (DESIGN §2.7), attachment scan lifecycle end-to-end.
 
@@ -334,10 +340,31 @@ everything shipped exists in DN and nothing shipped that doesn't.
    ever need `EXISTS` off a declared relation path? If not, supported;
    if so, the raw-SQL fallback covers that clause alone. Ratify only
    against a compiled program.
-2. **Fragment ↔ component pairing.** No Relay-style compiler exists for
+2. ~~**Fragment ↔ component pairing.** No Relay-style compiler exists for
    Rust. Candidates: a macro colocating the fragment with the Topcoat
    component, plus a build-time check validating every fragment against
-   the SDL. Decide at P0 while the app is small.
+   the SDL. Decide at P0 while the app is small.~~ **Resolved
+   2026-08-22: `cynic` derives are the macro and the check.** A
+   fragment is a `#[derive(cynic::QueryFragment)]` struct declared
+   beside the component that renders it; a page query composes
+   fragments by nesting the structs; `cynic-codegen` validates every
+   derive against `platform-client/schema.graphql` at build time. The
+   SDL is checked in and a `platform-graphql` test asserts it equals
+   `schema().sdl()` (`VARVE_UPDATE_SDL=1` rewrites it), so a resolver
+   change fails that test and a stale fragment then fails to compile.
+   Runner-up `graphql_client` generates from `.graphql` files into
+   names it chooses and composes cross-file fragments poorly; no custom
+   macro was needed. **In-process is the same JSON boundary as HTTP**:
+   every client is transport-agnostic by construction — an operation
+   is a `{query, variables}` document and a response a `{data, errors}`
+   document — so the in-process transport is
+   `serde_json → async_graphql::Request → execute → Response →
+   serde_json`, deliberately crossing the exact serialization
+   integrators cross (custom scalars, ids, timestamps are dogfooded
+   byte-for-byte, P.1 rule 4). The client is a leaf crate;
+   `platform-graphql` depends on it to provide that transport and
+   mirrors `error::Code` in the client's own enum (a test keeps the
+   two sets equal — five variants do not earn a shared crate).
 3. **Case-file state authority.** Derived from checkpoints alone, or also
    mirrored as a platform column? Lean: checkpoints are authoritative
    and the column is a read model maintained only by the use-case
