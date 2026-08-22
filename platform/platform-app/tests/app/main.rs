@@ -34,6 +34,7 @@ mod auth;
 mod harness;
 mod i18n;
 mod organizations;
+mod procedures;
 mod settings;
 mod shell;
 mod teams;

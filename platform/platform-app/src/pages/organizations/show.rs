@@ -9,8 +9,10 @@
 //! from the status code. A non-UUID segment is 404 too (`error =
 //! not_found`), never a 400 that would distinguish it.
 //!
-//! The [`teams`] submodule is `/organizations/{id}/teams`.
+//! The [`teams`] and [`procedures`] submodules are
+//! `/organizations/{id}/teams` and `/organizations/{id}/procedures`.
 
+pub(super) mod procedures;
 pub(super) mod teams;
 
 use cynic::QueryBuilder;
@@ -83,6 +85,7 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
     )
     .await?;
     let procedures_empty = t(cx, "organization.procedures.empty").await?;
+    let procedures_manage = t(cx, "organization.procedures.manage").await?;
     view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
@@ -141,7 +144,15 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
             )
             card(
                 card_header(
-                    <h2 class="leading-none font-semibold">(procedures_heading)</h2>
+                    <div class="flex items-center justify-between gap-3">
+                        <h2 class="leading-none font-semibold">(procedures_heading)</h2>
+                        <a
+                            href=(href!(procedures::page, OrganizationId(organization_id)))
+                            class="text-sm font-medium underline-offset-4 hover:underline"
+                        >
+                            (procedures_manage)
+                        </a>
+                    </div>
                 )
                 card_content(
                     if organization.procedures.is_empty() {

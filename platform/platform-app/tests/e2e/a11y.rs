@@ -182,6 +182,7 @@ async fn axe_scenario(
     .to_be_visible()
     .await?;
     check_axe(&page, "/organizations/{id}").await?;
+    let organization_url = page.url();
 
     // The organization's teams: empty, the form in its error state
     // (a blank name — whitespace, since the field is `required`),
@@ -222,6 +223,62 @@ async fn axe_scenario(
         .to_be_visible()
         .await?;
     check_axe(&page, "/organizations/{id}/teams (populated)").await?;
+
+    // The organization's procedures: the same three states, reached
+    // from the organization page (by URL — walking history back
+    // through a POST result stalls Chromium on resubmission).
+    page.goto(&organization_url, None).await?;
+    page.get_by_role(
+        AriaRole::Link,
+        Some(
+            GetByRoleOptions::default()
+                .name("Manage procedures")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#procedure-title")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/procedures (empty)").await?;
+    page.locator(locator!("#procedure-title"))
+        .fill("   ", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Create procedure")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#procedure-title[aria-invalid='true']")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/procedures (title error)").await?;
+    page.locator(locator!("#procedure-title"))
+        .fill("Axe permit", None)
+        .await?;
+    page.locator(locator!("#procedure-description"))
+        .fill("Checked by axe.", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Create procedure")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("li[data-procedure-id]")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/procedures (populated)").await?;
     page.goto(&app.url("/organizations"), None).await?;
     check_axe(&page, "/organizations (populated)").await?;
     Ok(())
