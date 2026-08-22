@@ -88,7 +88,10 @@ argument on top of that memory.
    Refines G.1 "connections for all lists": teams of an organization,
    revisions of a procedure, members, invitations are bounded by
    design and return `[XRef!]!`; case files are the unbounded list and
-   return a connection.
+   return a connection. Procedures (an organization's catalog, the
+   viewer's administered set) are treated as bounded for now (G.6);
+   a connection is a compatible later change if the corpus shows
+   catalogs large enough to page.
 5. **State is a union of state-specific objects** (`Draft
    { createdAt }`, `Submitted { submittedAt }`, and with P1's
    checkpoints `InReview { startedAt, team }`, `Accepted { decidedAt,
@@ -156,3 +159,47 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    procedure's table configuration, the viewer's saved view, or both
    — and how that interacts with surface scoping and mixed revisions
    (DESIGN §5.5). P1, with the reviewer table.
+
+## G.6 The P0 slice (settled 2026-08-22)
+
+The first types and mutations shipped under G.2, before the kernel
+edge: `organization`, `organizations`, `team`, `procedure`,
+`procedures`, `Member`, and `createOrganization`, `createTeam`,
+`createProcedure`. Settled by design argument on top of platform P.4
+(membership is the only right) and P.7 (the P0 principal is
+account-level only), so the rules below are the membership stand-in
+for "authorization is surface assignment" until surfaces arrive.
+
+1. **Visibility is membership, resolved once at the root.** An
+   organization (full object) is visible to its members only; a team
+   to its organization's members and to its own members; a procedure
+   to its organization's members. `organizations` and `procedures`
+   list the viewer's. A reviewer who is not an organization member
+   reaches the organization only as `team.organization`
+   (`OrganizationRef`) — never its procedures or members: the full
+   object is the administrator's view, and the Ref is exactly what a
+   reviewer needs to name where they work.
+2. **Absent and invisible are the same `null`.** Root lookups
+   (`organization(id)`, `team(id)`, `procedure(id)`) answer `null`
+   for an id that does not exist *or* that the viewer may not see, so
+   an id never reveals whether it exists. The same holds for
+   mutations: `createTeam`/`createProcedure` on a missing or foreign
+   organization are one `FORBIDDEN`.
+3. **`Member` is one type for both containers**: `{ account:
+   AccountRef, joinedAt }`, the account⟷container link with the
+   container as the parent (no back-pointer, G.2 rule 1).
+   `AccountRef` carries `id`, `name`, `email`: co-members see each
+   other's addresses, as DN shows reviewers to each other.
+4. **Errors carry `extensions.code`** (G.2.7 made concrete):
+   `INVALID_INPUT` (malformed id, empty name/title, bad slug
+   characters — `[a-z0-9-]` after normalization), `FORBIDDEN`,
+   `SLUG_TAKEN`. Kernel type errors join the set with the kernel edge.
+5. **`createOrganization` makes the caller the first member.** With
+   membership the only right, an organization nobody belongs to is
+   unreachable; the use case is the two writes together
+   (`platform-core`'s `create_organization_for`), not atomically —
+   platform P.9 Q10 is open; an orphan from a crash between them
+   grants nothing.
+6. **Counts are live `COUNT(*)` for now**, not read models: nothing
+   is materialized yet (P.6 / DESIGN Q18), and three bounded counts
+   per root fetch is the cost of waiting for the real thing.
