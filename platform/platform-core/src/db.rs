@@ -16,6 +16,12 @@
 //! review the SQL, and commit it together with the model change. The
 //! embedded set picks the new file up at the next build (the macro
 //! registers `history.toml` as a compile-time dependency).
+//!
+//! **Foreign keys are hand-written.** toasty derives none from
+//! `#[belongs_to]`, so `0005_foreign_keys.sql` adds one constraint
+//! per relation by hand (with its ON DELETE policy stated there), and
+//! any migration adding a relation must add its constraint the same
+//! way — the generator will not.
 
 /// Every migration this build knows about, embedded at compile time
 /// from `toasty/` (path relative to this crate's `Cargo.toml`).

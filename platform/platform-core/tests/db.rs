@@ -868,10 +868,25 @@ async fn create_organization_for_is_one_transaction() {
             .expect("member")
     );
 
-    // The rollback half has no oracle yet: nothing in the schema can
-    // make the second write fail (no foreign keys are emitted, so an
-    // unknown creator id is accepted). The transaction is the code's
-    // shape, not something this test can observe.
+    // A failing second write rolls the first back: an unknown creator
+    // violates the membership's account foreign key (migration 0005),
+    // and the organization row must not survive it — its slug stays
+    // free.
+    let slug = unique_slug("orphan");
+    let err = create_organization_for(&mut db, &slug, "Orphan", uuid::Uuid::new_v4())
+        .await
+        .expect_err("unknown creator must fail");
+    assert!(
+        matches!(err, CreateOrganizationError::Db(_)),
+        "got: {err:?}"
+    );
+    assert!(
+        find_organization_by_slug(&mut db, &slug)
+            .await
+            .expect("find")
+            .is_none(),
+        "organization row survived a rolled-back transaction"
+    );
 
     // A duplicate slug is still the typed error, and adds no membership.
     let err = create_organization_for(&mut db, &org.slug, "Again", creator.id)
