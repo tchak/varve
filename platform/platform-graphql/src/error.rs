@@ -22,6 +22,15 @@ pub enum Code {
 }
 
 impl Code {
+    /// Every code; `platform-client` mirrors this set and a test
+    /// keeps the two equal.
+    pub const ALL: [Code; 4] = [
+        Code::InvalidInput,
+        Code::Forbidden,
+        Code::SlugTaken,
+        Code::Internal,
+    ];
+
     /// The serialized form.
     pub fn as_str(self) -> &'static str {
         match self {

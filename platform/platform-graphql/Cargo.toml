@@ -12,15 +12,18 @@ license.workspace = true
 [dependencies]
 async-graphql = { version = "8.0.0-rc.5", features = ["uuid", "jiff"] }
 jiff = "0.2"
+# The client is a leaf; this crate provides its in-process transport.
+platform-client = { version = "0.1.0", path = "../platform-client" }
 platform-core = { version = "0.1.0", path = "../platform-core" }
 # Only for the `toasty::Db` handle resolvers receive; the driver and
 # model features are `platform-core`'s business.
+serde_json = "1"
 toasty = "0.10.0"
 tracing = "0.1"
 uuid = "1"
 
 [dev-dependencies]
-serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # v4 only for minting unique test fixtures.
 uuid = { version = "1", features = ["v4"] }
+cynic = "3.14"

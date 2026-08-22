@@ -16,6 +16,7 @@ members = [
     "tools/m0",
     "platform/platform-core",
     "platform/platform-i18n",
+    "platform/platform-client",
     "platform/platform-graphql",
     "platform/platform-app",
     "platform/platform-server",

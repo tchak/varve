@@ -1,0 +1,233 @@
+type AccountRef {
+	id: ID!
+	name: String!
+	email: String!
+}
+
+"""
+`createOrganization` input.
+"""
+input CreateOrganizationInput {
+	"""
+	URL/API handle; normalized and validated by the scalar.
+	"""
+	slug: Slug!
+	"""
+	Display name.
+	"""
+	name: String!
+}
+
+"""
+`createProcedure` input.
+"""
+input CreateProcedureInput {
+	"""
+	The owning organization; the viewer must be a member.
+	"""
+	organizationId: ID!
+	"""
+	Title shown to applicants and reviewers.
+	"""
+	title: String!
+	"""
+	Free-text description.
+	"""
+	description: String! = ""
+}
+
+"""
+`createTeam` input.
+"""
+input CreateTeamInput {
+	"""
+	The owning organization; the viewer must be a member.
+	"""
+	organizationId: ID!
+	"""
+	Display name.
+	"""
+	name: String!
+}
+
+scalar DateTime
+
+type Member {
+	"""
+	The member account.
+	"""
+	account: AccountRef!
+	"""
+	When the membership was created.
+	"""
+	joinedAt: DateTime!
+}
+
+type Mutation {
+	"""
+	Creates an organization; the viewer becomes its first member.
+	"""
+	createOrganization(input: CreateOrganizationInput!): Organization!
+	"""
+	Creates a team in an organization the viewer is a member of.
+	"""
+	createTeam(input: CreateTeamInput!): Team!
+	"""
+	Creates a procedure owned by an organization the viewer is a
+	member of.
+	"""
+	createProcedure(input: CreateProcedureInput!): Procedure!
+}
+
+type Organization {
+	id: ID!
+	"""
+	URL/API handle, unique across the platform.
+	"""
+	slug: Slug!
+	name: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	The organization's teams, oldest first (bounded, G.2.4).
+	"""
+	teams: [TeamRef!]!
+	"""
+	The procedures the organization owns, oldest first.
+	"""
+	procedures: [ProcedureRef!]!
+	"""
+	The members — every one administers every procedure the
+	organization owns (P.4).
+	"""
+	members: [Member!]!
+	"""
+	Counts without fetching the lists (G.2.6).
+	"""
+	counts: OrganizationCounts!
+}
+
+"""
+`organization.counts`.
+"""
+type OrganizationCounts {
+	procedures: Int!
+	teams: Int!
+	members: Int!
+}
+
+type OrganizationRef {
+	id: ID!
+	slug: Slug!
+	name: String!
+}
+
+type Procedure {
+	id: ID!
+	title: String!
+	"""
+	Free text; empty when none.
+	"""
+	description: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	The owning organization.
+	"""
+	organization: OrganizationRef!
+}
+
+type ProcedureRef {
+	id: ID!
+	title: String!
+	organization: OrganizationRef!
+}
+
+type Query {
+	"""
+	The authenticated account the request executes as.
+	"""
+	viewer: Viewer!
+	"""
+	An organization the viewer is a member of; `null` otherwise.
+	"""
+	organization(id: ID!): Organization
+	"""
+	The organizations the viewer is a member of, oldest first.
+	"""
+	organizations: [OrganizationRef!]!
+	"""
+	A team of an organization the viewer is a member of, or a team
+	the viewer reviews for; `null` otherwise.
+	"""
+	team(id: ID!): Team
+	"""
+	A procedure owned by an organization the viewer is a member
+	of; `null` otherwise.
+	"""
+	procedure(id: ID!): Procedure
+	"""
+	Every procedure the viewer administers — those owned by the
+	viewer's organizations — oldest first.
+	"""
+	procedures: [ProcedureRef!]!
+}
+
+"""
+URL/API handle of an organization: `[a-z0-9-]`, non-empty. Input
+is trimmed and lowercased before validation.
+"""
+scalar Slug
+
+type Team {
+	id: ID!
+	name: String!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	The owning organization.
+	"""
+	organization: OrganizationRef!
+	"""
+	The reviewers (P.4: team membership *is* being a reviewer).
+	"""
+	members: [Member!]!
+}
+
+type TeamRef {
+	id: ID!
+	name: String!
+	organization: OrganizationRef!
+}
+
+type Viewer {
+	"""
+	The account id.
+	"""
+	accountId: ID!
+	"""
+	The account's normalized email.
+	"""
+	email: String!
+	"""
+	The account's locale preference, when one was chosen.
+	"""
+	locale: String
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Provides a scalar specification URL for specifying the behavior of custom scalar types.
+"""
+directive @specifiedBy(url: String!) on SCALAR
+schema {
+	query: Query
+	mutation: Mutation
+}

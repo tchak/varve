@@ -60,6 +60,47 @@ pub async fn execute(
     schema.execute(request.data(principal).data(db)).await
 }
 
+/// The in-process [`platform_client::Transport`]: the typed client
+/// over [`execute`], bound to one principal. What the app's
+/// components and the resolver tests use; it crosses the same JSON
+/// boundary as HTTP on purpose (P.9 Q2) — a request document in, a
+/// response document out — so nothing in-process can observe what an
+/// integrator cannot.
+#[derive(Clone)]
+pub struct InProcess {
+    schema: PlatformSchema,
+    db: toasty::Db,
+    principal: Principal,
+}
+
+impl InProcess {
+    /// A transport executing as `principal`.
+    pub fn new(schema: PlatformSchema, db: toasty::Db, principal: Principal) -> Self {
+        Self {
+            schema,
+            db,
+            principal,
+        }
+    }
+}
+
+impl platform_client::Transport for InProcess {
+    async fn execute(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<serde_json::Value, platform_client::Error> {
+        let request: async_graphql::Request = serde_json::from_value(request)?;
+        let response = execute(
+            &self.schema,
+            request,
+            self.principal.clone(),
+            self.db.clone(),
+        )
+        .await;
+        Ok(serde_json::to_value(response)?)
+    }
+}
+
 /// The principal and a database handle, as every resolver reads them
 /// from the request data. Both are present by construction —
 /// [`execute`] is the only entry point and always attaches them; a

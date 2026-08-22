@@ -1,0 +1,28 @@
+[package]
+name = "platform-client"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The typed client for the public GraphQL schema (design/graphql.md;
+# platform P.6, P.9 Q2). A leaf crate: it depends on no other
+# platform crate. `schema.graphql` is the checked-in SDL every
+# operation here is validated against at build time; the server keeps
+# it current (`platform-graphql`'s `sdl_artifact_is_current`).
+[dependencies]
+cynic = "3.14"
+jiff = { version = "0.2", features = ["serde"] }
+# `http`: the bearer-token transport for integrators outside the
+# process. The app never enables it — its components execute
+# in-process (P.7).
+reqwest = { version = "0.13", optional = true, default-features = false, features = ["json", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror.workspace = true
+
+[build-dependencies]
+cynic-codegen = "3.14"
+
+[features]
+http = ["dep:reqwest"]

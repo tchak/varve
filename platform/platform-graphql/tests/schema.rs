@@ -3,8 +3,11 @@
 //! no transport. DB-backed, gated on `VARVE_TEST_DATABASE_URL` like
 //! `platform-core/tests/db.rs`; unset, every test passes vacuously.
 
+use cynic::QueryBuilder;
+use platform_client::organization::{OrganizationQuery, OrganizationVariables};
+use platform_client::viewer::ViewerQuery;
 use platform_core::{Principal, connect, register};
-use platform_graphql::{PlatformSchema, execute, schema};
+use platform_graphql::{InProcess, PlatformSchema, execute, schema};
 use serde_json::{Value, json};
 
 async fn test_db() -> Option<toasty::Db> {
@@ -109,6 +112,13 @@ impl Api {
         )
         .await["createProcedure"]
             .take()
+    }
+}
+
+impl Api {
+    /// The typed client, executing in-process as `who`.
+    fn client(&self, who: &Principal) -> InProcess {
+        InProcess::new(self.schema.clone(), self.db.clone(), who.clone())
     }
 }
 
@@ -398,4 +408,94 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
         assert!(!body.contains('['), "{ref_type} has a list field:\n{body}");
     }
+}
+
+/// The SDL `platform-client` builds against is this schema's, byte for
+/// byte (G.3, platform P.9 Q2). `VARVE_UPDATE_SDL=1` rewrites the
+/// artifact; cynic then recompiles every operation against it.
+#[test]
+fn sdl_artifact_is_current() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../platform-client/schema.graphql"
+    );
+    let sdl = schema().sdl();
+    if std::env::var_os("VARVE_UPDATE_SDL").is_some() {
+        std::fs::write(path, &sdl).expect("write schema.graphql");
+    }
+    let artifact = std::fs::read_to_string(path).expect("platform-client/schema.graphql");
+    assert!(
+        artifact == sdl,
+        "platform-client/schema.graphql is stale; run \
+         `VARVE_UPDATE_SDL=1 cargo test -p platform-graphql sdl_artifact_is_current`"
+    );
+}
+
+#[tokio::test]
+async fn the_typed_client_reads_what_the_schema_wrote() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let slug = unique_slug("typed");
+    let created = api.create_organization(&alice, &slug, "Typed").await;
+    let client = api.client(&alice);
+
+    let viewer = platform_client::run(&client, ViewerQuery::build(()))
+        .await
+        .expect("viewer")
+        .viewer;
+    assert_eq!(viewer.account_id.inner(), alice.account_id.to_string());
+    assert_eq!(viewer.email, alice.email);
+
+    let organization = platform_client::run(
+        &client,
+        OrganizationQuery::build(OrganizationVariables {
+            id: cynic::Id::new(id_of(&created)),
+        }),
+    )
+    .await
+    .expect("organization")
+    .organization
+    .expect("visible to its member");
+    assert_eq!(organization.slug.0, slug);
+    assert_eq!(organization.name, "Typed");
+    assert_eq!(organization.counts.members, 1);
+    assert_eq!(organization.members[0].account.email, alice.email);
+    assert!(organization.teams.is_empty());
+
+    // Absent-or-invisible is `None`, not an error (G.6).
+    let bob = account(&mut db, "bob").await;
+    let hidden = platform_client::run(
+        &api.client(&bob),
+        OrganizationQuery::build(OrganizationVariables {
+            id: cynic::Id::new(id_of(&created)),
+        }),
+    )
+    .await
+    .expect("a query, not an error");
+    assert!(hidden.organization.is_none());
+
+    // A structured error arrives typed.
+    let error = platform_client::run(
+        &client,
+        OrganizationQuery::build(OrganizationVariables {
+            id: cynic::Id::new("not-a-uuid"),
+        }),
+    )
+    .await
+    .expect_err("malformed id");
+    assert_eq!(error.code(), Some(platform_client::Code::InvalidInput));
+}
+
+#[test]
+fn the_client_mirrors_every_error_code() {
+    let server: Vec<&str> = platform_graphql::error::Code::ALL
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+    let client: Vec<&str> = platform_client::Code::ALL
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+    assert_eq!(server, client);
 }
