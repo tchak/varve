@@ -4346,7 +4346,9 @@ name = "platform-app"
 version = "0.1.0"
 dependencies = [
  "async-graphql",
+ "cynic",
  "jiff",
+ "platform-client",
  "platform-core",
  "platform-graphql",
  "platform-i18n",
