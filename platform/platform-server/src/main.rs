@@ -18,6 +18,11 @@
 //! - `DATABASE_URL` (**required**): the platform PostgreSQL URL.
 //!   [`platform_core::connect`] applies pending migrations once at
 //!   boot, before serving (its documented single-process pattern).
+//! - `COOKIE_KEY` (**required**): the key sealing private cookies
+//!   (the one-shot flashes `platform_app::flash` writes), standard
+//!   base64 of at least 64 random bytes — `openssl rand -base64 64`.
+//!   Persist it: a new key invalidates every cookie sealed with the
+//!   old one, and replicas must share it.
 //! - `HOST` / `PORT` (optional): the listen address, default
 //!   `127.0.0.1:3000` — read by [`topcoat::start`].
 //!
@@ -41,7 +46,8 @@
 use std::io;
 use std::process::ExitCode;
 
-use topcoat::asset::AssetBundle;
+use base64::Engine;
+use topcoat::{asset::AssetBundle, cookie::Key};
 
 /// Everything that can stop the server from coming up (or bring it
 /// down), each with an actionable message — a missing variable must
@@ -53,6 +59,13 @@ enum ServerError {
          e.g. DATABASE_URL=postgres://localhost/varve_platform"
     )]
     MissingDatabaseUrl,
+    #[error(
+        "COOKIE_KEY is not set — export standard base64 of at least 64 random bytes, \
+         e.g. COOKIE_KEY=$(openssl rand -base64 64)"
+    )]
+    MissingCookieKey,
+    #[error("COOKIE_KEY is not standard base64 of at least 64 bytes: {0}")]
+    InvalidCookieKey(String),
     #[error("connecting to the database (or applying migrations) failed: {0}")]
     Database(#[from] toasty::Error),
     #[error("loading the asset bundle next to the executable failed: {0}")]
@@ -81,6 +94,7 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), ServerError> {
     let database_url =
         std::env::var("DATABASE_URL").map_err(|_| ServerError::MissingDatabaseUrl)?;
+    let cookie_key = cookie_key()?;
     let db = platform_core::connect(&database_url).await?;
     let assets = match AssetBundle::load() {
         Ok(bundle) => Some(bundle),
@@ -93,7 +107,18 @@ async fn run() -> Result<(), ServerError> {
         }
         Err(error) => return Err(ServerError::Assets(error)),
     };
-    let router = platform_app::router(db, assets);
+    let router = platform_app::router(db, cookie_key, assets);
     topcoat::start(router).await?;
     Ok(())
+}
+
+/// `COOKIE_KEY` from the environment, decoded and length-checked (the
+/// `cookie` crate needs 64 bytes: 32 for signing, 32 for encryption).
+fn cookie_key() -> Result<Key, ServerError> {
+    let encoded = std::env::var("COOKIE_KEY").map_err(|_| ServerError::MissingCookieKey)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|error| ServerError::InvalidCookieKey(error.to_string()))?;
+    Key::try_from(bytes.as_slice())
+        .map_err(|error| ServerError::InvalidCookieKey(error.to_string()))
 }

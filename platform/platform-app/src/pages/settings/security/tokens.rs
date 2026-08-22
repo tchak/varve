@@ -10,13 +10,13 @@ use serde::Deserialize;
 use topcoat::{
     Result,
     context::Cx,
-    router::{content::Form, error::bad_request, page},
+    router::{content::Form, error::bad_request, href, page},
     view::view,
 };
 
-use crate::{auth::require_account, db, i18n::t};
+use crate::{auth::require_account, db, flash, i18n::t};
 
-use super::{TokensForm, security_cards};
+use super::{ISSUED_FLASH, IssuedFlash, TokensForm, security_cards};
 
 /// A creation submission: the token's name.
 #[derive(Deserialize)]
@@ -24,13 +24,13 @@ pub(super) struct Creation {
     name: String,
 }
 
-/// Creates a token and re-renders the security tab with the secret
-/// shown **once** — this response is the only place it ever appears
-/// in plaintext; the row keeps a hash (`platform_core::api_token`).
-/// A page, not a redirect: carrying the secret across a 303 would
-/// need a flash store, and a one-shot render is the simpler, safer
-/// shape (a refresh re-submits the form, creating another token,
-/// which the browser's resubmission prompt makes deliberate).
+/// Creates a token, parks the secret in a one-shot private cookie
+/// ([`flash`]), and answers 303 to the security tab, which shows the
+/// secret **once** as it consumes the flash — post/redirect/get, so a
+/// refresh of the landing page neither re-submits the form nor shows
+/// the secret again. The row keeps a hash only
+/// (`platform_core::api_token`); the encrypted cookie is the secret's
+/// only other transit, and it is gone after one GET.
 ///
 /// A blank name re-renders with the error in the field (and creates
 /// nothing); a name over `MAX_API_TOKEN_NAME_CHARS` is a 400 — the
@@ -44,11 +44,15 @@ pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
         .await
     {
         Ok(issued) => {
-            let form = TokensForm {
-                issued: Some((issued.token.name, issued.secret)),
-                ..TokensForm::default()
-            };
-            view! { security_cards(tokens_form: form) }
+            flash::set(
+                cx,
+                ISSUED_FLASH,
+                IssuedFlash {
+                    name: issued.token.name,
+                    secret: issued.secret,
+                },
+            )?;
+            super::super::super::redirect_to(cx, href!(super::page).resolve(cx)).await
         }
         Err(CreateApiTokenError::EmptyName) => {
             let error = t(cx, "settings.security.tokens.error.name-required").await?;

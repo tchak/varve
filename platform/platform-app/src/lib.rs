@@ -32,6 +32,7 @@
 
 pub mod auth;
 pub mod components;
+pub mod flash;
 pub mod i18n;
 pub mod pages;
 pub mod strings;
@@ -40,14 +41,20 @@ pub mod ua;
 use topcoat::{
     asset::{AssetBundle, RouterBuilderAssetExt},
     context::{Cx, app_context},
-    cookie::RouterBuilderCookieExt,
+    cookie::{Key, RouterBuilderCookieExt},
     router::{Router, RouterBuilderDiscoverExt},
     session::RouterBuilderSessionExt,
 };
 
 /// Builds the platform router over a connected database (from
-/// [`platform_core::connect`]) and, when one is supplied, an asset
-/// bundle.
+/// [`platform_core::connect`]), the cookie key, and, when one is
+/// supplied, an asset bundle.
+///
+/// `cookie_key` seals the private cookies [`flash`] writes
+/// (`topcoat::cookie::private_cookies` reads it from app context).
+/// It must be **persisted** across restarts and shared by every
+/// replica — `platform-server` loads it from `COOKIE_KEY`; tests
+/// mint one per router with [`Key::generate`].
 ///
 /// The route table is the [`pages`] module tree: `pages::builder`
 /// calls `module_router!` in the route root, so every pathless
@@ -75,12 +82,13 @@ use topcoat::{
 /// state-changing cross-origin browser requests are rejected with 403,
 /// and every state-changing route in [`pages`] is a POST, which is what
 /// makes that check sufficient (GETs are deliberately unchecked).
-pub fn router(db: toasty::Db, assets: Option<AssetBundle>) -> Router {
+pub fn router(db: toasty::Db, cookie_key: Key, assets: Option<AssetBundle>) -> Router {
     let builder = pages::builder()
         .discover()
         .cookies()
         .sessions(auth::session_config())
         .app_context(db)
+        .app_context(cookie_key)
         .app_context(strings::catalogs());
     match assets {
         Some(bundle) => builder.assets(bundle).build(),

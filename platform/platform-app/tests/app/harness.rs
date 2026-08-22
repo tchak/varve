@@ -25,7 +25,10 @@ pub async fn test_app() -> Option<(Router, toasty::Db)> {
     };
     let _guard = CONNECT_LOCK.lock().await;
     let db = platform_core::connect(&url).await.expect("connect");
-    Some((platform_app::router(db.clone(), None), db))
+    Some((
+        platform_app::router(db.clone(), topcoat::cookie::Key::generate(), None),
+        db,
+    ))
 }
 
 pub fn unique_email(tag: &str) -> String {

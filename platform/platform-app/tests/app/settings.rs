@@ -514,10 +514,29 @@ async fn forged_locale_is_a_bad_request() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-/// Creates a token through the form and returns the page that shows
-/// the secret once, asserting the creation contract (200, status
-/// notice, the secret in its `<code>`).
-async fn create_token(router: &topcoat::router::Router, cookie: &str, name: &str) -> String {
+/// The one-shot flash cookie a successful creation sets (the
+/// `__Host-` prefixed, encrypted carrier of the secret), as a
+/// `name=value` pair to send back.
+fn flash_cookie(response: &topcoat::router::response::Response) -> Option<String> {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with("__Host-api-token-issued=") && !value.contains("Max-Age=0"))
+        .map(|value| value.split(';').next().unwrap().to_owned())
+}
+
+/// Creates a token through the form — asserting the
+/// post/redirect/get contract: 303 to the security tab carrying the
+/// flash — then follows the redirect with the flash and returns
+/// (the landing page, which shows the secret once, and that
+/// response's flash removal as a bool).
+async fn create_token(
+    router: &topcoat::router::Router,
+    cookie: &str,
+    name: &str,
+) -> (String, bool) {
     let response = router
         .handle(post(
             "/settings/security/tokens",
@@ -525,8 +544,25 @@ async fn create_token(router: &topcoat::router::Router, cookie: &str, name: &str
             form_body(&[("name", name)]),
         ))
         .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings/security");
+    let flash = flash_cookie(&response).expect("creation sets the flash cookie");
+    // The secret never travels in the clear: the cookie is sealed.
+    assert!(!flash.contains("varve_"), "{flash}");
+    let response = router
+        .handle(get(
+            "/settings/security",
+            &[("cookie", &format!("{cookie}; {flash}"))],
+        ))
+        .await;
     assert_eq!(response.status(), StatusCode::OK);
-    body_text(response).await
+    let removed = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.starts_with("__Host-api-token-issued=") && value.contains("Max-Age=0"));
+    (body_text(response).await, removed)
 }
 
 /// The secret out of a creation response.
@@ -565,8 +601,10 @@ async fn api_token_is_created_shown_once_and_listed() {
     assert!(html.contains("No API tokens."), "{html}");
     assert!(html.contains("6 months"), "{html}");
 
-    // Creation shows the secret once, in a status notice.
-    let html = create_token(&router, &cookie, "  CI deploy ").await;
+    // Creation redirects; the landing page shows the secret once, in
+    // a status notice, and clears the flash on that same response.
+    let (html, flash_removed) = create_token(&router, &cookie, "  CI deploy ").await;
+    assert!(flash_removed, "{html}");
     assert!(html.contains(r#"role="status""#), "{html}");
     assert!(html.contains("Token “CI deploy” created"), "{html}");
     assert!(html.contains("it will not be shown again"), "{html}");
@@ -601,7 +639,8 @@ async fn api_token_is_created_shown_once_and_listed() {
         "hash must not embed the secret"
     );
 
-    // A plain GET lists the token but never the secret again.
+    // The next GET — a refresh of the landing page — lists the token
+    // but never the secret again.
     let html = body_text(
         router
             .handle(get("/settings/security", &[("cookie", &cookie)]))
@@ -623,7 +662,16 @@ async fn blank_token_name_rerenders_with_an_error_and_creates_nothing() {
     let email = unique_email("settings-tokens-blank");
     let cookie = crate::harness::signup(&router, "Blank", &email, "s3cret-enough").await;
 
-    let html = create_token(&router, &cookie, "   ").await;
+    let response = router
+        .handle(post(
+            "/settings/security/tokens",
+            &[("cookie", &cookie)],
+            form_body(&[("name", "   ")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(flash_cookie(&response).is_none());
+    let html = body_text(response).await;
     assert!(html.contains("Please enter a token name."), "{html}");
     assert!(
         html.contains(r#"aria-describedby="api-token-name-error""#),
@@ -675,7 +723,7 @@ async fn token_revocation_is_scoped_to_the_account() {
     )
     .await;
 
-    let html = create_token(&router, &owner_cookie, "Mine").await;
+    let (html, _) = create_token(&router, &owner_cookie, "Mine").await;
     let secret = secret_in(&html);
     let start = html.find(r#"data-token-id=""#).unwrap() + r#"data-token-id=""#.len();
     let token_id = &html[start..start + 36];
@@ -741,4 +789,51 @@ async fn token_revocation_is_scoped_to_the_account() {
         .await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers()[header::LOCATION], "/signin");
+}
+
+#[tokio::test]
+async fn tampered_flash_shows_nothing() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = crate::harness::signup(
+        &router,
+        "Flash",
+        &unique_email("settings-tokens-flash"),
+        "s3cret-enough",
+    )
+    .await;
+    let response = router
+        .handle(post(
+            "/settings/security/tokens",
+            &[("cookie", &cookie)],
+            form_body(&[("name", "Once")]),
+        ))
+        .await;
+    let flash = flash_cookie(&response).expect("flash");
+
+    // Tampered ciphertext: authenticated encryption rejects it, the
+    // page renders without a secret, and the junk cookie is cleared.
+    let mut tampered = flash.clone();
+    tampered.replace_range(tampered.len() - 4.., "AAAA");
+    let response = router
+        .handle(get(
+            "/settings/security",
+            &[("cookie", &format!("{cookie}; {tampered}"))],
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(!html.contains("api-token-secret"), "{html}");
+
+    // The genuine flash still works after the tampered attempt (it
+    // was never consumed).
+    let response = router
+        .handle(get(
+            "/settings/security",
+            &[("cookie", &format!("{cookie}; {flash}"))],
+        ))
+        .await;
+    let html = body_text(response).await;
+    assert!(html.contains("api-token-secret"), "{html}");
 }

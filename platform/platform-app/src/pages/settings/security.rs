@@ -5,12 +5,15 @@
 //! `/settings/security/tokens` and `/settings/security/tokens/revoke`).
 //!
 //! Both cards render through [`security_cards`], the one composition
-//! of the tab, so the POST that re-renders it with a freshly created
-//! token shows exactly what the GET shows.
+//! of the tab, shared by the GET [`page`] and the validation
+//! re-render of [`tokens::submit`]. A *successful* creation instead
+//! redirects here with the secret in a one-shot flash
+//! ([`crate::flash`]), which [`page`] consumes: shown on that one
+//! GET, gone on the next.
 
 mod tokens;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
@@ -33,7 +36,7 @@ use crate::{
         card::{card, card_content, card_description, card_header, card_title},
         field::field,
     },
-    db,
+    db, flash,
     i18n::{t, t_args},
     ua,
 };
@@ -231,6 +234,18 @@ async fn sessions_card(cx: &Cx) -> Result {
         )
     }
 }
+
+/// The flash a successful [`tokens::submit`] leaves for [`page`]:
+/// the created token's name and its secret (the secret's only
+/// transit besides the creation response — encrypted, one GET).
+#[derive(Clone, Serialize, Deserialize)]
+struct IssuedFlash {
+    name: String,
+    secret: String,
+}
+
+/// The flash cookie's name.
+const ISSUED_FLASH: &str = "api-token-issued";
 
 /// What the tokens card shows besides the list: the creation form's
 /// state, and — right after a creation — the secret, once.
@@ -443,10 +458,16 @@ async fn security_cards(cx: &Cx, tokens_form: TokensForm) -> Result {
     }
 }
 
-/// The security tab.
+/// The security tab. Consumes the issued-token flash when one is
+/// present, so the secret shows on exactly this response.
 #[page]
-pub async fn page() -> Result {
-    view! { security_cards(tokens_form: TokensForm::default()) }
+pub async fn page(cx: &Cx) -> Result {
+    let form = TokensForm {
+        issued: flash::take::<IssuedFlash>(cx, ISSUED_FLASH)
+            .map(|flash| (flash.name, flash.secret)),
+        ..TokensForm::default()
+    };
+    view! { security_cards(tokens_form: form) }
 }
 
 /// Revokes one session. The destroy is the *scoped*

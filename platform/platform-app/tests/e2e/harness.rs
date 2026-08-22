@@ -104,7 +104,11 @@ pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
         let _guard = CONNECT_LOCK.lock().await;
         platform_core::connect(&url).await.expect("connect")
     };
-    let router = platform_app::router(db.clone(), Some(assets().await));
+    let router = platform_app::router(
+        db.clone(),
+        topcoat::cookie::Key::generate(),
+        Some(assets().await),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind an ephemeral port");
