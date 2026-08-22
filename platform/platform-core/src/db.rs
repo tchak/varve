@@ -41,18 +41,41 @@ pub static MIGRATIONS: toasty::migration::MigrationSet = toasty::embed_migration
 /// become `platform-server` configuration when it exists (P.3).
 /// # Concurrency
 ///
-/// Migration application is not guarded against concurrent callers:
 /// toasty 0.10 runs each migration in its own transaction but takes
 /// no lock around creating `__toasty_migrations` or checking what is
-/// pending, so two processes migrating a fresh database at once can
-/// collide. Call this once at boot before serving (the
-/// `platform-server` pattern); anything needing multi-replica boot
-/// safety must add its own advisory lock around it.
+/// pending, so two callers migrating a fresh database at once would
+/// collide. `connect` therefore holds a session-level advisory lock
+/// ([`MIGRATION_LOCK`]) on a pinned connection for the duration of
+/// the apply: concurrent callers — multi-replica boot, test
+/// processes sharing one database — queue on it and each finds the
+/// schema complete. The lock is released before returning; it never
+/// outlives a crashed caller either, since Postgres drops it with
+/// the session.
 pub async fn connect(url: &str) -> toasty::Result<toasty::Db> {
     let db = toasty::Db::builder()
         .models(toasty::models!(crate::*))
         .connect(url)
         .await?;
-    MIGRATIONS.apply(&db).await?;
+    // Advisory locks are per session, so the lock and unlock must
+    // run on the same pinned connection; `apply` draws its own from
+    // the pool, which the lock serializes across callers, not
+    // across connections.
+    let mut conn = db.connection().await?;
+    toasty::sql::query("SELECT 1 FROM pg_advisory_lock($1)")
+        .bind(MIGRATION_LOCK)
+        .exec(&mut conn)
+        .await?;
+    let applied = MIGRATIONS.apply(&db).await;
+    let unlocked = toasty::sql::query("SELECT pg_advisory_unlock($1)")
+        .bind(MIGRATION_LOCK)
+        .exec(&mut conn)
+        .await;
+    applied?;
+    unlocked?;
     Ok(db)
 }
+
+/// Key of the advisory lock [`connect`] holds while applying
+/// migrations. Any fixed 64-bit value works as long as nothing else
+/// on the same database uses it for another purpose.
+const MIGRATION_LOCK: i64 = 0x7661_7276_6521_6d69; // "varve!mi"

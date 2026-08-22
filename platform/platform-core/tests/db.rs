@@ -27,14 +27,10 @@ use platform_core::{
 /// Connects to the test database, applying migrations; `None` (after
 /// printing why) when `VARVE_TEST_DATABASE_URL` is unset so the test
 /// passes vacuously.
-///
-/// Connects one test at a time: `connect` applies pending migrations,
-/// and concurrent application is unguarded in toasty 0.10 (see the
-/// `platform_core::db` docs) — on a fresh database, parallel tests
-/// would race creating `__toasty_migrations`.
+/// Concurrent connects (parallel tests, nextest's one process per
+/// test) are safe: `connect` serializes migration application with a
+/// database-side advisory lock.
 async fn test_db() -> Option<toasty::Db> {
-    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     let url = match std::env::var("VARVE_TEST_DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -42,7 +38,6 @@ async fn test_db() -> Option<toasty::Db> {
             return None;
         }
     };
-    let _guard = CONNECT_LOCK.lock().await;
     Some(connect(&url).await.expect("connect to test database"))
 }
 

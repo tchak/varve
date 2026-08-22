@@ -11,7 +11,6 @@ use platform_graphql::{InProcess, PlatformSchema, execute, schema};
 use serde_json::{Value, json};
 
 async fn test_db() -> Option<toasty::Db> {
-    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let url = match std::env::var("VARVE_TEST_DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -19,7 +18,6 @@ async fn test_db() -> Option<toasty::Db> {
             return None;
         }
     };
-    let _guard = CONNECT_LOCK.lock().await;
     Some(connect(&url).await.expect("connect to test database"))
 }
 

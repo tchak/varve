@@ -36,7 +36,7 @@ jobs:
       matrix:
         target: [wire_read, logic_canon, value_feature, record_entry]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@v2
         with:
@@ -45,7 +45,7 @@ jobs:
         with:
           workspaces: fuzz -> target
       - name: restore corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: fuzz/corpus/${{ matrix.target }}
           # Always a fresh key so the grown corpus is saved; restore the
@@ -74,14 +74,14 @@ jobs:
           echo "${{ matrix.target }}: $before → $after seeds (+$((after - before)))" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: upload merged seeds
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: seeds-${{ matrix.target }}
           path: fuzz/seeds/${{ matrix.target }}
           retention-days: 7
       - name: upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash-${{ matrix.target }}
           path: fuzz/artifacts/${{ matrix.target }}
@@ -96,8 +96,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: seeds-*
           path: seeds-dl
@@ -122,7 +122,7 @@ jobs:
           echo "changed=$(git status --porcelain fuzz/seeds | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
       - name: open or update pull request
         if: steps.seeds.outputs.changed != '0'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           # A PR opened with the default GITHUB_TOKEN does not trigger CI;
           # set a FUZZ_PR_TOKEN secret (fine-grained PAT: contents +

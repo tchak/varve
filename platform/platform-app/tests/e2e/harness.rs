@@ -62,11 +62,6 @@ impl App {
 /// The returned [`Playwright`] handle must stay alive for the whole
 /// test — dropping it tears down the driver process.
 pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
-    // Connects one test at a time — see `platform-core/tests/db.rs`
-    // for why (unguarded concurrent migration application in toasty
-    // 0.10).
-    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     let url = match std::env::var("VARVE_TEST_DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -100,10 +95,7 @@ pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
         return None;
     }
 
-    let db = {
-        let _guard = CONNECT_LOCK.lock().await;
-        platform_core::connect(&url).await.expect("connect")
-    };
+    let db = platform_core::connect(&url).await.expect("connect");
     let router = platform_app::router(
         db.clone(),
         topcoat::cookie::Key::generate(),

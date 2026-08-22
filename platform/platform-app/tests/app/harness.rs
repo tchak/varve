@@ -10,12 +10,10 @@ use topcoat::router::{
 
 /// Connects (applying migrations) and builds the app router; `None`
 /// (after printing why) when `VARVE_TEST_DATABASE_URL` is unset so
-/// the test passes vacuously. Connects one test at a time — see
-/// `platform-core/tests/db.rs` for why (unguarded concurrent
-/// migration application in toasty 0.10).
+/// the test passes vacuously. Concurrent connects are safe:
+/// `connect` serializes migration application with a database-side
+/// advisory lock.
 pub async fn test_app() -> Option<(Router, toasty::Db)> {
-    static CONNECT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     let url = match std::env::var("VARVE_TEST_DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -23,7 +21,6 @@ pub async fn test_app() -> Option<(Router, toasty::Db)> {
             return None;
         }
     };
-    let _guard = CONNECT_LOCK.lock().await;
     let db = platform_core::connect(&url).await.expect("connect");
     Some((
         platform_app::router(db.clone(), topcoat::cookie::Key::generate(), None),
