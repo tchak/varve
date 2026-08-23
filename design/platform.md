@@ -249,6 +249,42 @@ are emitted by use-case services (state changes, resolver failures, …).
 Deliberately not kernel data — the log is cells, not chat (DESIGN
 §2.9).
 
+**Procedure drafts (settled 2026-08-23).** The kernel has no notion of
+a schema *being edited*: a `Schema` is a plain value, a revision is
+that value once published and content-addressed (DESIGN §2.1), and
+`RevisionStore` holds publication events and objects only — an
+unpublished, constantly changing schema has no place in the
+hash-chained, erasure-bound kernel store and should not get one. The
+draft is therefore **platform state**: `ProcedureDraft`, a nullable
+embedded object on the catalog row (`platform-core::procedure`),
+holding the schema as the kernel's own **wire-canonical bytes**
+(`varve_wire::schema_bytes`, the body of a `revision` line, DESIGN §5)
+plus `base`, the id of the published revision it forks from (the
+publication's parent; `None` until the revision DAG lands). Rationale
+for bytes over a normalized `columns` table or a JSON mirror: the
+schema is a recursive tree the kernel already types (`Element`),
+the only query a draft ever answers is "load the whole thing", and
+the canonical encoding guarantees that what is stored is byte-for-byte
+what `publishRevision` will hash — no second schema representation to
+keep in sync, and no `serde` on kernel types outside `varve-wire`
+(DESIGN §13.5). The column is deferred out of the catalog `SELECT`
+and guarded by optimistic concurrency (`#[version]`): a stale editor
+fails its save instead of overwriting.
+
+**Editing is by element** (`platform-core::schema_edit`): add, update
+(label / type / arity on a column, label / cardinality on a group),
+move, remove — each atomic over the schema and validated by the kernel
+(`varve_schema::validate`, default depth policy) before it replaces
+the draft. Two kernel facts shape the API: ids are identity (minted
+once, opaque, never derived from labels — a type change must stay a
+type change for the impact report, DESIGN §3, not a removal plus an
+addition), and `required` / visibility / presentation are surface
+properties (DESIGN §2.6) with no place in schema edits. The first
+version carries the schema only; the **surface draft joins the same
+`ProcedureDraft`** when the editor grows its surface side — an
+administrator edits one form, and publishes schema and surface
+together. Open: P.9 Q15.
+
 ## P.5 GraphQL schema
 
 **Moved to `design/graphql.md` (2026-08-22).** The schema design grew
@@ -564,6 +600,17 @@ everything shipped exists in DN and nothing shipped that doesn't.
     reach the form; until then the open behavior is a P0 convenience,
     not a settled policy, and the schema's error vocabulary is ready
     for it (`FORBIDDEN`, G.2.7).
+15. **Draft mutation granularity on the public API.** (opened
+    2026-08-23 with procedure drafts, P.4.) `platform-core` exposes
+    element operations (add / update / move / remove); `graphql.md`
+    G.1 names a single `editRevision (draft)`. Granular mutations
+    compose with optimistic concurrency and give an audit trail per
+    edit; a whole-tree `editRevision(schema: SchemaInput)` is simpler
+    for a client-side form builder that holds the tree. The
+    server-rendered P0 editor posts form-by-form and fits the granular
+    shape; settle when the GraphQL side lands, and whether `base`
+    must be echoed by the client (a stale-fork check distinct from the
+    row version).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
