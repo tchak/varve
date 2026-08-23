@@ -43,10 +43,10 @@ pub(super) mod elements;
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, AddGroup, AddGroupInput, AddGroupVariables,
-    Arity, AttachmentType, Cardinality, ColumnType, DiscardRevisionDraft,
-    DiscardRevisionDraftInput, DiscardRevisionDraftVariables, PlacementInput,
-    ProcedureRevisionDraft, ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables,
-    SchemaColumn, SchemaElement, SchemaGroup, Unit,
+    AttachmentType, Cardinality, ColumnType, DiscardRevisionDraft, DiscardRevisionDraftInput,
+    DiscardRevisionDraftVariables, PlacementInput, ProcedureRevisionDraft,
+    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, SchemaColumn, SchemaElement,
+    SchemaGroup, Unit,
 };
 use platform_client::{Code, Error};
 use serde::{Deserialize, Serialize};
@@ -255,7 +255,6 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         ty: elements::kind_input(&input.kind),
-                        arity: None,
                     },
                 }),
             )
@@ -745,6 +744,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -1141,16 +1142,10 @@ async fn editor_page(
                                                         }
                                                     })
                                                 >
-                                                    <option
-                                                        value="ONE"
-                                                        selected=(matches!(c.column.arity, Arity::One))
-                                                    >
+                                                    <option value="ONE" selected=(!multiple_of(&c.column.ty))>
                                                         (arity_one.as_str())
                                                     </option>
-                                                    <option
-                                                        value="MANY"
-                                                        selected=(matches!(c.column.arity, Arity::Many))
-                                                    >
+                                                    <option value="MANY" selected=(multiple_of(&c.column.ty))>
                                                         (arity_many.as_str())
                                                     </option>
                                                 </select>
@@ -1490,11 +1485,14 @@ async fn tree_row(
     let is_selected = tree.selected.as_deref() == Some(id.as_str());
     let text = label_of(&element).to_owned();
     let summary = element_summary(cx, &element).await?;
+    // The multiplicity badge: only types that can hold many values
+    // say "one" or "many"; the rest say nothing.
     let (multiplicity, is_group) = match &element {
         SchemaElement::Column(c) => (
-            match c.arity {
-                Arity::One => tree.labels.one.clone(),
-                Arity::Many => tree.labels.many.clone(),
+            match multiple_of_type(&c.ty) {
+                Some(true) => tree.labels.many.clone(),
+                Some(false) => tree.labels.one.clone(),
+                None => String::new(),
             },
             false,
         ),
@@ -1565,7 +1563,9 @@ async fn tree_row(
                     (text.as_str())
                 </a>
                 badge(variant: BadgeVariant::Outline, (summary.as_str()))
-                badge(variant: BadgeVariant::Secondary, (multiplicity.as_str()))
+                if !multiplicity.is_empty() {
+                    badge(variant: BadgeVariant::Secondary, (multiplicity.as_str()))
+                }
                 dropdown_menu(
                     dropdown_menu_trigger(
                         attrs: attributes! {
@@ -1845,6 +1845,22 @@ pub(super) const KINDS: &[&str] = &[
     "ATTACHMENT",
     "GEOMETRY",
 ];
+
+/// Whether a column holds many values — `Some` for the types that
+/// carry the fact (choice, attachment, geometry), `None` otherwise.
+pub(super) fn multiple_of_type(ty: &ColumnType) -> Option<bool> {
+    match ty {
+        ColumnType::Enum(e) => Some(e.multiple),
+        ColumnType::Attachment(a) => Some(a.multiple),
+        ColumnType::Geometry(g) => Some(g.multiple),
+        _ => None,
+    }
+}
+
+/// [`multiple_of_type`], `false` where the fact does not apply.
+pub(super) fn multiple_of(ty: &ColumnType) -> bool {
+    multiple_of_type(ty).unwrap_or(false)
+}
 
 /// A number column's unit; `None` for any other column.
 pub(super) fn unit_of(ty: &ColumnType) -> Option<Unit> {

@@ -73,7 +73,6 @@ pub struct SchemaColumn {
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnType,
-    pub arity: Arity,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
@@ -83,13 +82,6 @@ pub struct SchemaGroup {
     pub parent_id: Option<cynic::Id>,
     pub label: String,
     pub cardinality: Cardinality,
-}
-
-#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
-#[cynic(graphql_type = "Arity")]
-pub enum Arity {
-    One,
-    Many,
 }
 
 #[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +188,7 @@ pub struct DatetimeType {
 #[cynic(graphql_type = "EnumType")]
 pub struct EnumType {
     pub kind: ColumnTypeKind,
+    pub multiple: bool,
     pub options: Vec<EnumOption>,
 }
 
@@ -210,6 +203,7 @@ pub struct EnumOption {
 #[cynic(graphql_type = "AttachmentType")]
 pub struct AttachmentType {
     pub kind: ColumnTypeKind,
+    pub multiple: bool,
     pub accept: Vec<String>,
     pub max_bytes: Option<i32>,
 }
@@ -218,6 +212,7 @@ pub struct AttachmentType {
 #[cynic(graphql_type = "GeometryType")]
 pub struct GeometryType {
     pub kind: ColumnTypeKind,
+    pub multiple: bool,
 }
 
 /// A column type on input (`@oneOf`): set exactly one member. Marker
@@ -242,7 +237,7 @@ pub struct ColumnTypeInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub attachment: Option<AttachmentTypeInput>,
     #[cynic(skip_serializing_if = "Option::is_none")]
-    pub geometry: Option<bool>,
+    pub geometry: Option<GeometryTypeInput>,
 }
 
 impl ColumnTypeInput {
@@ -282,24 +277,30 @@ impl ColumnTypeInput {
             ..Default::default()
         }
     }
-    pub fn enumeration(options: Vec<EnumOptionInput>) -> Self {
+    pub fn enumeration(options: Vec<EnumOptionInput>, multiple: bool) -> Self {
         Self {
-            enum_: Some(EnumTypeInput { options }),
+            enum_: Some(EnumTypeInput {
+                multiple: Some(multiple),
+                options,
+            }),
             ..Default::default()
         }
     }
-    pub fn attachment(accept: Vec<String>, max_bytes: Option<i32>) -> Self {
+    pub fn attachment(accept: Vec<String>, max_bytes: Option<i32>, multiple: bool) -> Self {
         Self {
             attachment: Some(AttachmentTypeInput {
+                multiple: Some(multiple),
                 accept: Some(accept),
                 max_bytes,
             }),
             ..Default::default()
         }
     }
-    pub fn geometry() -> Self {
+    pub fn geometry(multiple: bool) -> Self {
         Self {
-            geometry: Some(true),
+            geometry: Some(GeometryTypeInput {
+                multiple: Some(multiple),
+            }),
             ..Default::default()
         }
     }
@@ -313,6 +314,8 @@ pub struct NumberTypeInput {
 
 #[derive(cynic::InputObject, Debug, Clone)]
 pub struct EnumTypeInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub multiple: Option<bool>,
     pub options: Vec<EnumOptionInput>,
 }
 
@@ -328,9 +331,17 @@ pub struct EnumOptionInput {
 #[derive(cynic::InputObject, Debug, Clone, Default)]
 pub struct AttachmentTypeInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub multiple: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub accept: Option<Vec<String>>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<i32>,
+}
+
+#[derive(cynic::InputObject, Debug, Clone, Default)]
+pub struct GeometryTypeInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub multiple: Option<bool>,
 }
 
 /// Where an element goes: `parent_id` a group (`None` = root),
@@ -351,8 +362,6 @@ pub struct AddColumnInput {
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnTypeInput,
-    #[cynic(skip_serializing_if = "Option::is_none")]
-    pub arity: Option<Arity>,
 }
 
 #[derive(cynic::InputObject, Debug, Clone)]
@@ -374,8 +383,6 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[cynic(rename = "type", skip_serializing_if = "Option::is_none")]
     pub ty: Option<ColumnTypeInput>,
-    #[cynic(skip_serializing_if = "Option::is_none")]
-    pub arity: Option<Arity>,
 }
 
 /// An omitted field is left as it is.
@@ -447,7 +454,7 @@ pub struct UpdateColumnVariables {
     pub input: UpdateColumnInput,
 }
 
-/// `updateColumn`: label, type, or arity; the id never changes.
+/// `updateColumn`: label or type (which carries `multiple`); the id never changes.
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Mutation", variables = "UpdateColumnVariables")]
 pub struct UpdateColumn {
@@ -533,7 +540,6 @@ mod tests {
                 placement: None,
                 label: "Nom".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
-                arity: None,
             },
         });
         let document = serde_json::to_value(&add).unwrap();

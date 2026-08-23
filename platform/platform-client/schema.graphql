@@ -19,7 +19,6 @@ input AddColumnInput {
 	placement: PlacementInput! = {parentId: null, beforeId: null}
 	label: String!
 	type: ColumnTypeInput!
-	arity: Arity! = ONE
 }
 
 """
@@ -36,18 +35,14 @@ input AddGroupInput {
 }
 
 """
-A column holds one value or many (DESIGN §2.2).
-"""
-enum Arity {
-	ONE
-	MANY
-}
-
-"""
 A file column with its representability constraints (DESIGN §2.15).
 """
 type AttachmentType {
 	kind: ColumnTypeKind!
+	"""
+	Several files (multi-file).
+	"""
+	multiple: Boolean!
 	"""
 	IANA media-type patterns (`application/pdf`, `image/*`); empty =
 	unrestricted.
@@ -60,9 +55,11 @@ type AttachmentType {
 }
 
 """
-`ATTACHMENT`: representability constraints (DESIGN §2.15).
+`ATTACHMENT`: representability constraints (DESIGN §2.15) and
+whether several files are accepted.
 """
 input AttachmentTypeInput {
+	multiple: Boolean! = false
 	"""
 	IANA media-type patterns; omitted or empty = unrestricted.
 	"""
@@ -87,7 +84,10 @@ enum Cardinality {
 
 """
 A column's type: one object per constructor, carrying only the
-facts that constructor has.
+facts that constructor has — including whether it holds **many
+values** (`multiple`, the kernel's arity, DESIGN §2.2), which only
+choices, attachments and geometries offer (platform P.4: in the DN
+corpus `many` occurs nowhere else), so only those members carry it.
 """
 union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType
 
@@ -105,7 +105,7 @@ input ColumnTypeInput @oneOf {
 	datetime: Boolean
 	enum: EnumTypeInput
 	attachment: AttachmentTypeInput
-	geometry: Boolean
+	geometry: GeometryTypeInput
 }
 
 """
@@ -228,18 +228,35 @@ platform home.
 """
 type EnumType {
 	kind: ColumnTypeKind!
+	"""
+	Several options may be selected (a multi-select).
+	"""
+	multiple: Boolean!
 	options: [EnumOption!]!
 }
 
 """
-`ENUM`: the inline options (possibly none yet, in a draft).
+`ENUM`: the inline options (possibly none yet, in a draft), and
+whether several may be selected.
 """
 input EnumTypeInput {
+	multiple: Boolean! = false
 	options: [EnumOptionInput!]!
 }
 
 type GeometryType {
 	kind: ColumnTypeKind!
+	"""
+	Several features (a feature set).
+	"""
+	multiple: Boolean!
+}
+
+"""
+`GEOMETRY`: one feature, or a feature set.
+"""
+input GeometryTypeInput {
+	multiple: Boolean! = false
 }
 
 type IntegerType {
@@ -297,8 +314,9 @@ type Mutation {
 	"""
 	addGroup(input: AddGroupInput!): Procedure!
 	"""
-	Changes a column's label, type, or arity; its id — its identity
-	for the impact report — never changes.
+	Changes a column's label or type (the type carries whether it
+	holds many values); its id — its identity for the impact
+	report — never changes.
 	"""
 	updateColumn(input: UpdateColumnInput!): Procedure!
 	"""
@@ -473,7 +491,6 @@ type SchemaColumn {
 	parentId: ID
 	label: String!
 	type: ColumnType!
-	arity: Arity!
 }
 
 """
@@ -558,7 +575,6 @@ input UpdateColumnInput {
 	id: ID!
 	label: String
 	type: ColumnTypeInput
-	arity: Arity
 }
 
 """

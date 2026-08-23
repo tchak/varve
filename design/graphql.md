@@ -239,7 +239,15 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
    AttachmentType { accept maxBytes } | …` — G.2.5 applied to types:
    no nullable `unit` on a text column. Each member carries `kind:
    ColumnTypeKind` so a client that only wants the constructor need
-   not match on `__typename`. On input the mirror is a **`@oneOf`
+   not match on `__typename`. **Many values ride the type** (settled
+   2026-08-23, the rework platform P.9 Q15 anticipated): `EnumType`,
+   `AttachmentType` and `GeometryType` carry `multiple: Boolean!`
+   (the kernel's arity, DESIGN §2.2) and their inputs `multiple:
+   Boolean! = false`; no other member has the fact and `SchemaColumn`
+   has no `arity` — the platform rule that only those three kinds
+   hold many values (P.4, corpus-backed) is structural here, not a
+   validation, and `platform-core::schema_edit` keeps it as the
+   kernel-edge backstop. On input the mirror is a **`@oneOf`
    `ColumnTypeInput`** — `{ text: true }`, `{ integer: { unit } }`,
    `{ enum: { options } }`, `{ attachment: { accept maxBytes } }` —
    so the validator, not a resolver, keeps a unit off a text column,
@@ -262,9 +270,9 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
 3. **Mutations are element operations**, one `input` each, all
    answering with the full `Procedure` (G.2.7) so the editor reads
    `revisionDraft` off the response: `addColumn`, `addGroup`,
-   `updateColumn`, `updateGroup` (omitted fields unchanged; ids never
-   change — a type change must stay a type change for the impact
-   report, DESIGN §3), `moveElement`, `removeElement` (a group with
+   `updateColumn` (label / type — the type carrying `multiple`),
+   `updateGroup` (omitted fields unchanged; ids never change — a type
+   change must stay a type change for the impact report, DESIGN §3), `moveElement`, `removeElement` (a group with
    its subtree), `discardRevisionDraft`. **Placement is
    `{ parentId, beforeId }`** — a sibling anchor, never an index:
    `beforeId: null` appends, and the two cases reach both ends, while
@@ -277,9 +285,7 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
 4. **Two codes join G.6.4:** `INVALID_EDIT` — the draft or the kernel
    refused the operation (unknown element or parent, anchor outside
    its parent, a schema `varve_schema::validate` rejects: duplicate
-   id, `many` nested in `many`; and the platform rule that arity
-   `many` is offered on enum, attachment and geometry columns only —
-   platform P.4, corpus-backed); the message carries the reason and
+   id, `many` nested in `many`); the message carries the reason and
    the draft is unchanged — and `CONFLICT` — the row's optimistic
    concurrency check failed (two editors racing); re-read and retry.
    No client-side version token yet (platform P.9 Q15).

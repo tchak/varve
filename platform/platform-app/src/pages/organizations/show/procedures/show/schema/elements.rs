@@ -10,7 +10,7 @@
 use cynic::MutationBuilder;
 use platform_client::Error;
 use platform_client::revision_draft::{
-    Arity, AttachmentType, Cardinality, ColumnType, ColumnTypeInput, EnumOptionInput, MoveElement,
+    AttachmentType, Cardinality, ColumnType, ColumnTypeInput, EnumOptionInput, MoveElement,
     MoveElementInput, MoveElementVariables, PlacementInput, ProcedureRevisionDraft, RemoveElement,
     RemoveElementInput, RemoveElementVariables, SchemaColumn, SchemaElement, UpdateColumn,
     UpdateColumnInput, UpdateColumnVariables, UpdateGroup, UpdateGroupInput, UpdateGroupVariables,
@@ -26,8 +26,8 @@ use crate::{client, i18n::t};
 
 use super::super::procedure_draft;
 use super::{
-    Notice, NoticeKind, back_to_editor, done, done_with, id_of, kind_of, label_of, parent_of,
-    refused, unit_from_name, unit_of,
+    Notice, NoticeKind, back_to_editor, done, done_with, id_of, kind_of, label_of, multiple_of,
+    parent_of, refused, unit_from_name, unit_of,
 };
 
 /// A submitted form as ordered pairs — repeated names (the enum
@@ -57,9 +57,9 @@ pub(super) fn kind_input(kind: &str) -> ColumnTypeInput {
         "DECIMAL" => ColumnTypeInput::decimal(None),
         "DATE" => ColumnTypeInput::date(),
         "DATETIME" => ColumnTypeInput::datetime(),
-        "ENUM" => ColumnTypeInput::enumeration(Vec::new()),
-        "ATTACHMENT" => ColumnTypeInput::attachment(Vec::new(), None),
-        "GEOMETRY" => ColumnTypeInput::geometry(),
+        "ENUM" => ColumnTypeInput::enumeration(Vec::new(), false),
+        "ATTACHMENT" => ColumnTypeInput::attachment(Vec::new(), None, false),
+        "GEOMETRY" => ColumnTypeInput::geometry(false),
         _ => ColumnTypeInput::text(),
     }
 }
@@ -88,6 +88,10 @@ pub(super) async fn set_options(
     element_id: &str,
     options: Vec<EnumOptionInput>,
 ) -> Result<std::result::Result<(), Notice>> {
+    let (column, _) = match enum_column(cx, procedure, element_id).await? {
+        Ok(found) => found,
+        Err(notice) => return Ok(Err(notice)),
+    };
     let result = platform_client::run(
         client,
         UpdateColumn::build(UpdateColumnVariables {
@@ -95,8 +99,10 @@ pub(super) async fn set_options(
                 procedure_id: cynic::Id::new(procedure.id.inner()),
                 id: cynic::Id::new(element_id),
                 label: None,
-                ty: Some(ColumnTypeInput::enumeration(options)),
-                arity: None,
+                ty: Some(ColumnTypeInput::enumeration(
+                    options,
+                    multiple_of(&column.ty),
+                )),
             },
         }),
     )
@@ -230,18 +236,6 @@ pub(super) async fn apply_update(
                 Ok(ty) => ty,
                 Err(notice) => return Ok(Err(notice)),
             };
-            // The arity select is posted with the whole form even for a
-            // kind that cannot hold many values (it is hidden, not
-            // absent): leave it to the kernel edge, which takes the
-            // arity back to one with the type.
-            let kind = fields.get("kind").unwrap_or(kind_of(&column.ty));
-            let list_capable = matches!(kind, "ENUM" | "ATTACHMENT" | "GEOMETRY");
-            let arity = match fields.get("arity") {
-                Some("MANY") if list_capable => Some(Arity::Many),
-                Some("MANY") => None,
-                Some(_) => Some(Arity::One),
-                None => None,
-            };
             platform_client::run(
                 client,
                 UpdateColumn::build(UpdateColumnVariables {
@@ -250,7 +244,6 @@ pub(super) async fn apply_update(
                         id,
                         label,
                         ty,
-                        arity,
                     },
                 }),
             )
@@ -273,7 +266,7 @@ async fn column_type_input(
     column: &SchemaColumn,
     fields: &Fields,
 ) -> Result<std::result::Result<Option<ColumnTypeInput>, Notice>> {
-    let touched = ["kind", "unit", "accept", "max_bytes"]
+    let touched = ["kind", "unit", "accept", "max_bytes", "arity"]
         .iter()
         .any(|name| fields.get(name).is_some());
     if !touched {
@@ -294,17 +287,25 @@ async fn column_type_input(
         },
         None => current_unit,
     };
+    // Many values: the form's select when sent (it is posted with the
+    // whole form even when hidden, so only a list-capable kind reads
+    // it), else what the column already has.
+    let multiple = match fields.get("arity") {
+        Some(value) if matches!(kind, "ENUM" | "ATTACHMENT" | "GEOMETRY") => value == "MANY",
+        Some(_) => false,
+        None => multiple_of(&column.ty),
+    };
     let input = match kind {
         "BOOLEAN" => ColumnTypeInput::boolean(),
         "INTEGER" => ColumnTypeInput::integer(unit),
         "DECIMAL" => ColumnTypeInput::decimal(unit),
         "DATE" => ColumnTypeInput::date(),
         "DATETIME" => ColumnTypeInput::datetime(),
-        "GEOMETRY" => ColumnTypeInput::geometry(),
+        "GEOMETRY" => ColumnTypeInput::geometry(multiple),
         // Options are edited through `element::options`; a column
         // becoming an enum starts with none — an empty choice is a
         // draft state, refused at publication, not here.
-        "ENUM" => ColumnTypeInput::enumeration(current_options(column)),
+        "ENUM" => ColumnTypeInput::enumeration(current_options(column), multiple),
         "ATTACHMENT" => {
             let (current_accept, current_max) = match &column.ty {
                 ColumnType::Attachment(AttachmentType {
@@ -334,7 +335,7 @@ async fn column_type_input(
                 },
                 None => current_max,
             };
-            ColumnTypeInput::attachment(accept, max_bytes)
+            ColumnTypeInput::attachment(accept, max_bytes, multiple)
         }
         _ => ColumnTypeInput::text(),
     };

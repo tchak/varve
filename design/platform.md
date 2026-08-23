@@ -341,11 +341,12 @@ elements styled like the vendored components for the same reason.
 only** (settled 2026-08-23): the kernel lets any column be list-valued
 (DESIGN §2.2), but in the whole DN corpus arity `many` occurs only as
 multi-select, multi-file and feature sets
-(`corpus/M0-type-frequency.md`) — so this is a platform rule, enforced
-in `platform-core::schema_edit` (`list_capable`; `INVALID_EDIT`
-through the API, P.9 Q15's future API rework may lift it into the
-type), and the editor shows the arity select for those kinds only; a
-type change away from them takes the arity back to one. Out of scope,
+(`corpus/M0-type-frequency.md`) — so this is a platform rule: **in
+the API it is structural** (`multiple` lives on `EnumType`,
+`AttachmentType` and `GeometryType` only, G.7), `platform-core::
+schema_edit` keeps it as the kernel-edge backstop (`list_capable`),
+and the editor shows the values select for those kinds only; a type
+change away from them takes the arity back to one. Out of scope,
 deliberately: publishing, surface properties, blocks and published
 nomenclatures, undo.
 
@@ -677,8 +678,9 @@ everything shipped exists in DN and nothing shipped that doesn't.
     row version). **Partly settled (2026-08-23, `graphql.md` G.7):**
     the public API is granular by construction (`addColumn`,
     `moveElement`, … — one element operation per mutation, `CONFLICT`
-    on a lost race). Still open: whether a whole-tree `editRevision`
-    is ever worth adding beside them, and the `base` echo.
+    on a lost race); the arity-into-type rework landed the same day
+    (G.7.2). Still open: whether a whole-tree `editRevision` is ever
+    worth adding beside them, and the `base` echo.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 

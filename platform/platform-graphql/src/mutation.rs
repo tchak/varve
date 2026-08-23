@@ -11,7 +11,7 @@ use crate::error::{Code, coded, forbidden, internal, invalid_input};
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::Procedure;
 use crate::revision_draft::{
-    Arity, Cardinality, ColumnTypeInput, PlacementInput, element_id, new_column, new_group,
+    Cardinality, ColumnTypeInput, PlacementInput, element_id, new_column, new_group,
 };
 use crate::slug::Slug;
 use crate::team::Team;
@@ -62,8 +62,6 @@ pub struct AddColumnInput {
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnTypeInput,
-    #[graphql(default_with = "Arity::One")]
-    pub arity: Arity,
 }
 
 /// `addGroup` input.
@@ -86,7 +84,6 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[graphql(name = "type")]
     pub ty: Option<ColumnTypeInput>,
-    pub arity: Option<Arity>,
 }
 
 /// `updateGroup` input: an omitted field is left as it is.
@@ -291,11 +288,11 @@ impl Mutation {
         input: AddColumnInput,
     ) -> async_graphql::Result<Procedure> {
         validate_non_empty("label", &input.label)?;
-        let ty = input.ty.into_scalar_type()?;
+        let (ty, arity) = input.ty.into_column_type()?;
         let label = input.label.trim().to_owned();
         edit_revision_draft(ctx, &input.procedure_id, move |schema| {
             let placement = input.placement.resolve(schema)?;
-            platform_core::add_element(schema, &placement, new_column(label, ty, input.arity))
+            platform_core::add_element(schema, &placement, new_column(label, ty, arity))
         })
         .await
     }
@@ -316,8 +313,9 @@ impl Mutation {
         .await
     }
 
-    /// Changes a column's label, type, or arity; its id — its identity
-    /// for the impact report — never changes.
+    /// Changes a column's label or type (the type carries whether it
+    /// holds many values); its id — its identity for the impact
+    /// report — never changes.
     async fn update_column(
         &self,
         ctx: &Context<'_>,
@@ -326,13 +324,18 @@ impl Mutation {
         if let Some(label) = &input.label {
             validate_non_empty("label", label)?;
         }
+        let (ty, arity) = match input
+            .ty
+            .map(ColumnTypeInput::into_column_type)
+            .transpose()?
+        {
+            Some((ty, arity)) => (Some(ty), Some(arity)),
+            None => (None, None),
+        };
         let patch = ColumnPatch {
             label: input.label.map(|l| l.trim().to_owned()),
-            ty: input
-                .ty
-                .map(ColumnTypeInput::into_scalar_type)
-                .transpose()?,
-            arity: input.arity.map(Into::into),
+            ty,
+            arity,
         };
         edit_revision_draft(ctx, &input.procedure_id, move |schema| {
             let id = match element_id(schema, &input.id)? {

@@ -59,8 +59,7 @@ fn push_elements(out: &mut Vec<SchemaElement>, parent: Option<&GroupId>, element
                 id: ID::from(c.id.as_str()),
                 parent_id,
                 label: c.label.clone(),
-                ty: ColumnType::from(&c.ty),
-                arity: c.arity.into(),
+                ty: column_type(&c.ty, c.arity),
             })),
             Element::Group(g) => {
                 out.push(SchemaElement::Group(SchemaGroup {
@@ -91,7 +90,6 @@ pub struct SchemaColumn {
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnType,
-    pub arity: Arity,
 }
 
 /// An ordered container of elements (DESIGN §2.1).
@@ -102,14 +100,6 @@ pub struct SchemaGroup {
     pub parent_id: Option<ID>,
     pub label: String,
     pub cardinality: Cardinality,
-}
-
-/// A column holds one value or many (DESIGN §2.2).
-#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
-#[graphql(remote = "varve_schema::Arity")]
-pub enum Arity {
-    One,
-    Many,
 }
 
 /// A group holds one row or many (DESIGN §2.2).
@@ -161,7 +151,10 @@ pub enum ColumnTypeKind {
 }
 
 /// A column's type: one object per constructor, carrying only the
-/// facts that constructor has.
+/// facts that constructor has — including whether it holds **many
+/// values** (`multiple`, the kernel's arity, DESIGN §2.2), which only
+/// choices, attachments and geometries offer (platform P.4: in the DN
+/// corpus `many` occurs nowhere else), so only those members carry it.
 #[derive(Union)]
 pub enum ColumnType {
     Text(TextType),
@@ -213,6 +206,8 @@ pub struct DatetimeType {
 #[derive(SimpleObject)]
 pub struct EnumType {
     pub kind: ColumnTypeKind,
+    /// Several options may be selected (a multi-select).
+    pub multiple: bool,
     pub options: Vec<EnumOption>,
 }
 
@@ -227,6 +222,8 @@ pub struct EnumOption {
 #[derive(SimpleObject)]
 pub struct AttachmentType {
     pub kind: ColumnTypeKind,
+    /// Several files (multi-file).
+    pub multiple: bool,
     /// IANA media-type patterns (`application/pdf`, `image/*`); empty =
     /// unrestricted.
     pub accept: Vec<String>,
@@ -237,10 +234,15 @@ pub struct AttachmentType {
 #[derive(SimpleObject)]
 pub struct GeometryType {
     pub kind: ColumnTypeKind,
+    /// Several features (a feature set).
+    pub multiple: bool,
 }
 
-impl From<&ScalarType> for ColumnType {
-    fn from(ty: &ScalarType) -> Self {
+/// The GraphQL type of a kernel column: its `ScalarType` plus, for the
+/// members that carry it, the arity as `multiple`.
+pub fn column_type(ty: &ScalarType, arity: varve_schema::Arity) -> ColumnType {
+    let multiple = arity == varve_schema::Arity::Many;
+    {
         match ty {
             ScalarType::Text => ColumnType::Text(TextType {
                 kind: ColumnTypeKind::Text,
@@ -264,6 +266,7 @@ impl From<&ScalarType> for ColumnType {
             }),
             ScalarType::Enum(backing) => ColumnType::Enum(EnumType {
                 kind: ColumnTypeKind::Enum,
+                multiple,
                 options: match backing {
                     NomenclatureRef::Inline(rows) => rows
                         .iter()
@@ -279,11 +282,13 @@ impl From<&ScalarType> for ColumnType {
             }),
             ScalarType::Attachment(constraints) => ColumnType::Attachment(AttachmentType {
                 kind: ColumnTypeKind::Attachment,
+                multiple,
                 accept: constraints.accept.clone(),
                 max_bytes: constraints.max_bytes,
             }),
             ScalarType::Geometry => ColumnType::Geometry(GeometryType {
                 kind: ColumnTypeKind::Geometry,
+                multiple,
             }),
         }
     }
@@ -302,7 +307,7 @@ pub enum ColumnTypeInput {
     Datetime(bool),
     Enum(EnumTypeInput),
     Attachment(AttachmentTypeInput),
-    Geometry(bool),
+    Geometry(GeometryTypeInput),
 }
 
 /// `INTEGER` / `DECIMAL`: an optional unit (DESIGN §2.14).
@@ -311,9 +316,12 @@ pub struct NumberTypeInput {
     pub unit: Option<Unit>,
 }
 
-/// `ENUM`: the inline options (possibly none yet, in a draft).
+/// `ENUM`: the inline options (possibly none yet, in a draft), and
+/// whether several may be selected.
 #[derive(InputObject, Debug, Clone)]
 pub struct EnumTypeInput {
+    #[graphql(default = false)]
+    pub multiple: bool,
     pub options: Vec<EnumOptionInput>,
 }
 
@@ -326,17 +334,43 @@ pub struct EnumOptionInput {
     pub label: String,
 }
 
-/// `ATTACHMENT`: representability constraints (DESIGN §2.15).
+/// `ATTACHMENT`: representability constraints (DESIGN §2.15) and
+/// whether several files are accepted.
 #[derive(InputObject, Debug, Clone, Default)]
 pub struct AttachmentTypeInput {
+    #[graphql(default = false)]
+    pub multiple: bool,
     /// IANA media-type patterns; omitted or empty = unrestricted.
     pub accept: Option<Vec<String>>,
     /// Per-file byte limit; omitted = unlimited.
     pub max_bytes: Option<u64>,
 }
 
+/// `GEOMETRY`: one feature, or a feature set.
+#[derive(InputObject, Debug, Clone, Default)]
+pub struct GeometryTypeInput {
+    #[graphql(default = false)]
+    pub multiple: bool,
+}
+
 impl ColumnTypeInput {
-    pub fn into_scalar_type(self) -> async_graphql::Result<ScalarType> {
+    /// The kernel type and arity this input names.
+    pub fn into_column_type(self) -> async_graphql::Result<(ScalarType, varve_schema::Arity)> {
+        let multiple = match &self {
+            ColumnTypeInput::Enum(e) => e.multiple,
+            ColumnTypeInput::Attachment(a) => a.multiple,
+            ColumnTypeInput::Geometry(g) => g.multiple,
+            _ => false,
+        };
+        let arity = if multiple {
+            varve_schema::Arity::Many
+        } else {
+            varve_schema::Arity::One
+        };
+        Ok((self.into_scalar_type()?, arity))
+    }
+
+    fn into_scalar_type(self) -> async_graphql::Result<ScalarType> {
         let marker = |name: &str, set: bool, ty: ScalarType| {
             if set {
                 Ok(ty)
@@ -349,7 +383,7 @@ impl ColumnTypeInput {
             ColumnTypeInput::Boolean(set) => marker("boolean", set, ScalarType::Boolean)?,
             ColumnTypeInput::Date(set) => marker("date", set, ScalarType::Date)?,
             ColumnTypeInput::Datetime(set) => marker("datetime", set, ScalarType::Datetime)?,
-            ColumnTypeInput::Geometry(set) => marker("geometry", set, ScalarType::Geometry)?,
+            ColumnTypeInput::Geometry(_) => ScalarType::Geometry,
             ColumnTypeInput::Integer(n) => ScalarType::Integer(n.unit.map(Into::into)),
             ColumnTypeInput::Decimal(n) => ScalarType::Decimal(n.unit.map(Into::into)),
             // An enum with no options yet is a legitimate draft state —
@@ -432,12 +466,12 @@ pub fn element_id(schema: &Schema, id: &ID) -> Result<ElementId, platform_core::
 }
 
 /// A new column as `addColumn` builds it.
-pub fn new_column(label: String, ty: ScalarType, arity: Arity) -> Element {
+pub fn new_column(label: String, ty: ScalarType, arity: varve_schema::Arity) -> Element {
     Element::Column(Column {
         id: platform_core::new_column_id(),
         label,
         ty,
-        arity: arity.into(),
+        arity,
     })
 }
 

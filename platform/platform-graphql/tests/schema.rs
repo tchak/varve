@@ -505,10 +505,11 @@ fn the_client_mirrors_every_error_code() {
 /// The draft selection every draft mutation and the read share.
 const DRAFT: &str = "revisionDraft { base schema { elements {
     __typename
-    ... on SchemaColumn { id parentId label arity type { __typename
+    ... on SchemaColumn { id parentId label type { __typename
         ... on IntegerType { unit } ... on DecimalType { unit }
-        ... on EnumType { options { id label } }
-        ... on AttachmentType { accept maxBytes } } }
+        ... on EnumType { multiple options { id label } }
+        ... on AttachmentType { multiple accept maxBytes }
+        ... on GeometryType { multiple } } }
     ... on SchemaGroup { id parentId label cardinality }
 } } }";
 
@@ -593,7 +594,6 @@ async fn revision_draft_editing_journey() {
     assert!(p["revisionDraft"]["base"].is_null());
     assert_eq!(labels(&p), ["Nom"]);
     let nom = id_of(&p["revisionDraft"]["schema"]["elements"][0]);
-    assert_eq!(p["revisionDraft"]["schema"]["elements"][0]["arity"], "ONE");
     assert_eq!(
         p["revisionDraft"]["schema"]["elements"][0]["type"]["__typename"],
         "TextType"
@@ -659,28 +659,34 @@ async fn revision_draft_editing_journey() {
     let surface = &p["revisionDraft"]["schema"]["elements"][2];
     assert_eq!(id_of(surface), nom);
     assert_eq!(surface["label"], "Surface");
-    assert_eq!(surface["arity"], "ONE");
-    // Many values: a platform rule offers it on choices, attachments
-    // and geometries only (INVALID_EDIT elsewhere).
-    let code = api
-        .edit_error(
-            &alice,
-            "updateColumn",
-            "UpdateColumnInput",
-            json!({ "procedureId": pid, "id": nom, "arity": "MANY" }),
-        )
-        .await;
-    assert_eq!(code, "INVALID_EDIT");
+    // Many values ride the type: only choices, attachments and
+    // geometries carry `multiple` (G.7); the others have no such fact.
+    assert!(surface["type"].get("multiple").is_none());
     let p = api
         .edit(
             &alice,
             "updateColumn",
             "UpdateColumnInput",
-            json!({ "procedureId": pid, "id": nom, "type": { "attachment": {} }, "arity": "MANY" }),
+            json!({ "procedureId": pid, "id": nom, "type": { "attachment": { "multiple": true } } }),
         )
         .await;
-    assert_eq!(p["revisionDraft"]["schema"]["elements"][2]["arity"], "MANY");
-    // Back to a decimal: the arity follows the type back to one.
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][2]["type"]["multiple"],
+        true
+    );
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "type": { "geometry": {} } }),
+        )
+        .await;
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][2]["type"]["multiple"],
+        false
+    );
+    // Back to a decimal: a type without the fact.
     let p = api
         .edit(
             &alice,
@@ -691,7 +697,7 @@ async fn revision_draft_editing_journey() {
         )
         .await;
     let surface = &p["revisionDraft"]["schema"]["elements"][2];
-    assert_eq!(surface["arity"], "ONE");
+    assert!(surface["type"].get("multiple").is_none());
     assert_eq!(surface["type"]["__typename"], "DecimalType");
     assert_eq!(surface["type"]["unit"], "SQUARE_METRE");
 
@@ -916,7 +922,6 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 placement: None,
                 label: "Surface".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
-                arity: None,
             },
         }),
     )
@@ -956,7 +961,6 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 }),
                 label: "Inside a column".into(),
                 ty: ColumnTypeInput::text(),
-                arity: None,
             },
         }),
     )
