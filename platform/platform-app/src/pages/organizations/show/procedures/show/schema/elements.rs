@@ -341,12 +341,17 @@ async fn column_type_input(
     Ok(Ok(Some(input)))
 }
 
-/// A move: `direction` (`up` / `down`) among siblings, or `parent`
-/// (a group id, empty for the top level) to move into, appended.
+/// A move: `direction` (`up` / `down` / `top` / `bottom`) among
+/// siblings, `after` a sibling, or `parent` (a group id, empty for
+/// the top level) to move into, appended.
 #[derive(Deserialize)]
 pub(super) struct Relocation {
+    /// `up` / `down` / `top` / `bottom` among siblings.
     #[serde(default)]
     direction: String,
+    /// A sibling to land right after.
+    after: Option<String>,
+    /// A group to move into (empty = top level), appended.
     parent: Option<String>,
 }
 
@@ -426,16 +431,40 @@ pub(super) mod element {
                         .iter()
                         .position(|e| id_of(e) == element_id.as_str())
                         .unwrap_or(0);
-                    let before = match input.direction.as_str() {
-                        "up" => match index.checked_sub(1) {
+                    let before = match (input.direction.as_str(), &input.after) {
+                        // After a sibling = before the one that follows it
+                        // (appended when it is the last).
+                        (_, Some(after)) => {
+                            let Some(at) = siblings.iter().position(|e| id_of(e) == after) else {
+                                return back_to_editor(cx, Some(&element_id), None).await;
+                            };
+                            siblings
+                                .iter()
+                                .skip(at + 1)
+                                .find(|e| id_of(e) != element_id.as_str())
+                                .map(|e| id_of(e).to_owned())
+                        }
+                        ("up", _) => match index.checked_sub(1) {
                             Some(i) => Some(id_of(siblings[i]).to_owned()),
                             None => return back_to_editor(cx, Some(&element_id), None).await,
                         },
-                        "down" => {
+                        ("down", _) => {
                             if index + 1 >= siblings.len() {
                                 return back_to_editor(cx, Some(&element_id), None).await;
                             }
                             siblings.get(index + 2).map(|e| id_of(e).to_owned())
+                        }
+                        ("top", _) => {
+                            if index == 0 {
+                                return back_to_editor(cx, Some(&element_id), None).await;
+                            }
+                            Some(id_of(siblings[0]).to_owned())
+                        }
+                        ("bottom", _) => {
+                            if index + 1 >= siblings.len() {
+                                return back_to_editor(cx, Some(&element_id), None).await;
+                            }
+                            None
                         }
                         _ => return back_to_editor(cx, Some(&element_id), None).await,
                     };

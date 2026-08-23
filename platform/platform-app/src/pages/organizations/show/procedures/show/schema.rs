@@ -743,6 +743,8 @@ async fn editor_page(
                         },
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -1376,6 +1378,9 @@ struct TreeLabels {
     actions: String,
     move_up: String,
     move_down: String,
+    move_top: String,
+    move_bottom: String,
+    move_after: String,
     move_to: String,
     top_level: String,
     remove: String,
@@ -1389,6 +1394,9 @@ impl TreeLabels {
             actions: t(cx, "schema.actions").await?,
             move_up: t(cx, "schema.actions.move-up").await?,
             move_down: t(cx, "schema.actions.move-down").await?,
+            move_top: t(cx, "schema.actions.move-top").await?,
+            move_bottom: t(cx, "schema.actions.move-bottom").await?,
+            move_after: t(cx, "schema.actions.move-after").await?,
             move_to: t(cx, "schema.actions.move-to").await?,
             top_level: t(cx, "schema.actions.top-level").await?,
             remove: t(cx, "schema.actions.remove").await?,
@@ -1523,6 +1531,21 @@ async fn tree_row(
     );
     let destinations = tree.destinations(&id);
     let at_root = parent_of(&element).is_none();
+    let current_parent = parent_of(&element);
+    // "Move to" offers the top level (unless already there) and every
+    // group but the current parent, itself and its descendants; with
+    // nothing enabled the trigger itself is a disabled item.
+    let move_to_enabled = !at_root
+        || destinations
+            .iter()
+            .any(|g| current_parent.as_deref() != Some(g.id.inner()));
+    // "Move after": same-level siblings only, never itself.
+    let siblings: Vec<(String, String)> = tree
+        .children(current_parent.as_deref())
+        .into_iter()
+        .filter(|e| id_of(e) != id)
+        .map(|e| (id_of(e).to_owned(), label_of(e).to_owned()))
+        .collect();
     view! {
         <li
             data-element-id=(id.as_str())
@@ -1570,35 +1593,86 @@ async fn tree_row(
                                 (tree.labels.move_down.as_str())
                             )
                         </form>
-                        dropdown_menu_sub(
-                            dropdown_menu_sub_trigger((tree.labels.move_to.as_str()))
-                            dropdown_menu_sub_content(
-                                <form method="post" action=(relocate_href())>
-                                    <input type="hidden" name="parent" value="">
-                                    dropdown_menu_item(
-                                        attrs: attributes! { type="submit" disabled=(at_root) },
-                                        (tree.labels.top_level.as_str())
-                                    )
-                                </form>
-                                for group in &destinations {
-                                    <form method="post" action=(relocate_href())>
-                                        <input
-                                            type="hidden"
-                                            name="parent"
-                                            value=(group.id.inner())
-                                        >
-                                        dropdown_menu_item(
-                                            attrs: attributes! {
-                                                type="submit"
-                                                disabled=(parent_of(&element).as_deref()
-                                                    == Some(group.id.inner()))
-                                            },
-                                            (group.label.as_str())
-                                        )
-                                    </form>
-                                }
+                        <form method="post" action=(relocate_href())>
+                            <input type="hidden" name="direction" value="top">
+                            dropdown_menu_item(
+                                attrs: attributes! { type="submit" disabled=(first) },
+                                (tree.labels.move_top.as_str())
                             )
-                        )
+                        </form>
+                        <form method="post" action=(relocate_href())>
+                            <input type="hidden" name="direction" value="bottom">
+                            dropdown_menu_item(
+                                attrs: attributes! { type="submit" disabled=(last) },
+                                (tree.labels.move_bottom.as_str())
+                            )
+                        </form>
+                        if siblings.is_empty() {
+                            dropdown_menu_item(
+                                attrs: attributes! { type="button" disabled="" data-menu="move-after" },
+                                (tree.labels.move_after.as_str())
+                            )
+                        } else {
+                            dropdown_menu_sub(
+                                attrs: attributes! { data-menu="move-after" },
+                                dropdown_menu_sub_trigger(
+                                    (tree.labels.move_after.as_str())
+                                )
+                                dropdown_menu_sub_content(
+                                    for (sibling_id, sibling_label) in &siblings {
+                                        <form method="post" action=(relocate_href())>
+                                            <input
+                                                type="hidden"
+                                                name="after"
+                                                value=(sibling_id.as_str())
+                                            >
+                                            dropdown_menu_item(
+                                                attrs: attributes! { type="submit" },
+                                                (sibling_label.as_str())
+                                            )
+                                        </form>
+                                    }
+                                )
+                            )
+                        }
+                        if !move_to_enabled {
+                            dropdown_menu_item(
+                                attrs: attributes! { type="button" disabled="" data-menu="move-to" },
+                                (tree.labels.move_to.as_str())
+                            )
+                        } else {
+                            dropdown_menu_sub(
+                                attrs: attributes! { data-menu="move-to" },
+                                dropdown_menu_sub_trigger((tree.labels.move_to.as_str()))
+                                dropdown_menu_sub_content(
+                                    if !at_root {
+                                        <form method="post" action=(relocate_href())>
+                                            <input type="hidden" name="parent" value="">
+                                            dropdown_menu_item(
+                                                attrs: attributes! { type="submit" },
+                                                (tree.labels.top_level.as_str())
+                                            )
+                                        </form>
+                                    }
+                                    for group in &destinations {
+                                        if current_parent.as_deref()
+                                            != Some(group.id.inner()) {
+                                            <form method="post" action=(relocate_href())>
+                                                <input
+                                                    type="hidden"
+                                                    name="parent"
+                                                    value=(group.id.inner())
+                                                >
+                                                dropdown_menu_item(
+                                                    attrs: attributes! { type="submit" },
+                                                    (group.label.as_str())
+                                                )
+                                            </form>
+                                        }
+                                    }
+                                )
+                            )
+                        }
                         dropdown_menu_separator()
                         <form method="post" action=(remove_href)>
                             dropdown_menu_item(

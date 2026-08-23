@@ -388,6 +388,83 @@ async fn the_editing_journey() {
     // The actions menu names each row and offers the group as a target.
     assert!(html.contains("aria-label=\"Actions for Nom\""), "{html}");
     assert!(html.contains("Move to"), "{html}");
+    // Top / bottom / after: the order is [Adresse, Ville, Rue, Nom] at
+    // the root with Ville and Rue inside Adresse.
+    let to = act(&router, &cookie, &relocate(&nom), &[("direction", "top")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [nom.clone(), adresse.clone(), ville.clone(), rue.clone()]
+    );
+    let to = act(
+        &router,
+        &cookie,
+        &relocate(&nom),
+        &[("direction", "bottom")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), ville.clone(), rue.clone(), nom.clone()]
+    );
+    let to = act(&router, &cookie, &relocate(&rue), &[("after", &nom)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    // `after` a sibling at another level is ignored (no-op landing).
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), ville.clone(), rue.clone(), nom.clone()]
+    );
+    let to = act(&router, &cookie, &relocate(&rue), &[("after", &ville)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), ville.clone(), rue.clone(), nom.clone()]
+    );
+    let to = act(&router, &cookie, &relocate(&ville), &[("after", &rue)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), rue.clone(), ville.clone(), nom.clone()]
+    );
+    let to = act(&router, &cookie, &relocate(&ville), &[("after", &rue)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    // Already right after it: unchanged.
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), rue.clone(), ville.clone(), nom.clone()]
+    );
+    // Menus only offer what applies: a lone child has no "move after"
+    // (a disabled item, no submenu), and an element with nowhere to
+    // go has a disabled "move to".
+    let to = act(&router, &cookie, &relocate(&ville), &[("parent", "")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), rue.clone(), nom.clone(), ville.clone()]
+    );
+    let rue_row = html
+        .split(&format!("data-element-id=\"{rue}\""))
+        .nth(1)
+        .unwrap();
+    let rue_row = &rue_row[..rue_row.find("</li>").unwrap()];
+    let move_after = rue_row
+        .split("<button")
+        .find(|tag| tag.contains("data-menu=\"move-after\""))
+        .expect("a move-after item");
+    assert!(move_after.contains("disabled=\"\""), "{move_after}");
+    assert!(
+        !rue_row.contains("<details class=\"group/sub relative\" data-menu=\"move-after\""),
+        "{rue_row}"
+    );
+    // Its "move to" still opens: the top level is a destination.
+    assert!(rue_row.contains("data-menu=\"move-to\""), "{rue_row}");
+    let to = act(&router, &cookie, &relocate(&ville), &[("parent", &adresse)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [adresse.clone(), rue.clone(), ville.clone(), nom.clone()]
+    );
 
     // Update: label, a decimal with a unit, many values.
     let update = |id: &str| format!("{editor}/elements/{id}/update");
