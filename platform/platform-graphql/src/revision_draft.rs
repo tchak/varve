@@ -311,7 +311,7 @@ pub struct NumberTypeInput {
     pub unit: Option<Unit>,
 }
 
-/// `ENUM`: the inline options, at least one.
+/// `ENUM`: the inline options (possibly none yet, in a draft).
 #[derive(InputObject, Debug, Clone)]
 pub struct EnumTypeInput {
     pub options: Vec<EnumOptionInput>,
@@ -352,10 +352,10 @@ impl ColumnTypeInput {
             ColumnTypeInput::Geometry(set) => marker("geometry", set, ScalarType::Geometry)?,
             ColumnTypeInput::Integer(n) => ScalarType::Integer(n.unit.map(Into::into)),
             ColumnTypeInput::Decimal(n) => ScalarType::Decimal(n.unit.map(Into::into)),
+            // An enum with no options yet is a legitimate draft state —
+            // the editor builds the list option by option; publication
+            // is where an empty choice is refused.
             ColumnTypeInput::Enum(e) => {
-                if e.options.is_empty() {
-                    return Err(invalid_input("an ENUM column needs at least one option"));
-                }
                 let rows = e
                     .options
                     .into_iter()

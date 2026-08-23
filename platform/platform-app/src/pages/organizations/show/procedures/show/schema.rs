@@ -27,7 +27,8 @@
 //! when the chosen kind cannot use them. An enum's options are a
 //! card of their own under the column form: one row per option (its
 //! label autosaving, a red remove button), an explicit *Add option*
-//! form beneath; the last option cannot be removed. Procedure and shard
+//! form beneath; an empty choice is a draft state, publication's to
+//! refuse. Procedure and shard
 //! authorize themselves: they are public endpoints whose arguments
 //! the caller picks, and the client (`client(cx)`) is the guard,
 //! exactly as for a page.

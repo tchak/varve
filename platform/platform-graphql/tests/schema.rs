@@ -663,7 +663,21 @@ async fn revision_draft_editing_journey() {
     assert_eq!(surface["type"]["__typename"], "DecimalType");
     assert_eq!(surface["type"]["unit"], "SQUARE_METRE");
 
-    // An inline enum: option ids are minted when omitted and kept when given.
+    // An inline enum. An empty choice is accepted in the draft
+    // (publication refuses it); then option ids are minted when
+    // omitted and kept when given.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": ville, "type": { "enum": { "options": [] } } }),
+        )
+        .await;
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][1]["type"]["options"],
+        json!([])
+    );
     let p = api
         .edit(
             &alice,
@@ -762,14 +776,14 @@ async fn revision_draft_errors_are_structured() {
         assert_eq!(code, "FORBIDDEN");
     }
 
-    // INVALID_INPUT: malformed id, blank label, a false marker, an enum
-    // without options. (Two members, or none, fail `@oneOf` validation
+    // INVALID_INPUT: malformed id, blank label, a false marker, a blank
+    // option label. (Two members, or none, fail `@oneOf` validation
     // before any resolver — no code, a plain validation error.)
     for input in [
         json!({ "procedureId": "nope", "label": "x", "type": text }),
         json!({ "procedureId": pid, "label": "  ", "type": text }),
         json!({ "procedureId": pid, "label": "x", "type": { "date": false } }),
-        json!({ "procedureId": pid, "label": "x", "type": { "enum": { "options": [] } } }),
+        json!({ "procedureId": pid, "label": "x", "type": { "enum": { "options": [{ "label": " " }] } } }),
     ] {
         let code = api
             .edit_error(&alice, "addColumn", "AddColumnInput", input)

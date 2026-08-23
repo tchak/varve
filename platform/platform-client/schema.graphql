@@ -232,7 +232,7 @@ type EnumType {
 }
 
 """
-`ENUM`: the inline options, at least one.
+`ENUM`: the inline options (possibly none yet, in a draft).
 """
 input EnumTypeInput {
 	options: [EnumOptionInput!]!

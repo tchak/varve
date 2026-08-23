@@ -340,7 +340,18 @@ async fn axe_scenario(
     expect(page.locator(locator!("[data-save-status]")))
         .to_have_text("Saved.")
         .await?;
-    page.reload(None).await?;
+    expect(page.locator(locator!("[data-options-empty]")))
+        .to_be_visible()
+        .await?;
+    page.locator(locator!("#element-option-new"))
+        .fill("Paris", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Add option").exact(true)),
+    )
+    .click(None)
+    .await?;
     expect(page.locator(locator!("li[data-option-id]")))
         .to_be_visible()
         .await?;

@@ -71,12 +71,6 @@ pub(super) async fn set_options(
     element_id: &str,
     options: Vec<EnumOptionInput>,
 ) -> Result<std::result::Result<(), Notice>> {
-    if options.is_empty() {
-        return Ok(Err(Notice {
-            kind: NoticeKind::Alert,
-            text: t(cx, "schema.error.options-required").await?,
-        }));
-    }
     let result = platform_client::run(
         client,
         UpdateColumn::build(UpdateColumnVariables {
@@ -283,19 +277,10 @@ async fn column_type_input(
         "DATE" => ColumnTypeInput::date(),
         "DATETIME" => ColumnTypeInput::datetime(),
         "GEOMETRY" => ColumnTypeInput::geometry(),
-        "ENUM" => {
-            // Options are edited through `element::options`; a column
-            // becoming an enum with none yet gets one to start from,
-            // since the API (rightly) refuses an empty choice.
-            let mut options = current_options(column);
-            if options.is_empty() {
-                options.push(EnumOptionInput {
-                    id: None,
-                    label: t(cx, "schema.options.default").await?,
-                });
-            }
-            ColumnTypeInput::enumeration(options)
-        }
+        // Options are edited through `element::options`; a column
+        // becoming an enum starts with none — an empty choice is a
+        // draft state, refused at publication, not here.
+        "ENUM" => ColumnTypeInput::enumeration(current_options(column)),
         "ATTACHMENT" => {
             let (current_accept, current_max) = match &column.ty {
                 ColumnType::Attachment(AttachmentType {
@@ -578,8 +563,8 @@ pub(super) mod element {
         pub(in crate::pages) mod remove {
             use super::*;
 
-            /// Removes an option; the last one is refused (a choice
-            /// needs at least one).
+            /// Removes an option (the last one too: an empty choice is
+            /// a draft state, publication's to refuse).
             #[page(POST)]
             pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Removal>) -> Result {
                 let client = client(cx).await?;

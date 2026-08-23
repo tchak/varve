@@ -375,17 +375,28 @@ async fn the_editing_journey() {
     assert!(html.contains("value=\"m2\" selected"), "{html}");
     assert!(html.contains("value=\"MANY\" selected"), "{html}");
 
-    // An enum: switching the kind seeds one option; options are then
-    // added, renamed (the id kept), and removed through their own
-    // routes; the last one cannot go.
+    // An enum starts with no options (a draft state — publication is
+    // where an empty choice is refused); options are added, renamed
+    // (the id kept), and removed through their own routes.
     let options = |id: &str, action: &str| format!("{editor}/elements/{id}/options/{action}");
     let to = act(&router, &cookie, &update(&ville), &[("kind", "ENUM")]).await;
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Choice"), "{html}");
-    assert!(html.contains("value=\"Option 1\""), "{html}");
+    assert!(html.contains("data-options-empty"), "{html}");
     assert!(html.contains("id=\"element-option-new\""), "{html}");
-    let first = attribute_values(&html, "data-option-id");
-    assert_eq!(first.len(), 1, "{html}");
+    assert!(
+        attribute_values(&html, "data-option-id").is_empty(),
+        "{html}"
+    );
+    let to = act(
+        &router,
+        &cookie,
+        &options(&ville, "add"),
+        &[("label", " Paris ")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Option added."), "{html}");
     let to = act(
         &router,
         &cookie,
@@ -394,10 +405,9 @@ async fn the_editing_journey() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Option added."), "{html}");
     let ids = attribute_values(&html, "data-option-id");
     assert_eq!(ids.len(), 2, "{html}");
-    assert_eq!(ids[0], first[0]);
+    assert!(html.contains("value=\"Paris\""), "{html}");
     assert!(html.contains("value=\"Lyon\""), "{html}");
     assert!(html.contains("aria-label=\"Remove option Lyon\""), "{html}");
     let to = act(
@@ -420,6 +430,7 @@ async fn the_editing_journey() {
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Option removed."), "{html}");
     assert!(!html.contains("value=\"Lyon\""), "{html}");
+    // The last option can go too: an empty choice is a draft state.
     let to = act(
         &router,
         &cookie,
@@ -428,9 +439,8 @@ async fn the_editing_journey() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("role=\"alert\""), "{html}");
-    assert!(html.contains("at least one option"), "{html}");
-    assert!(html.contains("value=\"Paris (75)\""), "{html}");
+    assert!(html.contains("data-options-empty"), "{html}");
+    assert!(!html.contains("value=\"Paris (75)\""), "{html}");
     let to = act(
         &router,
         &cookie,

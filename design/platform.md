@@ -313,10 +313,10 @@ fieldsets hide when the kind cannot use them. Procedure and shard
 authorize themselves through the client — they are public endpoints.
 An enum's options are a card of their own under the column form —
 one row per option (label autosaving, a red icon-only *Remove*),
-an explicit *Add option* form beneath, the last option never
-removable, and switching a column to *Choice* seeds one option so
-the card is never a dead end — because a "blank row removes, extra
-row adds" list reads as nothing at all. One runtime
+an explicit *Add option* form beneath — because a "blank row
+removes, extra row adds" list reads as nothing at all. An enum with
+no options is a draft state (G.7): the editor never seeds one, and
+publication is where an empty choice is refused. One runtime
 constraint shaped the code and is recorded for the next interactive
 page: a runtime closure can reach **signals declared in its own
 `view!` and the event only** — captured locals are bound inside the

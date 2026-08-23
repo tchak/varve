@@ -252,9 +252,13 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
    fields while `@oneOf` members each grow their own. Same mechanism
    as the G.2.3 filters — one way to say "pick one variant".
    Enum columns are inline-backed only (DESIGN §2.12) until
-   published nomenclatures
-   have a platform home; option ids are kept when the client sends
-   them and minted when omitted (identity, DESIGN §2.11).
+   published nomenclatures have a platform home; option ids are kept
+   when the client sends them and minted when omitted (identity,
+   DESIGN §2.11). **An enum with no options is accepted in the
+   draft** (the editor builds the list one option at a time, and an
+   empty choice is nothing a record can break on yet); refusing it is
+   `publishRevision`'s job, with the rest of publication-time
+   validation.
 3. **Mutations are element operations**, one `input` each, all
    answering with the full `Procedure` (G.2.7) so the editor reads
    `revisionDraft` off the response: `addColumn`, `addGroup`,
