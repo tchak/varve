@@ -329,7 +329,22 @@ a bool for now — the corpus shows exactly DN's public/private pair;
 a third interleaved audience would grow it into an enum on the same
 tree, and genuinely independent surfaces (export layouts, print
 templates) remain their own authored artifacts, never compiled from
-this one.
+this one. **Amended 2026-08-24: the marker ships as `audience:
+Audience` (`all` | `reviewer`) from day one.** Two things moved it
+off the bool: the third audience is already visible — DN's experts
+(avis externes) see the case file but not the annotations privées,
+an interleaved audience from institutional memory, not speculation —
+and `private` as a field name is a reserved word in most client
+languages of the public API (Java, C#, C++, Swift, PHP, JS class
+syntax), so generated clients would trip on it; `restricted` was the
+runner-up, rejected because it names the narrow case rather than the
+axis. Semantics unchanged: `reviewer` is DN's private; the effective
+audience of an element is the narrowest along its ancestor path
+(inheritance — moving an element into a reviewer-only section
+narrows it without rewriting markers), and only *explicitly*
+authoring an element wider than its parent's effective audience is
+the refused contradiction. "Private" stays the prose word for the
+concept; `audience` is the field.
 
 **Conditions across the privacy boundary (settled with the above).**
 The authoring surfaces adopt DN's upstream-only rule, which DESIGN
@@ -352,7 +367,7 @@ notes — 18.3% of DN's descriptors (M0) — are surface nodes with no
 place in the schema (DESIGN §2.6), so the tree the editor edits is
 the authored surface tree itself: columns and groups interleaved
 with sections and notes, each element carrying its surface
-properties and the private marker. The draft stores that tree, and
+properties and its `audience` marker (amendment above). The draft stores that tree, and
 publication *derives* everything from it: project the schema (strip
 presentation nodes; schema document order = authored order),
 validate and publish the revision, then compile the applicant and
