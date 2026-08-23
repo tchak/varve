@@ -571,6 +571,7 @@ async fn check_surfaces(store: &impl SurfaceStore) {
     // Upsert: re-authoring replaces in place.
     let mut edited = surface("rev-1", "form");
     edited.nodes = vec![varve_surface::Node::Note(varve_surface::Note {
+        id: varve_core::NodeId::new("bienvenue"),
         title: None,
         body: "bienvenue".into(),
     })];

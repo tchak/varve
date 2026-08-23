@@ -6,7 +6,7 @@
 //! depends on `varve-surface`), which is exactly what the opaque-body
 //! decision preserves.
 
-use varve_core::{BlockId, ColumnId, GroupId, RevisionId, SurfaceId};
+use varve_core::{BlockId, ColumnId, GroupId, NodeId, RevisionId, SurfaceId};
 use varve_logic::{Atom, ColumnRef, Expr};
 use varve_schema::BlockRef;
 use varve_surface::{
@@ -29,6 +29,7 @@ fn sample_surface(revision: &RevisionId) -> Surface {
         revision: revision.clone(),
         nodes: vec![
             Node::Section(Section {
+                id: NodeId::new("identite"),
                 title: "Identité".into(),
                 help: None,
                 visibility: None,

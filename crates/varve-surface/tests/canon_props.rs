@@ -6,7 +6,7 @@
 
 use proptest::prelude::*;
 use varve_core::canonical::{CanonicalValue, hash_plain};
-use varve_core::{BlockId, ColumnId, GroupId, OptionId, RevisionId, SurfaceId};
+use varve_core::{BlockId, ColumnId, GroupId, NodeId, OptionId, RevisionId, SurfaceId};
 use varve_logic::{Atom, ColumnRef, Const, Expr, Operand};
 use varve_schema::BlockRef;
 use varve_surface::{
@@ -110,7 +110,13 @@ fn column_node() -> impl Strategy<Value = ColumnNode> {
 fn node() -> impl Strategy<Value = Node> {
     let leaf = prop_oneof![
         column_node().prop_map(Node::Column),
-        (text(), "\\PC{0,16}").prop_map(|(title, body)| Node::Note(Note { title, body })),
+        ("[a-z0-9]{1,8}", text(), "\\PC{0,16}").prop_map(|(id, title, body)| {
+            Node::Note(Note {
+                id: NodeId::new(id),
+                title,
+                body,
+            })
+        }),
     ];
     leaf.prop_recursive(3, 24, 4, |inner| {
         prop_oneof![
@@ -129,13 +135,15 @@ fn node() -> impl Strategy<Value = Node> {
                     }
                 )),
             (
+                "[a-z0-9]{1,8}",
                 "\\PC{0,12}",
                 text(),
                 rule(),
                 proptest::collection::vec(inner, 0..4)
             )
-                .prop_map(|(title, help, visibility, children)| Node::Section(
+                .prop_map(|(id, title, help, visibility, children)| Node::Section(
                     Section {
+                        id: NodeId::new(id),
                         title,
                         help,
                         visibility,
@@ -282,6 +290,15 @@ fn decoders_are_strict() {
     assert!(
         node_from(&obj(vec![
             ("note", s("body")),
+            ("title", CanonicalValue::Null)
+        ]))
+        .is_err(),
+        "the minted id is required (§2.6 surface node identity)"
+    );
+    assert!(
+        node_from(&obj(vec![
+            ("note", s("body")),
+            ("id", s("n1")),
             ("title", CanonicalValue::Null)
         ]))
         .is_ok()

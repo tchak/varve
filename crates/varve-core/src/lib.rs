@@ -76,6 +76,15 @@ id_type!(
     /// tree over a revision.
     SurfaceId
 );
+id_type!(
+    /// Identity of a presentation node — a section or note — within
+    /// surfaces (§2.6, surface node identity, settled 2026-08-23):
+    /// minted once at authoring time, outside the kernel like column
+    /// ids, stable across the compiled surface pair and across
+    /// revisions. Data nodes carry none — their identity is the
+    /// schema id they reference.
+    NodeId
+);
 
 /// One segment of a row path: which item of which `many` group.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

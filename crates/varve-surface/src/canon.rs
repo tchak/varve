@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use varve_core::canonical::{CanonicalValue, ContentHash, hash_plain};
-use varve_core::{ColumnId, GroupId, RevisionId, SurfaceId};
+use varve_core::{ColumnId, GroupId, NodeId, RevisionId, SurfaceId};
 use varve_logic::{Expr, from_canonical, to_canonical};
 use varve_schema::BlockRef;
 
@@ -100,6 +100,7 @@ pub fn node_canonical(n: &Node) -> CanonicalValue {
         ]),
         Node::Section(sec) => obj(vec![
             ("section", string(&sec.title)),
+            ("id", string(&sec.id)),
             ("help", opt(&sec.help)),
             ("visibility", rule(&sec.visibility)),
             (
@@ -109,6 +110,7 @@ pub fn node_canonical(n: &Node) -> CanonicalValue {
         ]),
         Node::Note(note) => obj(vec![
             ("note", string(&note.body)),
+            ("id", string(&note.id)),
             ("title", opt(&note.title)),
         ]),
     }
@@ -302,8 +304,9 @@ pub fn node_from(v: &CanonicalValue) -> Result<Node, SurfaceDecodeError> {
             })
         }
         "section" => {
-            only_keys(m, &["section", "help", "visibility", "children"])?;
+            only_keys(m, &["section", "id", "help", "visibility", "children"])?;
             Node::Section(Section {
+                id: NodeId::new(get_str(m, "id")?),
                 title: get_str(m, "section")?,
                 help: opt_str(m, "help")?,
                 visibility: opt_rule(m, "visibility")?,
@@ -311,8 +314,9 @@ pub fn node_from(v: &CanonicalValue) -> Result<Node, SurfaceDecodeError> {
             })
         }
         "note" => {
-            only_keys(m, &["note", "title"])?;
+            only_keys(m, &["note", "id", "title"])?;
             Node::Note(Note {
+                id: NodeId::new(get_str(m, "id")?),
                 title: opt_str(m, "title")?,
                 body: get_str(m, "note")?,
             })

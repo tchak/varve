@@ -1,14 +1,16 @@
 use std::collections::BTreeSet;
 
-use varve_core::{ColumnId, GroupId, ItemId, OptionId, PathSeg, RevisionId, RowPath, SurfaceId};
+use varve_core::{
+    ColumnId, GroupId, ItemId, NodeId, OptionId, PathSeg, RevisionId, RowPath, SurfaceId,
+};
 use varve_logic::{Atom, ColumnRef, Const, Expr, Operand};
 use varve_schema::{
     Arity, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
     revision_id,
 };
 use varve_surface::{
-    ColumnNode, Finding, Format, GroupNode, Ineligibility, Node, Section, Surface, SurfaceError,
-    WritePolicy, admissibility, reachability, validate,
+    ColumnNode, Finding, Format, GroupNode, Ineligibility, Node, Note, Section, Surface,
+    SurfaceError, WritePolicy, admissibility, reachability, validate,
 };
 use varve_value::{CellAddr, CellState, CellValue, ItemsAddr, RecordValues, Scalar};
 
@@ -179,6 +181,7 @@ fn reachability_cascades_and_sections_hide_children() {
         Node::Column(col_node("situation")),
         Node::Column(detail),
         Node::Section(Section {
+            id: NodeId::new("contact"),
             title: "Contact".into(),
             help: None,
             visibility: Some(when_oui("situation")),
@@ -466,4 +469,37 @@ fn writable_set_is_what_a_checkpoint_freezes() {
     })]);
     assert!(frozen_form.writable_columns().is_empty());
     assert!(frozen_form.writable_groups().is_empty());
+}
+
+#[test]
+fn validation_refuses_duplicate_groups_and_node_ids() {
+    // Groups get the column rule: one placement each (§2.6). Minted
+    // presentation-node ids are identity, so a repeat is refused.
+    let s = schema();
+    let group = || {
+        Node::Group(GroupNode {
+            group: GroupId::new("contacts"),
+            prompt: None,
+            visibility: None,
+            children: vec![],
+        })
+    };
+    let errors = validate(&surface(vec![group(), group()]), &s, &Default::default());
+    assert!(
+        errors.contains(&SurfaceError::DuplicateGroup(GroupId::new("contacts"))),
+        "{errors:?}"
+    );
+
+    let note = || {
+        Node::Note(Note {
+            id: NodeId::new("aide"),
+            title: None,
+            body: "Pensez au SIRET.".into(),
+        })
+    };
+    let errors = validate(&surface(vec![note(), note()]), &s, &Default::default());
+    assert_eq!(
+        errors,
+        vec![SurfaceError::DuplicateNode(NodeId::new("aide"))]
+    );
 }

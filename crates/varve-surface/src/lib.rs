@@ -29,7 +29,7 @@ pub use validate::{SurfaceError, validate};
 
 use std::collections::BTreeSet;
 
-use varve_core::{ColumnId, GroupId, RevisionId, SurfaceId};
+use varve_core::{ColumnId, GroupId, NodeId, RevisionId, SurfaceId};
 use varve_logic::Expr;
 
 /// A surface: an ordered tree of nodes over one revision. A "form" is
@@ -112,6 +112,9 @@ pub struct GroupNode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
+    /// §2.6 surface node identity: minted at authoring time, stable
+    /// across the compiled surface pair and across revisions.
+    pub id: NodeId,
     pub title: String,
     pub help: Option<String>,
     pub visibility: Option<Expr>,
@@ -120,6 +123,8 @@ pub struct Section {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Note {
+    /// §2.6 surface node identity (see [`Section::id`]).
+    pub id: NodeId,
     pub title: Option<String>,
     pub body: String,
 }

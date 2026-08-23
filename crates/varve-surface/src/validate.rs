@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use varve_core::{ColumnId, GroupId, RevisionId};
+use varve_core::{ColumnId, GroupId, NodeId, RevisionId};
 use varve_logic::{RuleCycle, TypeError, check_acyclic, typecheck};
 use varve_schema::{Cardinality, NomenclatureTable, ScalarType, Schema, SchemaIndex, revision_id};
 
@@ -26,6 +26,13 @@ pub enum SurfaceError {
     UnknownGroup(GroupId),
     #[error("column '{0}' appears more than once")]
     DuplicateColumn(ColumnId),
+    /// Group nodes get the column rule (§2.6): one placement each.
+    #[error("group '{0}' appears more than once")]
+    DuplicateGroup(GroupId),
+    /// §2.6 surface node identity: minted ids are identity, so a
+    /// repeated id would make two presentation nodes one.
+    #[error("node id '{0}' appears more than once")]
+    DuplicateNode(NodeId),
     /// A column node must sit inside the surface nodes of exactly the
     /// `many` groups that form its schema scope.
     #[error("column '{0}' is placed outside its scope")]
@@ -66,7 +73,7 @@ pub fn validate(
             schema: actual,
         });
     }
-    let mut seen = BTreeSet::new();
+    let mut seen = Seen::default();
     walk(
         &surface.nodes,
         schema,
@@ -98,19 +105,36 @@ pub fn validate(
     errors
 }
 
+/// Everything placement-unique in one walk: columns and groups may
+/// each appear once (their schema id is their identity), and minted
+/// presentation-node ids may not repeat (§2.6).
+#[derive(Default)]
+struct Seen {
+    columns: BTreeSet<ColumnId>,
+    groups: BTreeSet<GroupId>,
+    nodes: BTreeSet<NodeId>,
+}
+
 fn walk(
     nodes: &[Node],
     schema: &Schema,
     index: &SchemaIndex,
     nomenclatures: &NomenclatureTable,
     scope: &mut Vec<GroupId>,
-    seen: &mut BTreeSet<ColumnId>,
+    seen: &mut Seen,
     errors: &mut Vec<SurfaceError>,
 ) {
     for node in nodes {
         match node {
-            Node::Note(_) => {}
+            Node::Note(note) => {
+                if !seen.nodes.insert(note.id.clone()) {
+                    errors.push(SurfaceError::DuplicateNode(note.id.clone()));
+                }
+            }
             Node::Section(section) => {
+                if !seen.nodes.insert(section.id.clone()) {
+                    errors.push(SurfaceError::DuplicateNode(section.id.clone()));
+                }
                 if let Some(rule) = &section.visibility {
                     for error in typecheck(rule, schema, nomenclatures, scope) {
                         errors.push(SurfaceError::SectionRule(error));
@@ -127,6 +151,9 @@ fn walk(
                 );
             }
             Node::Group(group_node) => {
+                if !seen.groups.insert(group_node.group.clone()) {
+                    errors.push(SurfaceError::DuplicateGroup(group_node.group.clone()));
+                }
                 let Some(info) = index.groups.get(&group_node.group) else {
                     errors.push(SurfaceError::UnknownGroup(group_node.group.clone()));
                     continue;
@@ -160,7 +187,7 @@ fn walk(
             }
             Node::Column(column_node) => {
                 let column = &column_node.column;
-                if !seen.insert(column.clone()) {
+                if !seen.columns.insert(column.clone()) {
                     errors.push(SurfaceError::DuplicateColumn(column.clone()));
                 }
                 let Some(info) = index.columns.get(column) else {
