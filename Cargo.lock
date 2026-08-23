@@ -4394,6 +4394,9 @@ dependencies = [
  "toasty-cli",
  "tokio",
  "uuid",
+ "varve-core",
+ "varve-schema",
+ "varve-wire",
 ]
 
 [[package]]

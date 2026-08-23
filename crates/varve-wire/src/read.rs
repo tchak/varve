@@ -431,7 +431,7 @@ type Obj = BTreeMap<String, CanonicalValue>;
 /// strings. **Duplicate object keys are refused**: a JCS serializer
 /// never emits them, so a line carrying two values for one key is
 /// malformed — never last-wins.
-struct JsonLine(CanonicalValue);
+pub(crate) struct JsonLine(pub(crate) CanonicalValue);
 
 impl<'de> serde::Deserialize<'de> for JsonLine {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

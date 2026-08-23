@@ -22,12 +22,17 @@ thiserror.workspace = true
 toasty = { version = "0.10.0", features = ["postgresql", "jiff", "migration"] }
 toasty-cli = { version = "0.10.0", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-uuid = "1"
+# `procedure`: draft column ids are minted here (v4 — no ordering to preserve).
+uuid = { version = "1", features = ["v4"] }
+# The kernel edge (P.4 procedure drafts): the draft *is* a kernel
+# `Schema`, edited in memory and parked as its wire-canonical bytes.
+varve-core = { path = "../../crates/varve-core" }
+varve-schema = { path = "../../crates/varve-schema" }
+varve-wire = { path = "../../crates/varve-wire" }
 
 [dev-dependencies]
+varve-schema = { path = "../../crates/varve-schema" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
-# v4 only for minting unique test fixtures; the library itself only names the type.
-uuid = { version = "1", features = ["v4"] }
 
 [features]
 # The project-local migration CLI (toasty has no standalone binary: the

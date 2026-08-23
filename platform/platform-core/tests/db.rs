@@ -12,17 +12,20 @@
 //! unique emails/token hashes and never asserts on global counts.
 
 use jiff::{SignedDuration, Timestamp};
+use platform_core::{ColumnPatch, DraftError, Placement, add_element, update_column};
 use platform_core::{
     CreateApiTokenError, CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS,
     RegisterError, add_organization_member, add_team_member, connect, create_api_token,
     create_organization, create_organization_for, create_procedure, create_session, create_team,
-    delete_account_sessions, delete_session, destroy_api_token, destroy_session,
-    find_live_api_token, find_live_session, find_organization_by_slug, is_organization_member,
-    list_account_organizations, list_account_teams, list_live_api_tokens, list_live_sessions,
-    list_organization_procedures, list_organization_teams, register, remove_organization_member,
+    delete_account_sessions, delete_session, destroy_api_token, destroy_session, discard_draft,
+    draft_schema, edit_draft, find_live_api_token, find_live_session, find_organization_by_slug,
+    find_procedure, find_procedure_with_draft, is_organization_member, list_account_organizations,
+    list_account_teams, list_live_api_tokens, list_live_sessions, list_organization_procedures,
+    list_organization_teams, new_column_id, register, remove_organization_member,
     remove_team_member, sweep_expired, sweep_expired_api_tokens, update_profile,
     verify_credentials,
 };
+use varve_schema::{Arity, Column, Element, ScalarType};
 
 /// Connects to the test database, applying migrations; `None` (after
 /// printing why) when `VARVE_TEST_DATABASE_URL` is unset so the test
@@ -891,4 +894,105 @@ async fn create_organization_for_is_one_transaction() {
         matches!(err, CreateOrganizationError::SlugTaken),
         "got: {err:?}"
     );
+}
+
+#[tokio::test]
+async fn procedure_draft_round_trips_through_edits() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let org = create_organization(&mut db, &unique_slug("draft"), "Org")
+        .await
+        .expect("create org");
+    let created = create_procedure(&mut db, org.id, "Bourse", "")
+        .await
+        .expect("procedure");
+
+    // A fresh procedure has no draft; the first edit starts one from
+    // the empty schema.
+    let mut procedure = find_procedure_with_draft(&mut db, created.id)
+        .await
+        .unwrap()
+        .expect("exists");
+    assert_eq!(draft_schema(&procedure).unwrap(), None);
+    let id = new_column_id();
+    let stored = edit_draft(&mut db, &mut procedure, |schema| {
+        add_element(
+            schema,
+            &Placement::root(),
+            Element::Column(Column {
+                id: id.clone(),
+                label: "Nom".into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+            }),
+        )
+    })
+    .await
+    .expect("first edit");
+    assert_eq!(stored.root.len(), 1);
+
+    // The stored bytes decode to the same value on a fresh load, and
+    // the next edit builds on them; the catalog lookup never loads it.
+    let mut reloaded = find_procedure_with_draft(&mut db, created.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft_schema(&reloaded).unwrap(), Some(stored.clone()));
+    assert!(
+        find_procedure(&mut db, created.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .draft
+            .is_unloaded()
+    );
+    let stored = edit_draft(&mut db, &mut reloaded, |schema| {
+        update_column(
+            schema,
+            &id,
+            ColumnPatch {
+                label: Some("Nom de famille".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .await
+    .expect("second edit");
+    match &stored.root[0] {
+        Element::Column(c) => assert_eq!(c.label, "Nom de famille"),
+        _ => panic!(),
+    }
+
+    // A rejected operation stores nothing.
+    let err = edit_draft(&mut db, &mut reloaded, |schema| {
+        update_column(schema, &new_column_id(), ColumnPatch::default())
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(err, DraftError::Edit(_)));
+    let again = find_procedure_with_draft(&mut db, created.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft_schema(&again).unwrap(), Some(stored));
+
+    // `procedure` is the stale copy from before the second edit:
+    // optimistic concurrency refuses its save rather than overwriting.
+    let conflict = edit_draft(&mut db, &mut procedure, |_| Ok(()))
+        .await
+        .unwrap_err();
+    assert!(matches!(conflict, DraftError::Db(_)), "{conflict}");
+
+    let mut fresh = find_procedure_with_draft(&mut db, created.id)
+        .await
+        .unwrap()
+        .unwrap();
+    discard_draft(&mut db, &mut fresh).await.expect("discard");
+    assert_eq!(draft_schema(&fresh).unwrap(), None);
+    let after = find_procedure_with_draft(&mut db, created.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft_schema(&after).unwrap(), None);
 }

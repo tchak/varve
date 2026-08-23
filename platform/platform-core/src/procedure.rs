@@ -1,12 +1,24 @@
 //! The procedure catalog row (P.4): title, description, owning
-//! organization. **Shell only for now** — the revision DAG, surfaces,
-//! rules, and the open/closed lifecycle arrive with the kernel edge
-//! (P1, `varve-service`); this row exists so organizations own
-//! something and the ownership relation is real.
+//! organization — and the **procedure draft**, the schema being
+//! edited before it is published (P.4, *Procedure drafts*). The
+//! revision DAG, surfaces, rules, and the open/closed lifecycle still
+//! arrive with the kernel edge (`varve-service`); until then the
+//! draft is the one kernel value the platform holds.
+//!
+//! The draft is a nullable embedded object on the row, deferred out
+//! of the catalog `SELECT`: its schema travels as the kernel's own
+//! wire-canonical bytes ([`varve_wire::schema_bytes`]), so what is
+//! stored is exactly the value that will be published — no platform
+//! mirror of the schema type. Edits go through [`edit_draft`], which
+//! composes the pure operations of [`crate::schema_edit`] with a load
+//! and a version-checked store.
 
 use toasty::Deferred;
+use varve_schema::Schema;
+use varve_wire::{ReadError, schema_bytes, schema_from_bytes};
 
 use crate::organization::Organization;
+use crate::schema_edit::EditError;
 
 /// A procedure's catalog entry.
 #[derive(Debug, toasty::Model)]
@@ -38,6 +50,63 @@ pub struct Procedure {
     /// Set on insert and on every update.
     #[auto]
     pub updated_at: jiff::Timestamp,
+
+    /// The unpublished schema being edited; `None` when nothing is in
+    /// progress. Deferred: loaded only by [`find_procedure_with_draft`].
+    pub draft: Deferred<Option<ProcedureDraft>>,
+
+    /// Optimistic concurrency (toasty-managed): two editors saving the
+    /// draft from the same loaded row cannot silently overwrite each
+    /// other — the second save fails with a condition error and must
+    /// reload.
+    #[version]
+    pub version: u64,
+}
+
+/// The draft of a procedure's next revision. Holds the schema today;
+/// the surface draft joins it when the editor grows a surface side.
+#[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
+pub struct ProcedureDraft {
+    /// The schema under edit, wire-canonical.
+    pub schema: SchemaBytes,
+
+    /// The published revision this draft forks from (its id) — the
+    /// publication's parent. `None` until the procedure has a first
+    /// revision to fork from, which is every draft until the revision
+    /// DAG lands.
+    pub base: Option<String>,
+}
+
+/// A kernel [`Schema`] as its wire-canonical bytes (one `BYTEA`
+/// column). Constructed from a `Schema` only, so the column never
+/// holds anything [`schema_from_bytes`] would refuse — short of
+/// corruption, which [`DraftError::Corrupt`] reports.
+#[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
+pub struct SchemaBytes(Vec<u8>);
+
+impl SchemaBytes {
+    pub fn encode(schema: &Schema) -> Self {
+        Self(schema_bytes(schema))
+    }
+
+    pub fn decode(&self) -> Result<Schema, ReadError> {
+        schema_from_bytes(&self.0)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DraftError {
+    #[error(transparent)]
+    Edit(#[from] EditError),
+    /// The stored draft no longer decodes — never produced by this
+    /// crate's writes; a database-level corruption to surface, not
+    /// silently replace.
+    #[error("stored draft is unreadable: {0}")]
+    Corrupt(#[from] ReadError),
+    /// Database failure, including the optimistic-concurrency conflict
+    /// (`condition_failed`) when the row changed since it was loaded.
+    #[error(transparent)]
+    Db(#[from] toasty::Error),
 }
 
 /// Creates a procedure catalog row owned by `organization_id`.
@@ -62,6 +131,67 @@ pub async fn find_procedure(
     id: uuid::Uuid,
 ) -> toasty::Result<Option<Procedure>> {
     Procedure::filter_by_id(id).first().exec(db).await
+}
+
+/// Looks a procedure up by id with its draft loaded.
+pub async fn find_procedure_with_draft(
+    db: &mut toasty::Db,
+    id: uuid::Uuid,
+) -> toasty::Result<Option<Procedure>> {
+    Procedure::filter_by_id(id)
+        .include(Procedure::fields().draft())
+        .first()
+        .exec(db)
+        .await
+}
+
+/// The draft schema of a procedure loaded by
+/// [`find_procedure_with_draft`]: `None` when no draft is in progress.
+///
+/// # Panics
+///
+/// If the draft was not loaded (the catalog lookups defer it).
+pub fn draft_schema(procedure: &Procedure) -> Result<Option<Schema>, DraftError> {
+    Ok(match procedure.draft.get() {
+        Some(draft) => Some(draft.schema.decode()?),
+        None => None,
+    })
+}
+
+/// Applies `edit` to the procedure's draft schema and stores the
+/// result, returning the schema as stored. With no draft in progress
+/// the edit starts one from the empty schema. The procedure must come
+/// from [`find_procedure_with_draft`]; on success it is updated in
+/// place (draft, `version`, `updated_at`).
+///
+/// Atomic: `edit` errors (a rejected operation) store nothing, and a
+/// concurrent change to the row since it was loaded fails the store
+/// ([`DraftError::Db`], `condition_failed`) instead of overwriting.
+pub async fn edit_draft(
+    db: &mut toasty::Db,
+    procedure: &mut Procedure,
+    edit: impl FnOnce(&mut Schema) -> Result<(), EditError>,
+) -> Result<Schema, DraftError> {
+    let (mut schema, base) = match procedure.draft.get() {
+        Some(draft) => (draft.schema.decode()?, draft.base.clone()),
+        None => (Schema::default(), None),
+    };
+    edit(&mut schema)?;
+    procedure
+        .update()
+        .draft(Some(ProcedureDraft {
+            schema: SchemaBytes::encode(&schema),
+            base,
+        }))
+        .exec(db)
+        .await?;
+    Ok(schema)
+}
+
+/// Drops the procedure's draft, if any. Same loading and concurrency
+/// contract as [`edit_draft`].
+pub async fn discard_draft(db: &mut toasty::Db, procedure: &mut Procedure) -> toasty::Result<()> {
+    procedure.update().draft(None).exec(db).await
 }
 
 /// The procedures `account_id` administers — those owned by any
