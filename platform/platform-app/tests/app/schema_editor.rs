@@ -375,51 +375,71 @@ async fn the_editing_journey() {
     assert!(html.contains("value=\"m2\" selected"), "{html}");
     assert!(html.contains("value=\"MANY\" selected"), "{html}");
 
-    // An enum: ids minted for new rows, kept for existing ones, a
-    // blank row removed.
+    // An enum: switching the kind seeds one option; options are then
+    // added, renamed (the id kept), and removed through their own
+    // routes; the last one cannot go.
+    let options = |id: &str, action: &str| format!("{editor}/elements/{id}/options/{action}");
+    let to = act(&router, &cookie, &update(&ville), &[("kind", "ENUM")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Choice"), "{html}");
+    assert!(html.contains("value=\"Option 1\""), "{html}");
+    assert!(html.contains("id=\"element-option-new\""), "{html}");
+    let first = attribute_values(&html, "data-option-id");
+    assert_eq!(first.len(), 1, "{html}");
     let to = act(
         &router,
         &cookie,
-        &update(&ville),
-        &[
-            ("kind", "ENUM"),
-            ("option_id", ""),
-            ("option_label", "Paris"),
-            ("option_id", ""),
-            ("option_label", "Lyon"),
-            ("option_id", ""),
-            ("option_label", ""),
-        ],
+        &options(&ville, "add"),
+        &[("label", " Lyon ")],
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Choice"), "{html}");
-    assert!(html.contains("value=\"Paris\""), "{html}");
+    assert!(html.contains("Option added."), "{html}");
+    let ids = attribute_values(&html, "data-option-id");
+    assert_eq!(ids.len(), 2, "{html}");
+    assert_eq!(ids[0], first[0]);
     assert!(html.contains("value=\"Lyon\""), "{html}");
-    let option_ids = attribute_values(&html, "name=\"option_id\" value");
-    assert_eq!(option_ids.len(), 3, "{html}"); // two options + the blank row
-    assert!(!option_ids[0].is_empty() && !option_ids[1].is_empty());
-    let paris = option_ids[0].clone();
+    assert!(html.contains("aria-label=\"Remove option Lyon\""), "{html}");
     let to = act(
         &router,
         &cookie,
-        &update(&ville),
-        &[
-            ("kind", "ENUM"),
-            ("option_id", &paris),
-            ("option_label", "Paris (75)"),
-            ("option_id", &option_ids[1]),
-            ("option_label", ""),
-        ],
+        &options(&ville, "update"),
+        &[("option_id", &ids[0]), ("label", "Paris (75)")],
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("value=\"Paris (75)\""), "{html}");
+    assert_eq!(attribute_values(&html, "data-option-id")[0], ids[0]);
+    let to = act(
+        &router,
+        &cookie,
+        &options(&ville, "remove"),
+        &[("option_id", &ids[1])],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Option removed."), "{html}");
     assert!(!html.contains("value=\"Lyon\""), "{html}");
-    assert_eq!(
-        attribute_values(&html, "name=\"option_id\" value")[0],
-        paris
-    );
+    let to = act(
+        &router,
+        &cookie,
+        &options(&ville, "remove"),
+        &[("option_id", &ids[0])],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("role=\"alert\""), "{html}");
+    assert!(html.contains("at least one option"), "{html}");
+    assert!(html.contains("value=\"Paris (75)\""), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &options(&ville, "add"),
+        &[("label", "  ")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("A label is required."), "{html}");
 
     // A group's cardinality; a blank label is refused with an alert.
     let to = act(

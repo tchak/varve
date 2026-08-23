@@ -24,8 +24,10 @@
 //! successful save bumps a revision signal that re-renders the
 //! structure panel, a `#[shard]` ([`structure`]), so the tree shows
 //! the new label without a reload. Type-dependent fieldsets hide
-//! when the chosen kind cannot use them. Enum options keep the
-//! explicit *Save* — several rows interplay. Procedure and shard
+//! when the chosen kind cannot use them. An enum's options are a
+//! card of their own under the column form: one row per option (its
+//! label autosaving, a red remove button), an explicit *Add option*
+//! form beneath; the last option cannot be removed. Procedure and shard
 //! authorize themselves: they are public endpoints whose arguments
 //! the caller picks, and the client (`client(cx)`) is the guard,
 //! exactly as for a page.
@@ -50,6 +52,7 @@ use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
+    icon::{icon, iconify::iconify_icon},
     router::{
         content::Form,
         error::{RouterErrorExt, not_found},
@@ -362,6 +365,43 @@ async fn save_field(
     }
 }
 
+/// Autosave of one enum option's label: `input_id` is the row's
+/// input id (`option-<id>`), the one thing a handler can read off the
+/// event besides the value. Same outcome shape as [`save_field`].
+#[procedure]
+async fn save_option(
+    cx: &Cx,
+    procedure_id: String,
+    element_id: String,
+    input_id: String,
+    value: String,
+) -> Result<std::result::Result<String, String>> {
+    let client = client(cx).await?;
+    let Some(option_id) = input_id.strip_prefix("option-") else {
+        return Ok(Err(t(cx, "schema.error.conflict").await?));
+    };
+    let procedure = match procedure_id.parse::<uuid::Uuid>() {
+        Ok(id) => {
+            platform_client::run(
+                &client,
+                ProcedureRevisionDraftQuery::build(ProcedureRevisionDraftVariables {
+                    id: cynic::Id::new(id.to_string()),
+                }),
+            )
+            .await
+        }
+        Err(_) => return Ok(Err(t(cx, "schema.error.conflict").await?)),
+    };
+    let procedure: ProcedureRevisionDraft = match procedure {
+        Ok(ProcedureRevisionDraftQuery { procedure: Some(p) }) => p,
+        _ => return Ok(Err(t(cx, "schema.error.conflict").await?)),
+    };
+    match elements::rename_option(cx, &client, &procedure, &element_id, option_id, &value).await? {
+        Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
+        Err(notice) => Ok(Err(notice.text)),
+    }
+}
+
 /// The structure panel as a shard: re-rendered when `revision`
 /// changes (after an autosave). Authorizes itself through the client;
 /// an unreadable procedure renders nothing rather than leaking.
@@ -400,7 +440,8 @@ struct ColumnDetail {
     column: SchemaColumn,
     kind: String,
     unit: Option<Unit>,
-    options: Vec<(String, String)>,
+    /// `(id, label, accessible name of its remove button)`.
+    options: Vec<(String, String, String)>,
     accept: String,
     max_bytes: Option<String>,
 }
@@ -491,6 +532,9 @@ async fn editor_page(
     let options_label = t(cx, "schema.options").await?;
     let options_help = t(cx, "schema.options.help").await?;
     let option_label = t(cx, "schema.options.label").await?;
+    let options_empty = t(cx, "schema.options.empty").await?;
+    let option_new_label = t(cx, "schema.options.new").await?;
+    let options_add = t(cx, "schema.options.add").await?;
     let accept_label = t(cx, "schema.attachment.accept").await?;
     let accept_help = t(cx, "schema.attachment.accept.help").await?;
     let max_bytes_label = t(cx, "schema.attachment.max-bytes").await?;
@@ -500,7 +544,7 @@ async fn editor_page(
     for kind in KINDS {
         kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
     }
-    let detail = match &selected_element {
+    let mut detail = match &selected_element {
         Some(SchemaElement::Column(column)) => Detail::Column(ColumnDetail {
             column: column.clone(),
             kind: kind_of(&column.ty).to_owned(),
@@ -509,7 +553,7 @@ async fn editor_page(
                 ColumnType::Enum(e) => e
                     .options
                     .iter()
-                    .map(|o| (o.id.inner().to_owned(), o.label.clone()))
+                    .map(|o| (o.id.inner().to_owned(), o.label.clone(), String::new()))
                     .collect(),
                 _ => Vec::new(),
             },
@@ -529,6 +573,16 @@ async fn editor_page(
         }),
         _ => Detail::Nothing,
     };
+    if let Detail::Column(c) = &mut detail {
+        for (_, option_text, remove_name) in &mut c.options {
+            *remove_name = t_args(
+                cx,
+                "schema.options.remove",
+                &one_arg("label", option_text.clone()),
+            )
+            .await?;
+        }
+    }
     let detail_heading = match &detail {
         Detail::Column(c) => {
             t_args(
@@ -560,9 +614,32 @@ async fn editor_page(
             ElementId(selected_string.clone())
         )
     };
+    let option_add_href = href!(
+        elements::element::options::add::submit,
+        OrganizationId(organization_id),
+        ProcedureId(procedure_id),
+        ElementId(selected_string.clone())
+    );
+    let option_update_href = || {
+        href!(
+            elements::element::options::update::submit,
+            OrganizationId(organization_id),
+            ProcedureId(procedure_id),
+            ElementId(selected_string.clone())
+        )
+    };
+    let option_remove_href = || {
+        href!(
+            elements::element::options::remove::submit,
+            OrganizationId(organization_id),
+            ProcedureId(procedure_id),
+            ElementId(selected_string.clone())
+        )
+    };
     view! {
         signal revision = 0.0;
         signal status = String::new();
+        signal option_status = String::new();
         signal kind = initial_kind.clone();
         signal pid = procedure_id_string.clone();
         signal eid = selected_string.clone();
@@ -921,49 +998,6 @@ async fn editor_page(
                                                     }
                                                 </select>
                                             </div>
-                                            <fieldset
-                                                class="flex flex-col gap-2"
-                                                :hidden=$(kind.get() != "ENUM")
-                                                data-facet="options"
-                                            >
-                                                <legend class="text-sm font-medium">
-                                                    (options_label.as_str())
-                                                </legend>
-                                                <p class="text-sm text-muted-foreground">
-                                                    (options_help.as_str())
-                                                </p>
-                                                for row in 0..c.options.len() + 1 {
-                                                    <div class="flex flex-col gap-1">
-                                                        <input
-                                                            type="hidden"
-                                                            name="option_id"
-                                                            value=(c
-                                                                .options
-                                                                .get(row)
-                                                                .map(|o| o.0.as_str())
-                                                                .unwrap_or(""))
-                                                        >
-                                                        <label
-                                                            for=(format!("element-option-{row}"))
-                                                            class="sr-only"
-                                                        >
-                                                            (format!("{option_label} {}", row + 1))
-                                                        </label>
-                                                        <input
-                                                            id=(format!("element-option-{row}"))
-                                                            class=(INPUT)
-                                                            type="text"
-                                                            name="option_label"
-                                                            value=(c
-                                                                .options
-                                                                .get(row)
-                                                                .map(|o| o.1.as_str())
-                                                                .unwrap_or(""))
-                                                            autocomplete="off"
-                                                        >
-                                                    </div>
-                                                }
-                                            </fieldset>
                                             <div
                                                 class="flex flex-col gap-4"
                                                 :hidden=$(kind.get() != "ATTACHMENT")
@@ -1094,6 +1128,136 @@ async fn editor_page(
                                     )
                                 </form>
                             )
+                            <div
+                                class="mt-6"
+                                :hidden=$(kind.get() != "ENUM")
+                                data-facet="options"
+                            >
+                                card(
+                                    card_header(
+                                        <h3 class="leading-none font-semibold">
+                                            (options_label.as_str())
+                                        </h3>
+                                    )
+                                    card_content(
+                                        <div class="flex flex-col gap-4">
+                                            <p class="text-sm text-muted-foreground">
+                                                (options_help.as_str())
+                                            </p>
+                                            if c.options.is_empty() {
+                                                <p
+                                                    class="text-sm text-muted-foreground"
+                                                    data-options-empty=""
+                                                >
+                                                    (options_empty.as_str())
+                                                </p>
+                                            } else {
+                                                <ul class="flex flex-col gap-2">
+                                                    for (index, (option_id, option_text, remove_name)) in c.options.iter().enumerate() {
+                                                        <li
+                                                            class="flex items-center gap-2"
+                                                            data-option-id=(option_id.as_str())
+                                                        >
+                                                            <form
+                                                                method="post"
+                                                                action=(option_update_href())
+                                                                class="flex min-w-0 flex-1 items-center gap-2"
+                                                            >
+                                                                <input
+                                                                    type="hidden"
+                                                                    name="option_id"
+                                                                    value=(option_id.as_str())
+                                                                >
+                                                                <label for=(format!("option-{option_id}")) class="sr-only">
+                                                                    (format!("{option_label} {}", index + 1))
+                                                                </label>
+                                                                <input
+                                                                    id=(format!("option-{option_id}"))
+                                                                    class=(INPUT)
+                                                                    type="text"
+                                                                    name="label"
+                                                                    value=(option_text.as_str())
+                                                                    required=""
+                                                                    autocomplete="off"
+                                                                    @change=$(async |e: Event| {
+                                                                        option_status.set(saving.get());
+                                                                        let outcome = save_option(
+                                                                                pid.get(),
+                                                                                eid.get(),
+                                                                                e.target.id,
+                                                                                e.target.value,
+                                                                            )
+                                                                            .await;
+                                                                        if outcome.is_ok() {
+                                                                            option_status.set(outcome.unwrap());
+                                                                            revision.increment();
+                                                                        } else {
+                                                                            option_status.set(outcome.unwrap_err());
+                                                                        }
+                                                                    })
+                                                                >
+                                                            </form>
+                                                            <form method="post" action=(option_remove_href())>
+                                                                <input
+                                                                    type="hidden"
+                                                                    name="option_id"
+                                                                    value=(option_id.as_str())
+                                                                >
+                                                                button(
+                                                                    variant: ButtonVariant::Ghost,
+                                                                    size: ButtonSize::Icon,
+                                                                    attrs: attributes! {
+                                                                        type="submit"
+                                                                        aria-label=(remove_name.as_str())
+                                                                        class="text-destructive"
+                                                                        data-option-remove=""
+                                                                    },
+                                                                    icon(
+                                                                        data: iconify_icon!("feather:trash-2"),
+                                                                        attrs: attributes! { class="size-4" }
+                                                                    )
+                                                                )
+                                                            </form>
+                                                        </li>
+                                                    }
+                                                </ul>
+                                            }
+                                            <p
+                                                role="status"
+                                                class="min-h-5 text-sm text-muted-foreground"
+                                                data-option-status=""
+                                            >
+                                                $(option_status.get())
+                                            </p>
+                                            <form
+                                                method="post"
+                                                action=(option_add_href)
+                                                class="flex items-end gap-2"
+                                            >
+                                                <div class="flex min-w-0 flex-1 flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-option-new" },
+                                                        (option_new_label.as_str())
+                                                    )
+                                                    <input
+                                                        id="element-option-new"
+                                                        class=(INPUT)
+                                                        type="text"
+                                                        name="label"
+                                                        required=""
+                                                        autocomplete="off"
+                                                    >
+                                                </div>
+                                                button(
+                                                    variant: ButtonVariant::Outline,
+                                                    attrs: attributes! { type="submit" },
+                                                    (options_add.as_str())
+                                                )
+                                            </form>
+                                        </div>
+                                    )
+                                )
+                            </div>
                         }
                         Detail::Nothing => add_form(
                             procedure_id: procedure_id,

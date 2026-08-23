@@ -311,7 +311,12 @@ uses), reports through a `role=status` line, and bumps a signal that
 re-renders the structure panel, a `#[shard]`; kind-dependent
 fieldsets hide when the kind cannot use them. Procedure and shard
 authorize themselves through the client — they are public endpoints.
-Enum options keep an explicit *Save* (rows interplay). One runtime
+An enum's options are a card of their own under the column form —
+one row per option (label autosaving, a red icon-only *Remove*),
+an explicit *Add option* form beneath, the last option never
+removable, and switching a column to *Choice* seeds one option so
+the card is never a dead end — because a "blank row removes, extra
+row adds" list reads as nothing at all. One runtime
 constraint shaped the code and is recorded for the next interactive
 page: a runtime closure can reach **signals declared in its own
 `view!` and the event only** — captured locals are bound inside the

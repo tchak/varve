@@ -45,14 +45,117 @@ impl Fields {
             .find(|(n, _)| n == name)
             .map(|(_, v)| v.as_str())
     }
+}
 
-    fn all(&self, name: &str) -> Vec<&str> {
-        self.0
+/// A column's inline options as inputs that keep their ids.
+fn current_options(column: &SchemaColumn) -> Vec<EnumOptionInput> {
+    match &column.ty {
+        ColumnType::Enum(e) => e
+            .options
             .iter()
-            .filter(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-            .collect()
+            .map(|o| EnumOptionInput {
+                id: Some(o.id.clone()),
+                label: o.label.clone(),
+            })
+            .collect(),
+        _ => Vec::new(),
     }
+}
+
+/// Stores `options` as the enum column `element_id`'s backing (its
+/// label and arity untouched). `Err` is the notice to show.
+pub(super) async fn set_options(
+    cx: &Cx,
+    client: &platform_graphql::InProcess,
+    procedure: &ProcedureRevisionDraft,
+    element_id: &str,
+    options: Vec<EnumOptionInput>,
+) -> Result<std::result::Result<(), Notice>> {
+    if options.is_empty() {
+        return Ok(Err(Notice {
+            kind: NoticeKind::Alert,
+            text: t(cx, "schema.error.options-required").await?,
+        }));
+    }
+    let result = platform_client::run(
+        client,
+        UpdateColumn::build(UpdateColumnVariables {
+            input: UpdateColumnInput {
+                procedure_id: cynic::Id::new(procedure.id.inner()),
+                id: cynic::Id::new(element_id),
+                label: None,
+                ty: Some(ColumnTypeInput::enumeration(options)),
+                arity: None,
+            },
+        }),
+    )
+    .await;
+    match result {
+        Ok(_) => Ok(Ok(())),
+        Err(error) => Ok(Err(refused(cx, error).await?)),
+    }
+}
+
+/// The enum column `element_id` of `procedure`'s draft and its
+/// options; the conflict notice when it is not one.
+pub(super) async fn enum_column<'a>(
+    cx: &Cx,
+    procedure: &'a ProcedureRevisionDraft,
+    element_id: &str,
+) -> Result<std::result::Result<(&'a SchemaColumn, Vec<EnumOptionInput>), Notice>> {
+    let column = procedure
+        .revision_draft
+        .as_ref()
+        .and_then(|d| {
+            d.schema.elements.iter().find_map(|e| match e {
+                SchemaElement::Column(c) if c.id.inner() == element_id => Some(c),
+                _ => None,
+            })
+        })
+        .filter(|c| matches!(c.ty, ColumnType::Enum(_)));
+    match column {
+        Some(column) => Ok(Ok((column, current_options(column)))),
+        None => Ok(Err(Notice {
+            kind: NoticeKind::Alert,
+            text: t(cx, "schema.error.conflict").await?,
+        })),
+    }
+}
+
+/// One option's change from the autosave or the row's form: `Err` is
+/// the notice to show.
+pub(super) async fn rename_option(
+    cx: &Cx,
+    client: &platform_graphql::InProcess,
+    procedure: &ProcedureRevisionDraft,
+    element_id: &str,
+    option_id: &str,
+    label: &str,
+) -> Result<std::result::Result<(), Notice>> {
+    let label = label.trim();
+    if label.is_empty() {
+        return Ok(Err(Notice {
+            kind: NoticeKind::Alert,
+            text: t(cx, "schema.error.label-required").await?,
+        }));
+    }
+    let (_, mut options) = match enum_column(cx, procedure, element_id).await? {
+        Ok(found) => found,
+        Err(notice) => return Ok(Err(notice)),
+    };
+    match options
+        .iter_mut()
+        .find(|o| o.id.as_ref().is_some_and(|id| id.inner() == option_id))
+    {
+        Some(option) => option.label = label.to_owned(),
+        None => {
+            return Ok(Err(Notice {
+                kind: NoticeKind::Alert,
+                text: t(cx, "schema.error.conflict").await?,
+            }));
+        }
+    }
+    set_options(cx, client, procedure, element_id, options).await
 }
 
 /// Applies `fields` to the element `element_id` of `procedure`'s
@@ -152,7 +255,7 @@ async fn column_type_input(
     column: &SchemaColumn,
     fields: &Fields,
 ) -> Result<std::result::Result<Option<ColumnTypeInput>, Notice>> {
-    let touched = ["kind", "unit", "option_label", "accept", "max_bytes"]
+    let touched = ["kind", "unit", "accept", "max_bytes"]
         .iter()
         .any(|name| fields.get(name).is_some());
     if !touched {
@@ -181,41 +284,15 @@ async fn column_type_input(
         "DATETIME" => ColumnTypeInput::datetime(),
         "GEOMETRY" => ColumnTypeInput::geometry(),
         "ENUM" => {
-            let options = if fields.get("option_label").is_some() {
-                // Rows in order: a blank label drops its row; a row
-                // with an id keeps its identity, a new row is minted.
-                let ids = fields.all("option_id");
-                fields
-                    .all("option_label")
-                    .into_iter()
-                    .enumerate()
-                    .filter(|(_, label)| !label.trim().is_empty())
-                    .map(|(row, label)| EnumOptionInput {
-                        id: ids
-                            .get(row)
-                            .filter(|id| !id.is_empty())
-                            .map(|id| cynic::Id::new(*id)),
-                        label: label.trim().to_owned(),
-                    })
-                    .collect()
-            } else {
-                match &column.ty {
-                    ColumnType::Enum(e) => e
-                        .options
-                        .iter()
-                        .map(|o| EnumOptionInput {
-                            id: Some(o.id.clone()),
-                            label: o.label.clone(),
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                }
-            };
+            // Options are edited through `element::options`; a column
+            // becoming an enum with none yet gets one to start from,
+            // since the API (rightly) refuses an empty choice.
+            let mut options = current_options(column);
             if options.is_empty() {
-                return Ok(Err(Notice {
-                    kind: NoticeKind::Alert,
-                    text: t(cx, "schema.error.options-required").await?,
-                }));
+                options.push(EnumOptionInput {
+                    id: None,
+                    label: t(cx, "schema.options.default").await?,
+                });
             }
             ColumnTypeInput::enumeration(options)
         }
@@ -410,6 +487,120 @@ pub(super) mod element {
                     let notice = refused(cx, error).await?;
                     back_to_editor(cx, Some(&element_id), Some(notice)).await
                 }
+            }
+        }
+    }
+
+    /// `…/elements/{eid}/options/{add,update,remove}`: the enum
+    /// column's options, one POST each; the row's label input also
+    /// autosaves through `save_option`.
+    pub(in crate::pages) mod options {
+        use super::*;
+
+        /// An option to add: its label.
+        #[derive(Deserialize)]
+        pub(in crate::pages) struct Addition {
+            label: String,
+        }
+
+        /// A row's change: the option and its new label.
+        #[derive(Deserialize)]
+        pub(in crate::pages) struct Change {
+            option_id: String,
+            label: String,
+        }
+
+        /// A removal: the option.
+        #[derive(Deserialize)]
+        pub(in crate::pages) struct Removal {
+            option_id: String,
+        }
+
+        pub(in crate::pages) mod add {
+            use super::*;
+
+            /// Appends an option (a minted id).
+            #[page(POST)]
+            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Addition>) -> Result {
+                let client = client(cx).await?;
+                let procedure = procedure_draft(cx).await?;
+                let element_id = path_param::<ElementId>(cx).to_owned();
+                let label = input.label.trim().to_owned();
+                let notice = if label.is_empty() {
+                    Notice {
+                        kind: NoticeKind::Alert,
+                        text: t(cx, "schema.error.label-required").await?,
+                    }
+                } else {
+                    match enum_column(cx, &procedure, &element_id).await? {
+                        Err(notice) => notice,
+                        Ok((_, mut options)) => {
+                            options.push(EnumOptionInput { id: None, label });
+                            match set_options(cx, &client, &procedure, &element_id, options).await?
+                            {
+                                Ok(()) => done(cx, "schema.notice.option-added").await?,
+                                Err(notice) => notice,
+                            }
+                        }
+                    }
+                };
+                back_to_editor(cx, Some(&element_id), Some(notice)).await
+            }
+        }
+
+        pub(in crate::pages) mod update {
+            use super::*;
+
+            /// Renames an option (the row's form; Enter without the
+            /// script).
+            #[page(POST)]
+            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Change>) -> Result {
+                let client = client(cx).await?;
+                let procedure = procedure_draft(cx).await?;
+                let element_id = path_param::<ElementId>(cx).to_owned();
+                let notice = match rename_option(
+                    cx,
+                    &client,
+                    &procedure,
+                    &element_id,
+                    &input.option_id,
+                    &input.label,
+                )
+                .await?
+                {
+                    Ok(()) => done(cx, "schema.notice.saved").await?,
+                    Err(notice) => notice,
+                };
+                back_to_editor(cx, Some(&element_id), Some(notice)).await
+            }
+        }
+
+        pub(in crate::pages) mod remove {
+            use super::*;
+
+            /// Removes an option; the last one is refused (a choice
+            /// needs at least one).
+            #[page(POST)]
+            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Removal>) -> Result {
+                let client = client(cx).await?;
+                let procedure = procedure_draft(cx).await?;
+                let element_id = path_param::<ElementId>(cx).to_owned();
+                let notice = match enum_column(cx, &procedure, &element_id).await? {
+                    Err(notice) => notice,
+                    Ok((_, options)) => {
+                        let kept: Vec<EnumOptionInput> = options
+                            .into_iter()
+                            .filter(|o| {
+                                o.id.as_ref().is_none_or(|id| id.inner() != input.option_id)
+                            })
+                            .collect();
+                        match set_options(cx, &client, &procedure, &element_id, kept).await? {
+                            Ok(()) => done(cx, "schema.notice.option-removed").await?,
+                            Err(notice) => notice,
+                        }
+                    }
+                };
+                back_to_editor(cx, Some(&element_id), Some(notice)).await
             }
         }
     }

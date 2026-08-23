@@ -333,6 +333,22 @@ async fn axe_scenario(
     )
     .await?;
     let editor_url = page.url();
+    // A choice column: the options card with its row and add form.
+    page.locator(locator!("#element-kind"))
+        .select_option("ENUM", None)
+        .await?;
+    expect(page.locator(locator!("[data-save-status]")))
+        .to_have_text("Saved.")
+        .await?;
+    page.reload(None).await?;
+    expect(page.locator(locator!("li[data-option-id]")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema (choice options)",
+    )
+    .await?;
     page.locator(locator!("#element-label"))
         .fill("   ", None)
         .await?;
