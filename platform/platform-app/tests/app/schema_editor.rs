@@ -386,12 +386,7 @@ async fn the_editing_journey() {
         &router,
         &cookie,
         &update(&nom),
-        &[
-            ("label", " Surface "),
-            ("kind", "DECIMAL"),
-            ("unit", "m2"),
-            ("arity", "MANY"),
-        ],
+        &[("label", " Surface "), ("kind", "DECIMAL"), ("unit", "m2")],
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
@@ -399,7 +394,38 @@ async fn the_editing_journey() {
     assert!(html.contains("Decimal (m2)"), "{html}");
     assert!(html.contains("Saved."), "{html}");
     assert!(html.contains("value=\"m2\" selected"), "{html}");
+    // Many values is offered on choices, attachments and geometries
+    // only: posted with a decimal it is ignored (the select is hidden,
+    // not absent), on an attachment it sticks, and a type change back
+    // takes it to one.
+    let to = act(
+        &router,
+        &cookie,
+        &update(&nom),
+        &[("kind", "DECIMAL"), ("arity", "MANY")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("value=\"ONE\" selected"), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&nom),
+        &[("kind", "ATTACHMENT"), ("arity", "MANY")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("value=\"MANY\" selected"), "{html}");
+    assert!(html.contains(">Many<"), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&nom),
+        &[("kind", "DECIMAL"), ("unit", "m2")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("value=\"ONE\" selected"), "{html}");
 
     // An enum starts with no options (a draft state — publication is
     // where an empty choice is refused); options are added, renamed

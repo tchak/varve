@@ -230,8 +230,15 @@ pub(super) async fn apply_update(
                 Ok(ty) => ty,
                 Err(notice) => return Ok(Err(notice)),
             };
+            // The arity select is posted with the whole form even for a
+            // kind that cannot hold many values (it is hidden, not
+            // absent): leave it to the kernel edge, which takes the
+            // arity back to one with the type.
+            let kind = fields.get("kind").unwrap_or(kind_of(&column.ty));
+            let list_capable = matches!(kind, "ENUM" | "ATTACHMENT" | "GEOMETRY");
             let arity = match fields.get("arity") {
-                Some("MANY") => Some(Arity::Many),
+                Some("MANY") if list_capable => Some(Arity::Many),
+                Some("MANY") => None,
                 Some(_) => Some(Arity::One),
                 None => None,
             };

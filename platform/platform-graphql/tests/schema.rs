@@ -653,13 +653,45 @@ async fn revision_draft_editing_journey() {
             "updateColumn",
             "UpdateColumnInput",
             json!({ "procedureId": pid, "id": nom, "label": " Surface ",
-                    "type": { "decimal": { "unit": "SQUARE_METRE" } }, "arity": "MANY" }),
+                    "type": { "decimal": { "unit": "SQUARE_METRE" } } }),
         )
         .await;
     let surface = &p["revisionDraft"]["schema"]["elements"][2];
     assert_eq!(id_of(surface), nom);
     assert_eq!(surface["label"], "Surface");
-    assert_eq!(surface["arity"], "MANY");
+    assert_eq!(surface["arity"], "ONE");
+    // Many values: a platform rule offers it on choices, attachments
+    // and geometries only (INVALID_EDIT elsewhere).
+    let code = api
+        .edit_error(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "arity": "MANY" }),
+        )
+        .await;
+    assert_eq!(code, "INVALID_EDIT");
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "type": { "attachment": {} }, "arity": "MANY" }),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["schema"]["elements"][2]["arity"], "MANY");
+    // Back to a decimal: the arity follows the type back to one.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom,
+                    "type": { "decimal": { "unit": "SQUARE_METRE" } } }),
+        )
+        .await;
+    let surface = &p["revisionDraft"]["schema"]["elements"][2];
+    assert_eq!(surface["arity"], "ONE");
     assert_eq!(surface["type"]["__typename"], "DecimalType");
     assert_eq!(surface["type"]["unit"], "SQUARE_METRE");
 

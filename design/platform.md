@@ -328,8 +328,17 @@ handlers, the `revision` signal, and the shard call share one
 `view!`, and the ids and texts a handler needs travel as signals.
 The editor's inputs and selects that carry handlers are plain
 elements styled like the vendored components for the same reason.
-Out of scope, deliberately: publishing, surface properties, blocks
-and published nomenclatures, undo.
+**Many values is offered on choices, attachments and geometries
+only** (settled 2026-08-23): the kernel lets any column be list-valued
+(DESIGN §2.2), but in the whole DN corpus arity `many` occurs only as
+multi-select, multi-file and feature sets
+(`corpus/M0-type-frequency.md`) — so this is a platform rule, enforced
+in `platform-core::schema_edit` (`list_capable`; `INVALID_EDIT`
+through the API, P.9 Q15's future API rework may lift it into the
+type), and the editor shows the arity select for those kinds only; a
+type change away from them takes the arity back to one. Out of scope,
+deliberately: publishing, surface properties, blocks and published
+nomenclatures, undo.
 
 ## P.5 GraphQL schema
 

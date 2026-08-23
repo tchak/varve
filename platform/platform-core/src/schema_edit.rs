@@ -90,6 +90,19 @@ pub struct GroupPatch {
     pub cardinality: Option<Cardinality>,
 }
 
+/// Whether a column of type `ty` may hold many values (arity `many`).
+/// A **platform rule, not a kernel one**: the kernel lets any column
+/// be list-valued (DESIGN §2.2), but in the whole DN corpus `many`
+/// occurs only on attachments (multi-file), enums (multi-select) and
+/// geometries (feature sets) — `corpus/M0-type-frequency.md` — so the
+/// editor offers it there and nowhere else (design/platform.md P.4).
+pub fn list_capable(ty: &ScalarType) -> bool {
+    matches!(
+        ty,
+        ScalarType::Enum(_) | ScalarType::Attachment(_) | ScalarType::Geometry
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EditError {
     #[error("no group '{0}' to place the element in")]
@@ -100,6 +113,10 @@ pub enum EditError {
     /// (or, on a move, is the moved element itself).
     #[error("{anchor:?} is not a child of {parent:?}")]
     AnchorNotInParent { parent: Parent, anchor: ElementId },
+    /// Arity `many` asked on a column whose type is not list-capable
+    /// ([`list_capable`]).
+    #[error("column '{0}' cannot hold many values: only choices, attachments and geometries can")]
+    ArityNotOffered(ColumnId),
     /// The edit produced a schema the kernel rejects (duplicate id,
     /// nesting beyond policy, …). The draft is unchanged.
     #[error("the edit leaves the schema invalid: {}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))]
@@ -128,6 +145,12 @@ pub fn add_element(
     placement: &Placement,
     element: Element,
 ) -> Result<(), EditError> {
+    if let Element::Column(c) = &element
+        && c.arity == Arity::Many
+        && !list_capable(&c.ty)
+    {
+        return Err(EditError::ArityNotOffered(c.id.clone()));
+    }
     commit(schema, |s| insert(s, placement, element))
 }
 
@@ -148,8 +171,16 @@ pub fn update_column(
         if let Some(ty) = patch.ty {
             column.ty = ty;
         }
-        if let Some(arity) = patch.arity {
-            column.arity = arity;
+        match patch.arity {
+            Some(arity) => column.arity = arity,
+            // A type change to one that cannot hold many values takes
+            // the arity back to `one` rather than failing: the kind is
+            // what the editor asked for, the arity follows from it.
+            None if !list_capable(&column.ty) => column.arity = Arity::One,
+            None => {}
+        }
+        if column.arity == Arity::Many && !list_capable(&column.ty) {
+            return Err(EditError::ArityNotOffered(column.id.clone()));
         }
         Ok(())
     })
@@ -511,6 +542,69 @@ mod tests {
         assert_eq!(
             remove_element(&mut s, &cid("b")),
             Err(EditError::UnknownElement(cid("b")))
+        );
+    }
+
+    #[test]
+    fn arity_many_is_offered_on_list_capable_types_only() {
+        let mut s = fixture();
+        let many_text = Element::Column(Column {
+            id: ColumnId::new("z"),
+            label: "Z".into(),
+            ty: ScalarType::Text,
+            arity: Arity::Many,
+        });
+        assert_eq!(
+            add_element(&mut s, &Placement::root(), many_text),
+            Err(EditError::ArityNotOffered(ColumnId::new("z")))
+        );
+        let many_files = Element::Column(Column {
+            id: ColumnId::new("z"),
+            label: "Z".into(),
+            ty: ScalarType::Attachment(Default::default()),
+            arity: Arity::Many,
+        });
+        add_element(&mut s, &Placement::root(), many_files).unwrap();
+        // Explicit many on a text column: refused, schema untouched.
+        let before = s.clone();
+        assert_eq!(
+            update_column(
+                &mut s,
+                &ColumnId::new("a"),
+                ColumnPatch {
+                    arity: Some(Arity::Many),
+                    ..Default::default()
+                }
+            ),
+            Err(EditError::ArityNotOffered(ColumnId::new("a")))
+        );
+        assert_eq!(s, before);
+        // A type change away from a list-capable type takes the arity
+        // back to one; an explicit many alongside it is refused.
+        update_column(
+            &mut s,
+            &ColumnId::new("z"),
+            ColumnPatch {
+                ty: Some(ScalarType::Text),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        match &s.root[3] {
+            Element::Column(c) => assert_eq!(c.arity, Arity::One),
+            _ => panic!(),
+        }
+        assert_eq!(
+            update_column(
+                &mut s,
+                &ColumnId::new("z"),
+                ColumnPatch {
+                    ty: Some(ScalarType::Geometry),
+                    arity: Some(Arity::Many),
+                    ..Default::default()
+                }
+            ),
+            Ok(())
         );
     }
 

@@ -63,8 +63,9 @@ pub use procedure::{
     revision_draft_schema,
 };
 pub use schema_edit::{
-    ColumnPatch, EditError, ElementId, GroupPatch, Parent, Placement, add_element, move_element,
-    new_column_id, new_group_id, new_option_id, remove_element, update_column, update_group,
+    ColumnPatch, EditError, ElementId, GroupPatch, Parent, Placement, add_element, list_capable,
+    move_element, new_column_id, new_group_id, new_option_id, remove_element, update_column,
+    update_group,
 };
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,

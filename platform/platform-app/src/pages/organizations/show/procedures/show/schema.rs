@@ -1079,7 +1079,17 @@ async fn editor_page(
                                                     >
                                                 </div>
                                             </div>
-                                            <div class="flex flex-col gap-2">
+                                            <div
+                                                class="flex flex-col gap-2"
+                                                :hidden=$(if kind.get() == "ENUM" {
+                                                    false
+                                                } else if kind.get() == "ATTACHMENT" {
+                                                    false
+                                                } else {
+                                                    kind.get() != "GEOMETRY"
+                                                })
+                                                data-facet="arity"
+                                            >
                                                 label(
                                                     attrs: attributes! { for="element-arity" },
                                                     (arity_label.as_str())

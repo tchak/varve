@@ -277,7 +277,9 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
 4. **Two codes join G.6.4:** `INVALID_EDIT` — the draft or the kernel
    refused the operation (unknown element or parent, anchor outside
    its parent, a schema `varve_schema::validate` rejects: duplicate
-   id, `many` nested in `many`); the message carries the reason and
+   id, `many` nested in `many`; and the platform rule that arity
+   `many` is offered on enum, attachment and geometry columns only —
+   platform P.4, corpus-backed); the message carries the reason and
    the draft is unchanged — and `CONFLICT` — the row's optimistic
    concurrency check failed (two editors racing); re-read and retry.
    No client-side version token yet (platform P.9 Q15).
