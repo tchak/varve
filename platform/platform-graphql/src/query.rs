@@ -104,7 +104,7 @@ impl Query {
     ) -> async_graphql::Result<Option<Procedure>> {
         let (principal, mut db) = session(ctx)?;
         let id = parse_id(&id)?;
-        let Some(procedure) = platform_core::find_procedure(&mut db, id)
+        let Some(procedure) = platform_core::find_procedure_with_revision_draft(&mut db, id)
             .await
             .map_err(internal)?
         else {

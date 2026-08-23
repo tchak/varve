@@ -57,13 +57,14 @@ pub use organization::{
 };
 pub use principal::Principal;
 pub use procedure::{
-    DraftError, Procedure, RevisionDraft, SchemaBytes, create_procedure, discard_draft,
-    draft_schema, edit_draft, find_procedure, find_procedure_with_revision_draft, list_account_procedures,
-    list_organization_procedures,
+    Procedure, RevisionDraft, RevisionDraftError, SchemaBytes, create_procedure,
+    discard_revision_draft, edit_revision_draft, find_procedure,
+    find_procedure_with_revision_draft, list_account_procedures, list_organization_procedures,
+    revision_draft_schema,
 };
 pub use schema_edit::{
     ColumnPatch, EditError, ElementId, GroupPatch, Parent, Placement, add_element, move_element,
-    new_column_id, new_group_id, remove_element, update_column, update_group,
+    new_column_id, new_group_id, new_option_id, remove_element, update_column, update_group,
 };
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,

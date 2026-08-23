@@ -3,8 +3,12 @@
 //! no transport. DB-backed, gated on `VARVE_TEST_DATABASE_URL` like
 //! `platform-core/tests/db.rs`; unset, every test passes vacuously.
 
-use cynic::QueryBuilder;
+use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
+use platform_client::revision_draft::{
+    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, ColumnTypeKind,
+    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, SchemaElement, Unit,
+};
 use platform_client::viewer::ViewerQuery;
 use platform_core::{Principal, connect, register};
 use platform_graphql::{InProcess, PlatformSchema, execute, schema};
@@ -496,4 +500,452 @@ fn the_client_mirrors_every_error_code() {
         .map(|c| c.as_str())
         .collect();
     assert_eq!(server, client);
+}
+
+/// The draft selection every draft mutation and the read share.
+const DRAFT: &str = "revisionDraft { base schema { elements {
+    __typename
+    ... on SchemaColumn { id parentId label arity type { __typename
+        ... on IntegerType { unit } ... on DecimalType { unit }
+        ... on EnumType { options { id label } }
+        ... on AttachmentType { accept maxBytes } } }
+    ... on SchemaGroup { id parentId label cardinality }
+} } }";
+
+fn draft_mutation(field: &str, input_type: &str) -> String {
+    format!("mutation($input: {input_type}!) {{ {field}(input: $input) {{ id {DRAFT} }} }}")
+}
+
+/// `(typename, id, parentId, label)` of every element, document order.
+fn outline(procedure: &Value) -> Vec<(String, String, Option<String>, String)> {
+    procedure["revisionDraft"]["schema"]["elements"]
+        .as_array()
+        .expect("elements")
+        .iter()
+        .map(|e| {
+            (
+                e["__typename"].as_str().unwrap().to_owned(),
+                id_of(e),
+                e["parentId"].as_str().map(str::to_owned),
+                e["label"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn labels(procedure: &Value) -> Vec<String> {
+    outline(procedure).into_iter().map(|e| e.3).collect()
+}
+
+impl Api {
+    async fn edit(&self, who: &Principal, field: &str, input_type: &str, input: Value) -> Value {
+        let mut data = self
+            .data(
+                who,
+                &draft_mutation(field, input_type),
+                json!({ "input": input }),
+            )
+            .await;
+        data[field].take()
+    }
+
+    async fn edit_error(
+        &self,
+        who: &Principal,
+        field: &str,
+        input_type: &str,
+        input: Value,
+    ) -> String {
+        self.error_code(
+            who,
+            &draft_mutation(field, input_type),
+            json!({ "input": input }),
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+async fn revision_draft_editing_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("draft"), "Org")
+        .await;
+    let procedure = api.create_procedure(&alice, &id_of(&org), "Bourse").await;
+    let pid = id_of(&procedure);
+
+    // No draft until the first edit.
+    let read = format!("query($id: ID!) {{ procedure(id: $id) {{ id {DRAFT} }} }}");
+    let data = api.data(&alice, &read, json!({ "id": pid })).await;
+    assert!(data["procedure"]["revisionDraft"].is_null(), "{data}");
+
+    // addColumn at the root starts the draft; base is null (no DAG yet).
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": " Nom ", "type": { "kind": "TEXT" } }),
+        )
+        .await;
+    assert!(p["revisionDraft"]["base"].is_null());
+    assert_eq!(labels(&p), ["Nom"]);
+    let nom = id_of(&p["revisionDraft"]["schema"]["elements"][0]);
+    assert_eq!(p["revisionDraft"]["schema"]["elements"][0]["arity"], "ONE");
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][0]["type"]["__typename"],
+        "TextType"
+    );
+
+    // addGroup (MANY), then columns inside it: append, then before.
+    let p = api
+        .edit(
+            &alice,
+            "addGroup",
+            "AddGroupInput",
+            json!({ "procedureId": pid, "label": "Adresses", "cardinality": "MANY" }),
+        )
+        .await;
+    let adresses = id_of(&p["revisionDraft"]["schema"]["elements"][1]);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Rue", "type": { "kind": "TEXT" },
+                    "placement": { "parentId": adresses } }),
+        )
+        .await;
+    let rue = id_of(&p["revisionDraft"]["schema"]["elements"][2]);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Ville", "type": { "kind": "TEXT" },
+                    "placement": { "parentId": adresses, "beforeId": rue } }),
+        )
+        .await;
+    assert_eq!(labels(&p), ["Nom", "Adresses", "Ville", "Rue"]);
+    let ville = id_of(&p["revisionDraft"]["schema"]["elements"][2]);
+    assert_eq!(outline(&p)[2].2.as_deref(), Some(adresses.as_str()));
+    assert_eq!(outline(&p)[1].2, None);
+
+    // moveElement across levels, anchored on a sibling.
+    let p = api
+        .edit(
+            &alice,
+            "moveElement",
+            "MoveElementInput",
+            json!({ "procedureId": pid, "id": nom,
+                    "placement": { "parentId": adresses, "beforeId": rue } }),
+        )
+        .await;
+    assert_eq!(labels(&p), ["Adresses", "Ville", "Nom", "Rue"]);
+    assert_eq!(outline(&p)[2].2.as_deref(), Some(adresses.as_str()));
+
+    // updateColumn: type with a unit, label trimmed, id unchanged.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "label": " Surface ",
+                    "type": { "kind": "DECIMAL", "unit": "SQUARE_METRE" }, "arity": "MANY" }),
+        )
+        .await;
+    let surface = &p["revisionDraft"]["schema"]["elements"][2];
+    assert_eq!(id_of(surface), nom);
+    assert_eq!(surface["label"], "Surface");
+    assert_eq!(surface["arity"], "MANY");
+    assert_eq!(surface["type"]["__typename"], "DecimalType");
+    assert_eq!(surface["type"]["unit"], "SQUARE_METRE");
+
+    // An inline enum: option ids are minted when omitted and kept when given.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": ville,
+                    "type": { "kind": "ENUM", "options": [
+                        { "label": "Paris" }, { "id": "lyon", "label": "Lyon" } ] } }),
+        )
+        .await;
+    let options = &p["revisionDraft"]["schema"]["elements"][1]["type"]["options"];
+    assert_eq!(options[0]["label"], "Paris");
+    assert!(!options[0]["id"].as_str().unwrap().is_empty());
+    assert_eq!(options[1], json!({ "id": "lyon", "label": "Lyon" }));
+
+    // updateGroup, then removeElement of a column.
+    let p = api
+        .edit(
+            &alice,
+            "updateGroup",
+            "UpdateGroupInput",
+            json!({ "procedureId": pid, "id": adresses, "label": "Adresse", "cardinality": "ONE" }),
+        )
+        .await;
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][0]["label"],
+        "Adresse"
+    );
+    assert_eq!(
+        p["revisionDraft"]["schema"]["elements"][0]["cardinality"],
+        "ONE"
+    );
+    let p = api
+        .edit(
+            &alice,
+            "removeElement",
+            "RemoveElementInput",
+            json!({ "procedureId": pid, "id": rue }),
+        )
+        .await;
+    assert_eq!(labels(&p), ["Adresse", "Ville", "Surface"]);
+
+    // The read sees what the mutations answered with.
+    let data = api.data(&alice, &read, json!({ "id": pid })).await;
+    assert_eq!(labels(&data["procedure"]), ["Adresse", "Ville", "Surface"]);
+
+    // Removing the group takes its subtree; discard empties the draft.
+    let p = api
+        .edit(
+            &alice,
+            "removeElement",
+            "RemoveElementInput",
+            json!({ "procedureId": pid, "id": adresses }),
+        )
+        .await;
+    assert!(labels(&p).is_empty());
+    let p = api
+        .edit(
+            &alice,
+            "discardRevisionDraft",
+            "DiscardRevisionDraftInput",
+            json!({ "procedureId": pid }),
+        )
+        .await;
+    assert!(p["revisionDraft"].is_null(), "{p}");
+}
+
+#[tokio::test]
+async fn revision_draft_errors_are_structured() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let bob = account(&mut db, "bob").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("draft-err"), "Org")
+        .await;
+    let procedure = api.create_procedure(&alice, &id_of(&org), "Permis").await;
+    let pid = id_of(&procedure);
+    let text = json!({ "kind": "TEXT" });
+
+    // FORBIDDEN: a non-member, a missing procedure — the same answer.
+    for who in [&bob, &alice] {
+        let target = if who.account_id == bob.account_id {
+            pid.clone()
+        } else {
+            NIL.to_owned()
+        };
+        let code = api
+            .edit_error(
+                who,
+                "addColumn",
+                "AddColumnInput",
+                json!({ "procedureId": target, "label": "x", "type": text }),
+            )
+            .await;
+        assert_eq!(code, "FORBIDDEN");
+    }
+
+    // INVALID_INPUT: malformed id, blank label, a fact foreign to the
+    // kind, an enum without options.
+    for input in [
+        json!({ "procedureId": "nope", "label": "x", "type": text }),
+        json!({ "procedureId": pid, "label": "  ", "type": text }),
+        json!({ "procedureId": pid, "label": "x", "type": { "kind": "TEXT", "unit": "METRE" } }),
+        json!({ "procedureId": pid, "label": "x", "type": { "kind": "ENUM" } }),
+        json!({ "procedureId": pid, "label": "x", "type": { "kind": "ATTACHMENT", "options": [] } }),
+    ] {
+        let code = api
+            .edit_error(&alice, "addColumn", "AddColumnInput", input)
+            .await;
+        assert_eq!(code, "INVALID_INPUT");
+    }
+
+    // INVALID_EDIT: the draft or the kernel refuses — and the draft is
+    // unchanged afterwards.
+    let p = api
+        .edit(
+            &alice,
+            "addGroup",
+            "AddGroupInput",
+            json!({ "procedureId": pid, "label": "Rows", "cardinality": "MANY" }),
+        )
+        .await;
+    let rows = id_of(&p["revisionDraft"]["schema"]["elements"][0]);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Cell", "type": text,
+                    "placement": { "parentId": rows } }),
+        )
+        .await;
+    let cell = id_of(&p["revisionDraft"]["schema"]["elements"][1]);
+    for (field, input_type, input) in [
+        // many inside many: depth policy
+        (
+            "addGroup",
+            "AddGroupInput",
+            json!({ "procedureId": pid, "label": "Deep", "cardinality": "MANY",
+                    "placement": { "parentId": rows } }),
+        ),
+        // unknown parent
+        (
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "x", "type": text,
+                    "placement": { "parentId": NIL } }),
+        ),
+        // anchor outside its parent (cell is in rows, not at the root)
+        (
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "x", "type": text,
+                    "placement": { "beforeId": cell } }),
+        ),
+        // unknown element
+        (
+            "removeElement",
+            "RemoveElementInput",
+            json!({ "procedureId": pid, "id": NIL }),
+        ),
+        // a column updated as a group
+        (
+            "updateGroup",
+            "UpdateGroupInput",
+            json!({ "procedureId": pid, "id": cell, "label": "x" }),
+        ),
+        // a group moved into itself
+        (
+            "moveElement",
+            "MoveElementInput",
+            json!({ "procedureId": pid, "id": rows, "placement": { "parentId": rows } }),
+        ),
+    ] {
+        let code = api.edit_error(&alice, field, input_type, input).await;
+        assert_eq!(code, "INVALID_EDIT", "{field} {input_type}");
+    }
+    let read = format!("query($id: ID!) {{ procedure(id: $id) {{ id {DRAFT} }} }}");
+    let data = api.data(&alice, &read, json!({ "id": pid })).await;
+    assert_eq!(labels(&data["procedure"]), ["Rows", "Cell"]);
+
+    // A non-member reads null, never the draft (G.6).
+    let data = api.data(&bob, &read, json!({ "id": pid })).await;
+    assert!(data["procedure"].is_null());
+}
+
+#[tokio::test]
+async fn the_typed_client_edits_and_reads_the_draft() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("typed-draft"), "Org")
+        .await;
+    let procedure = api.create_procedure(&alice, &id_of(&org), "Typed").await;
+    let client = api.client(&alice);
+
+    let added = platform_client::run(
+        &client,
+        AddColumn::build(AddColumnVariables {
+            input: AddColumnInput {
+                procedure_id: cynic::Id::new(id_of(&procedure)),
+                placement: None,
+                label: "Surface".into(),
+                ty: ColumnTypeInput {
+                    kind: ColumnTypeKind::Integer,
+                    unit: Some(Unit::SquareMetre),
+                    ..Default::default()
+                },
+                arity: None,
+            },
+        }),
+    )
+    .await
+    .expect("addColumn")
+    .add_column;
+    let draft = added.revision_draft.expect("draft started");
+    assert!(draft.base.is_none());
+    let SchemaElement::Column(column) = draft.schema.elements[0].clone() else {
+        panic!("{:?}", draft.schema.elements);
+    };
+    assert_eq!(column.label, "Surface");
+    assert!(column.parent_id.is_none());
+    assert!(matches!(&column.ty, ColumnType::Integer(t) if t.unit == Some(Unit::SquareMetre)));
+
+    let read = platform_client::run(
+        &client,
+        ProcedureRevisionDraftQuery::build(ProcedureRevisionDraftVariables {
+            id: cynic::Id::new(id_of(&procedure)),
+        }),
+    )
+    .await
+    .expect("read")
+    .procedure
+    .expect("visible");
+    assert_eq!(read.revision_draft, Some(draft));
+
+    // A refused edit arrives typed.
+    let error = platform_client::run(
+        &client,
+        AddColumn::build(AddColumnVariables {
+            input: AddColumnInput {
+                procedure_id: cynic::Id::new(id_of(&procedure)),
+                placement: Some(platform_client::revision_draft::PlacementInput {
+                    parent_id: Some(column.id.clone()),
+                    before_id: None,
+                }),
+                label: "Inside a column".into(),
+                ty: ColumnTypeInput::default(),
+                arity: None,
+            },
+        }),
+    )
+    .await
+    .expect_err("a column is not a parent");
+    assert_eq!(error.code(), Some(platform_client::Code::InvalidEdit));
+}
+
+#[test]
+fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
+    let sdl = schema().sdl();
+    for needle in [
+        "revisionDraft: RevisionDraft",
+        "elements: [SchemaElement!]!",
+        "union SchemaElement = SchemaColumn | SchemaGroup",
+        "union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType",
+        "addColumn(input: AddColumnInput!): Procedure!",
+        "addGroup(input: AddGroupInput!): Procedure!",
+        "updateColumn(input: UpdateColumnInput!): Procedure!",
+        "updateGroup(input: UpdateGroupInput!): Procedure!",
+        "moveElement(input: MoveElementInput!): Procedure!",
+        "removeElement(input: RemoveElementInput!): Procedure!",
+        "discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!",
+        "beforeId: ID",
+    ] {
+        assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
+    }
+    // G.2 / G.5 Q1: the tree is flat — a group names its parent and
+    // carries no children.
+    let start = sdl.find("type SchemaGroup {").expect("SchemaGroup");
+    let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
+    assert!(body.contains("parentId: ID"), "{body}");
+    assert!(!body.contains('['), "SchemaGroup has a list field:\n{body}");
 }

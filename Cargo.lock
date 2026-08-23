@@ -4413,6 +4413,8 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "varve-core",
+ "varve-schema",
 ]
 
 [[package]]

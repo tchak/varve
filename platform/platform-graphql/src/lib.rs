@@ -8,7 +8,9 @@
 //! this crate owns types and resolvers.
 //!
 //! **Current scope: the P0 slice** (G.6) — organizations, teams,
-//! procedures, and their members, with the three `create*` mutations.
+//! procedures, and their members, with the three `create*` mutations
+//! — plus the **revision-draft slice**: a procedure's draft schema
+//! ([`revision_draft`]) and the element mutations that edit it.
 //! The type graph follows G.2: full objects only at root
 //! ([`organization::Organization`], [`team::Team`],
 //! [`procedure::Procedure`]), `*Ref` types everywhere a list or a
@@ -29,6 +31,7 @@ pub mod mutation;
 pub mod organization;
 pub mod procedure;
 pub mod query;
+pub mod revision_draft;
 pub mod slug;
 pub mod team;
 

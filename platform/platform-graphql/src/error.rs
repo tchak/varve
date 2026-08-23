@@ -15,6 +15,14 @@ pub enum Code {
     Forbidden,
     /// `createOrganization`: the slug is already taken.
     SlugTaken,
+    /// A revision-draft edit the kernel or the draft refuses: unknown
+    /// element or parent, anchor outside its parent, or a schema the
+    /// kernel's validation rejects (duplicate id, nesting beyond
+    /// policy). The message carries the reason; the draft is unchanged.
+    InvalidEdit,
+    /// The draft changed since the client last read it (two editors
+    /// racing): re-read and retry.
+    Conflict,
     /// The platform failed, not the request: a store error or a
     /// wiring bug. The cause is logged server-side and never
     /// serialized — a client learns nothing about the database.
@@ -24,10 +32,12 @@ pub enum Code {
 impl Code {
     /// Every code; `platform-client` mirrors this set and a test
     /// keeps the two equal.
-    pub const ALL: [Code; 4] = [
+    pub const ALL: [Code; 6] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
+        Code::InvalidEdit,
+        Code::Conflict,
         Code::Internal,
     ];
 
@@ -37,6 +47,8 @@ impl Code {
             Code::InvalidInput => "INVALID_INPUT",
             Code::Forbidden => "FORBIDDEN",
             Code::SlugTaken => "SLUG_TAKEN",
+            Code::InvalidEdit => "INVALID_EDIT",
+            Code::Conflict => "CONFLICT",
             Code::Internal => "INTERNAL",
         }
     }

@@ -5,6 +5,119 @@ type AccountRef {
 }
 
 """
+`addColumn` input.
+"""
+input AddColumnInput {
+	"""
+	The procedure whose revision draft is edited; the viewer must
+	administer it.
+	"""
+	procedureId: ID!
+	"""
+	Where the column goes; omitted = appended at the root.
+	"""
+	placement: PlacementInput! = {parentId: null, beforeId: null}
+	label: String!
+	type: ColumnTypeInput!
+	arity: Arity! = ONE
+}
+
+"""
+`addGroup` input.
+"""
+input AddGroupInput {
+	procedureId: ID!
+	"""
+	Where the group goes; omitted = appended at the root.
+	"""
+	placement: PlacementInput! = {parentId: null, beforeId: null}
+	label: String!
+	cardinality: Cardinality! = ONE
+}
+
+"""
+A column holds one value or many (DESIGN §2.2).
+"""
+enum Arity {
+	ONE
+	MANY
+}
+
+"""
+A file column with its representability constraints (DESIGN §2.15).
+"""
+type AttachmentType {
+	kind: ColumnTypeKind!
+	"""
+	IANA media-type patterns (`application/pdf`, `image/*`); empty =
+	unrestricted.
+	"""
+	accept: [String!]!
+	"""
+	Per-file byte limit; `null` = unlimited.
+	"""
+	maxBytes: Int
+}
+
+type BooleanType {
+	kind: ColumnTypeKind!
+}
+
+"""
+A group holds one row or many (DESIGN §2.2).
+"""
+enum Cardinality {
+	ONE
+	MANY
+}
+
+"""
+A column's type: one object per constructor, carrying only the
+facts that constructor has.
+"""
+union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType
+
+"""
+A column type on input: `kind` plus the facts that kind carries.
+A fact that does not belong to the kind is `INVALID_INPUT`.
+"""
+input ColumnTypeInput {
+	kind: ColumnTypeKind!
+	"""
+	`INTEGER` / `DECIMAL` only.
+	"""
+	unit: Unit
+	"""
+	`ENUM` only; required there.
+	"""
+	options: [EnumOptionInput!]
+	"""
+	`ATTACHMENT` only.
+	"""
+	accept: [String!]
+	"""
+	`ATTACHMENT` only.
+	"""
+	maxBytes: Int
+}
+
+"""
+The type constructors, shared by the output union (as each
+member's `kind`) and [`ColumnTypeInput`].
+"""
+enum ColumnTypeKind {
+	TEXT
+	BOOLEAN
+	INTEGER
+	DECIMAL
+	DATE
+	DATETIME
+	ENUM
+	ATTACHMENT
+	GEOMETRY
+}
+
+"""
 `createOrganization` input.
 """
 input CreateOrganizationInput {
@@ -52,6 +165,74 @@ input CreateTeamInput {
 
 scalar DateTime
 
+type DateType {
+	kind: ColumnTypeKind!
+}
+
+type DatetimeType {
+	kind: ColumnTypeKind!
+}
+
+type DecimalType {
+	kind: ColumnTypeKind!
+	unit: Unit
+}
+
+"""
+`discardRevisionDraft` input.
+"""
+input DiscardRevisionDraftInput {
+	procedureId: ID!
+}
+
+"""
+The schema as a flat list.
+"""
+type DraftSchema {
+	"""
+	Every element, **document order** (a group precedes its
+	children; siblings in their order), each naming its parent.
+	"""
+	elements: [SchemaElement!]!
+}
+
+"""
+One option; identity is the `id` (DESIGN §2.11).
+"""
+type EnumOption {
+	id: ID!
+	label: String!
+}
+
+"""
+An enum option on input. Pass an existing option's `id` to keep
+its identity across edits; omit it for a new option and the server
+mints one.
+"""
+input EnumOptionInput {
+	id: ID
+	label: String!
+}
+
+"""
+An enum backed by an inline nomenclature (DESIGN §2.12) — the only
+backing the editor offers until published nomenclatures have a
+platform home.
+"""
+type EnumType {
+	kind: ColumnTypeKind!
+	options: [EnumOption!]!
+}
+
+type GeometryType {
+	kind: ColumnTypeKind!
+}
+
+type IntegerType {
+	kind: ColumnTypeKind!
+	unit: Unit
+}
+
 type Member {
 	"""
 	The member account.
@@ -61,6 +242,18 @@ type Member {
 	When the membership was created.
 	"""
 	joinedAt: DateTime!
+}
+
+"""
+`moveElement` input.
+"""
+input MoveElementInput {
+	procedureId: ID!
+	"""
+	A column or a group (with its subtree).
+	"""
+	id: ID!
+	placement: PlacementInput!
 }
 
 type Mutation {
@@ -77,6 +270,41 @@ type Mutation {
 	member of.
 	"""
 	createProcedure(input: CreateProcedureInput!): Procedure!
+	"""
+	Adds a column to the procedure's revision draft (starting the
+	draft when none is in progress). The new column is the element
+	in front of `placement.beforeId` in its parent — or the parent's
+	last child when `beforeId` is omitted.
+	"""
+	addColumn(input: AddColumnInput!): Procedure!
+	"""
+	Adds an empty group to the procedure's revision draft; placed
+	like `addColumn`.
+	"""
+	addGroup(input: AddGroupInput!): Procedure!
+	"""
+	Changes a column's label, type, or arity; its id — its identity
+	for the impact report — never changes.
+	"""
+	updateColumn(input: UpdateColumnInput!): Procedure!
+	"""
+	Changes a group's label or cardinality; its id and children
+	stay.
+	"""
+	updateGroup(input: UpdateGroupInput!): Procedure!
+	"""
+	Moves a column or a group (with its subtree) to `placement`.
+	"""
+	moveElement(input: MoveElementInput!): Procedure!
+	"""
+	Removes a column or a group (with its subtree) from the draft.
+	"""
+	removeElement(input: RemoveElementInput!): Procedure!
+	"""
+	Drops the procedure's revision draft; `revisionDraft` is `null`
+	afterwards.
+	"""
+	discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!
 }
 
 type Organization {
@@ -122,6 +350,15 @@ type OrganizationRef {
 	name: String!
 }
 
+"""
+Where to put an element: `parentId` names a group (`null` = root),
+`beforeId` a sibling to insert in front of (`null` = append).
+"""
+input PlacementInput {
+	parentId: ID
+	beforeId: ID
+}
+
 type Procedure {
 	id: ID!
 	title: String!
@@ -135,6 +372,11 @@ type Procedure {
 	The owning organization.
 	"""
 	organization: OrganizationRef!
+	"""
+	The draft of the next revision; `null` when none is in
+	progress.
+	"""
+	revisionDraft: RevisionDraft
 }
 
 type ProcedureRef {
@@ -174,6 +416,64 @@ type Query {
 }
 
 """
+`removeElement` input.
+"""
+input RemoveElementInput {
+	procedureId: ID!
+	"""
+	A column or a group (with its subtree).
+	"""
+	id: ID!
+}
+
+"""
+The draft of a procedure's next revision.
+"""
+type RevisionDraft {
+	"""
+	The published revision this draft forks from; `null` until the
+	procedure has one.
+	"""
+	base: ID
+	"""
+	The schema under edit.
+	"""
+	schema: DraftSchema!
+}
+
+"""
+A typed field (DESIGN §2.1).
+"""
+type SchemaColumn {
+	id: ID!
+	"""
+	The containing group; `null` at the root.
+	"""
+	parentId: ID
+	label: String!
+	type: ColumnType!
+	arity: Arity!
+}
+
+"""
+A column or a group.
+"""
+union SchemaElement = SchemaColumn | SchemaGroup
+
+"""
+An ordered container of elements (DESIGN §2.1).
+"""
+type SchemaGroup {
+	id: ID!
+	"""
+	The containing group; `null` at the root.
+	"""
+	parentId: ID
+	label: String!
+	cardinality: Cardinality!
+}
+
+"""
 URL/API handle of an organization: `[a-z0-9-]`, non-empty. Input
 is trimmed and lowercased before validation.
 """
@@ -198,6 +498,56 @@ type TeamRef {
 	id: ID!
 	name: String!
 	organization: OrganizationRef!
+}
+
+type TextType {
+	kind: ColumnTypeKind!
+}
+
+"""
+A number's unit (DESIGN §2.14); plain numbers carry none.
+"""
+enum Unit {
+	MILLIMETRE
+	CENTIMETRE
+	METRE
+	KILOMETRE
+	GRAM
+	KILOGRAM
+	TONNE
+	MINUTE
+	HOUR
+	DAY
+	WEEK
+	MONTH
+	YEAR
+	SQUARE_METRE
+	HECTARE
+	SQUARE_KILOMETRE
+	LITRE
+	CUBIC_METRE
+	PERCENT
+}
+
+"""
+`updateColumn` input: an omitted field is left as it is.
+"""
+input UpdateColumnInput {
+	procedureId: ID!
+	id: ID!
+	label: String
+	type: ColumnTypeInput
+	arity: Arity
+}
+
+"""
+`updateGroup` input: an omitted field is left as it is.
+"""
+input UpdateGroupInput {
+	procedureId: ID!
+	id: ID!
+	label: String
+	cardinality: Cardinality
 }
 
 type Viewer {

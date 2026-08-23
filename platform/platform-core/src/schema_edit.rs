@@ -20,7 +20,7 @@
 //!   (DESIGN §2.6) and have no place in these operations; the surface
 //!   draft joins the procedure draft later.
 
-use varve_core::{ColumnId, GroupId};
+use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{
     Arity, Cardinality, DepthPolicy, Element, Group, ScalarType, Schema, SchemaError, validate,
 };
@@ -114,6 +114,12 @@ pub fn new_column_id() -> ColumnId {
 /// A fresh group id. Opaque (UUID v4, hex).
 pub fn new_group_id() -> GroupId {
     GroupId::new(uuid::Uuid::new_v4().simple().to_string())
+}
+
+/// A fresh inline-enum option id (DESIGN §2.12: synthesized by the
+/// authoring tool). Opaque (UUID v4, hex).
+pub fn new_option_id() -> OptionId {
+    OptionId::new(uuid::Uuid::new_v4().simple().to_string())
 }
 
 /// Inserts `element` at `placement`.

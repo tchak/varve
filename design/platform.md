@@ -614,7 +614,11 @@ everything shipped exists in DN and nothing shipped that doesn't.
     server-rendered P0 editor posts form-by-form and fits the granular
     shape; settle when the GraphQL side lands, and whether `base`
     must be echoed by the client (a stale-fork check distinct from the
-    row version).
+    row version). **Partly settled (2026-08-23, `graphql.md` G.7):**
+    the public API is granular by construction (`addColumn`,
+    `moveElement`, … — one element operation per mutation, `CONFLICT`
+    on a lost race). Still open: whether a whole-tree `editRevision`
+    is ever worth adding beside them, and the `base` echo.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 

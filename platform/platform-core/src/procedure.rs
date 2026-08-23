@@ -82,7 +82,7 @@ pub struct RevisionDraft {
 /// A kernel [`Schema`] as its wire-canonical bytes (one `BYTEA`
 /// column). Constructed from a `Schema` only, so the column never
 /// holds anything [`schema_from_bytes`] would refuse — short of
-/// corruption, which [`DraftError::Corrupt`] reports.
+/// corruption, which [`RevisionDraftError::Corrupt`] reports.
 #[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
 pub struct SchemaBytes(Vec<u8>);
 
@@ -97,7 +97,7 @@ impl SchemaBytes {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DraftError {
+pub enum RevisionDraftError {
     #[error(transparent)]
     Edit(#[from] EditError),
     /// The stored draft no longer decodes — never produced by this
@@ -153,7 +153,7 @@ pub async fn find_procedure_with_revision_draft(
 /// # Panics
 ///
 /// If the draft was not loaded (the catalog lookups defer it).
-pub fn draft_schema(procedure: &Procedure) -> Result<Option<Schema>, DraftError> {
+pub fn revision_draft_schema(procedure: &Procedure) -> Result<Option<Schema>, RevisionDraftError> {
     Ok(match procedure.revision_draft.get() {
         Some(draft) => Some(draft.schema.decode()?),
         None => None,
@@ -168,12 +168,12 @@ pub fn draft_schema(procedure: &Procedure) -> Result<Option<Schema>, DraftError>
 ///
 /// Atomic: `edit` errors (a rejected operation) store nothing, and a
 /// concurrent change to the row since it was loaded fails the store
-/// ([`DraftError::Db`], `condition_failed`) instead of overwriting.
-pub async fn edit_draft(
+/// ([`RevisionDraftError::Db`], `condition_failed`) instead of overwriting.
+pub async fn edit_revision_draft(
     db: &mut toasty::Db,
     procedure: &mut Procedure,
     edit: impl FnOnce(&mut Schema) -> Result<(), EditError>,
-) -> Result<Schema, DraftError> {
+) -> Result<Schema, RevisionDraftError> {
     let (mut schema, base) = match procedure.revision_draft.get() {
         Some(draft) => (draft.schema.decode()?, draft.base.clone()),
         None => (Schema::default(), None),
@@ -192,7 +192,10 @@ pub async fn edit_draft(
 
 /// Drops the procedure's draft, if any. Same loading and concurrency
 /// contract as [`edit_revision_draft`].
-pub async fn discard_draft(db: &mut toasty::Db, procedure: &mut Procedure) -> toasty::Result<()> {
+pub async fn discard_revision_draft(
+    db: &mut toasty::Db,
+    procedure: &mut Procedure,
+) -> toasty::Result<()> {
     procedure.update().revision_draft(None).exec(db).await
 }
 

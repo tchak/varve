@@ -15,6 +15,10 @@ jiff = "0.2"
 # The client is a leaf; this crate provides its in-process transport.
 platform-client = { version = "0.1.0", path = "../platform-client" }
 platform-core = { version = "0.1.0", path = "../platform-core" }
+# The revision draft is a kernel `Schema`; its GraphQL shape is a
+# flattening of the kernel types (G.6, revision-draft slice).
+varve-core = { path = "../../crates/varve-core" }
+varve-schema = { path = "../../crates/varve-schema" }
 # Only for the `toasty::Db` handle resolvers receive; the driver and
 # model features are `platform-core`'s business.
 serde_json = "1"

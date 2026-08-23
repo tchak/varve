@@ -155,7 +155,11 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    prototype did (matches DN's three header levels, which the M0
    corpus can confirm), or a flat list with `depth`/`parentId`. Decide
    when `varve-surface`'s tree type is fixed; keep the discipline
-   either way — no recursive output type.
+   either way — no recursive output type. **Settled for the schema
+   side (2026-08-23, G.7):** a flat list in document order with
+   `parentId` — the kernel allows groups 24 deep, so per-depth types
+   do not fit the schema; the surface side stays open but now has a
+   precedent to match.
 2. **Invitations: `join(token)` as a query or a mutation?** The
    prototype's mutation returned the next client action; two of its
    four outcomes change nothing. Candidate: `invitation(token)
@@ -213,3 +217,63 @@ for "authorization is surface assignment" until surfaces arrive.
 6. **Counts are live `COUNT(*)` for now**, not read models: nothing
    is materialized yet (P.6 / DESIGN Q18), and three bounded counts
    per root fetch is the cost of waiting for the real thing.
+
+## G.7 The revision-draft slice (settled 2026-08-23)
+
+The editor's API, over platform P.4's procedure drafts: one read and
+seven mutations, shipped with `platform-core::schema_edit`. Settled by
+design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
+§3).
+
+1. **`Procedure.revisionDraft: RevisionDraft`** (`null` = nothing in
+   progress) carries `base` (the revision it forks from, `null` until
+   the DAG lands) and `schema { elements: [SchemaElement!]! }` — the
+   kernel tree **flattened in document order**, each `SchemaColumn` /
+   `SchemaGroup` naming its `parentId` (`null` at the root). No
+   recursive type (G.2), the tree rebuilds in one pass, and one query
+   carries the whole draft. Named *revision* draft because "draft" alone
+   is also a case-file state (G.2.5) and other published documents may
+   grow drafts; the noun is what the draft publishes as.
+2. **Column types are a union from the kernel's `ScalarType`** —
+   `TextType | … | IntegerType { unit } | EnumType { options } |
+   AttachmentType { accept maxBytes } | …` — G.2.5 applied to types:
+   no nullable `unit` on a text column. Each member carries `kind:
+   ColumnTypeKind` so a client that only wants the constructor need
+   not match on `__typename`. On input the same facts ride one
+   **`ColumnTypeInput { kind, unit, options, accept, maxBytes }`**
+   validated server-side (a fact foreign to the kind is
+   `INVALID_INPUT`) rather than a `@oneOf`: marker constructors
+   (`TEXT`, `DATE`, …) have no payload, and `@oneOf` over empty
+   members reads worse than a discriminant. Enum columns are
+   inline-backed only (DESIGN §2.12) until published nomenclatures
+   have a platform home; option ids are kept when the client sends
+   them and minted when omitted (identity, DESIGN §2.11).
+3. **Mutations are element operations**, one `input` each, all
+   answering with the full `Procedure` (G.2.7) so the editor reads
+   `revisionDraft` off the response: `addColumn`, `addGroup`,
+   `updateColumn`, `updateGroup` (omitted fields unchanged; ids never
+   change — a type change must stay a type change for the impact
+   report, DESIGN §3), `moveElement`, `removeElement` (a group with
+   its subtree), `discardRevisionDraft`. **Placement is
+   `{ parentId, beforeId }`** — a sibling anchor, never an index:
+   `beforeId: null` appends, and the two cases reach both ends, while
+   an index is only meaningful against the tree the client last saw.
+   Ids are server-minted; the element `addColumn`/`addGroup` created
+   is the one in front of `beforeId` in its parent, or that parent's
+   last child. `required`, visibility and presentation are surface
+   facts (DESIGN §2.6) and have no mutation here; the surface draft
+   joins `RevisionDraft` later and publishes with it.
+4. **Two codes join G.6.4:** `INVALID_EDIT` — the draft or the kernel
+   refused the operation (unknown element or parent, anchor outside
+   its parent, a schema `varve_schema::validate` rejects: duplicate
+   id, `many` nested in `many`); the message carries the reason and
+   the draft is unchanged — and `CONFLICT` — the row's optimistic
+   concurrency check failed (two editors racing); re-read and retry.
+   No client-side version token yet (platform P.9 Q15).
+5. **Not here:** `publishRevision` (needs the revision DAG store and
+   the impact report, DESIGN §3 — `base` is its hook) and blocks /
+   published nomenclatures (registries not yet wired).
+
+Platform P.9 Q15 (granular vs whole-tree mutations) is thereby
+answered for P0 by construction — granular — and stays open only as
+to whether a whole-tree `editRevision` is ever worth adding beside it.

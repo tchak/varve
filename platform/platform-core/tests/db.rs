@@ -12,18 +12,18 @@
 //! unique emails/token hashes and never asserts on global counts.
 
 use jiff::{SignedDuration, Timestamp};
-use platform_core::{ColumnPatch, DraftError, Placement, add_element, update_column};
+use platform_core::{ColumnPatch, Placement, RevisionDraftError, add_element, update_column};
 use platform_core::{
     CreateApiTokenError, CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS,
     RegisterError, add_organization_member, add_team_member, connect, create_api_token,
     create_organization, create_organization_for, create_procedure, create_session, create_team,
-    delete_account_sessions, delete_session, destroy_api_token, destroy_session, discard_draft,
-    draft_schema, edit_draft, find_live_api_token, find_live_session, find_organization_by_slug,
-    find_procedure, find_procedure_with_revision_draft, is_organization_member, list_account_organizations,
-    list_account_teams, list_live_api_tokens, list_live_sessions, list_organization_procedures,
-    list_organization_teams, new_column_id, register, remove_organization_member,
-    remove_team_member, sweep_expired, sweep_expired_api_tokens, update_profile,
-    verify_credentials,
+    delete_account_sessions, delete_session, destroy_api_token, destroy_session,
+    discard_revision_draft, edit_revision_draft, find_live_api_token, find_live_session,
+    find_organization_by_slug, find_procedure, find_procedure_with_revision_draft,
+    is_organization_member, list_account_organizations, list_account_teams, list_live_api_tokens,
+    list_live_sessions, list_organization_procedures, list_organization_teams, new_column_id,
+    register, remove_organization_member, remove_team_member, revision_draft_schema, sweep_expired,
+    sweep_expired_api_tokens, update_profile, verify_credentials,
 };
 use varve_schema::{Arity, Column, Element, ScalarType};
 
@@ -914,9 +914,9 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .expect("exists");
-    assert_eq!(draft_schema(&procedure).unwrap(), None);
+    assert_eq!(revision_draft_schema(&procedure).unwrap(), None);
     let id = new_column_id();
-    let stored = edit_draft(&mut db, &mut procedure, |schema| {
+    let stored = edit_revision_draft(&mut db, &mut procedure, |schema| {
         add_element(
             schema,
             &Placement::root(),
@@ -938,7 +938,10 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(draft_schema(&reloaded).unwrap(), Some(stored.clone()));
+    assert_eq!(
+        revision_draft_schema(&reloaded).unwrap(),
+        Some(stored.clone())
+    );
     assert!(
         find_procedure(&mut db, created.id)
             .await
@@ -947,7 +950,7 @@ async fn procedure_draft_round_trips_through_edits() {
             .revision_draft
             .is_unloaded()
     );
-    let stored = edit_draft(&mut db, &mut reloaded, |schema| {
+    let stored = edit_revision_draft(&mut db, &mut reloaded, |schema| {
         update_column(
             schema,
             &id,
@@ -965,34 +968,36 @@ async fn procedure_draft_round_trips_through_edits() {
     }
 
     // A rejected operation stores nothing.
-    let err = edit_draft(&mut db, &mut reloaded, |schema| {
+    let err = edit_revision_draft(&mut db, &mut reloaded, |schema| {
         update_column(schema, &new_column_id(), ColumnPatch::default())
     })
     .await
     .unwrap_err();
-    assert!(matches!(err, DraftError::Edit(_)));
+    assert!(matches!(err, RevisionDraftError::Edit(_)));
     let again = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(draft_schema(&again).unwrap(), Some(stored));
+    assert_eq!(revision_draft_schema(&again).unwrap(), Some(stored));
 
     // `procedure` is the stale copy from before the second edit:
     // optimistic concurrency refuses its save rather than overwriting.
-    let conflict = edit_draft(&mut db, &mut procedure, |_| Ok(()))
+    let conflict = edit_revision_draft(&mut db, &mut procedure, |_| Ok(()))
         .await
         .unwrap_err();
-    assert!(matches!(conflict, DraftError::Db(_)), "{conflict}");
+    assert!(matches!(conflict, RevisionDraftError::Db(_)), "{conflict}");
 
     let mut fresh = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
-    discard_draft(&mut db, &mut fresh).await.expect("discard");
-    assert_eq!(draft_schema(&fresh).unwrap(), None);
+    discard_revision_draft(&mut db, &mut fresh)
+        .await
+        .expect("discard");
+    assert_eq!(revision_draft_schema(&fresh).unwrap(), None);
     let after = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(draft_schema(&after).unwrap(), None);
+    assert_eq!(revision_draft_schema(&after).unwrap(), None);
 }

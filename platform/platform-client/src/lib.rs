@@ -24,6 +24,7 @@ use serde::de::DeserializeOwned;
 
 pub mod organization;
 pub mod procedure;
+pub mod revision_draft;
 pub mod team;
 pub mod viewer;
 
@@ -99,16 +100,23 @@ pub enum Code {
     Forbidden,
     /// `createOrganization`: the slug is already taken.
     SlugTaken,
+    /// A revision-draft edit refused by the draft or the kernel; the
+    /// message says why and the draft is unchanged.
+    InvalidEdit,
+    /// The draft changed since it was read: re-read and retry.
+    Conflict,
     /// The platform failed, not the request.
     Internal,
 }
 
 impl Code {
     /// Every code, for the server-side set-equality test.
-    pub const ALL: [Code; 4] = [
+    pub const ALL: [Code; 6] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
+        Code::InvalidEdit,
+        Code::Conflict,
         Code::Internal,
     ];
 
@@ -118,6 +126,8 @@ impl Code {
             Code::InvalidInput => "INVALID_INPUT",
             Code::Forbidden => "FORBIDDEN",
             Code::SlugTaken => "SLUG_TAKEN",
+            Code::InvalidEdit => "INVALID_EDIT",
+            Code::Conflict => "CONFLICT",
             Code::Internal => "INTERNAL",
         }
     }
