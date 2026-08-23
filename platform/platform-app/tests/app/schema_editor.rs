@@ -304,7 +304,7 @@ async fn the_editing_journey() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert_eq!(element_ids(&html), [nom.clone()]);
+    assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
     let to = act(
         &router,
         &cookie,
