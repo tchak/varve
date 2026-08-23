@@ -273,7 +273,10 @@ fails its save instead of overwriting.
 
 **Editing is by element** (`platform-core::schema_edit`): add, update
 (label / type / arity on a column, label / cardinality on a group),
-move, remove — each atomic over the schema and validated by the kernel
+move, remove — placement anchored on a sibling id (`before`, `None`
+= append), never an index, since an index is only meaningful against
+the tree the editor last saw — each atomic over the schema and
+validated by the kernel
 (`varve_schema::validate`, default depth policy) before it replaces
 the draft. Two kernel facts shape the API: ids are identity (minted
 once, opaque, never derived from labels — a type change must stay a

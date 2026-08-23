@@ -32,11 +32,23 @@ pub enum Parent {
     Group(GroupId),
 }
 
-/// A slot in a parent's children: `position: None` appends.
+/// Either kind of element, by id. Column and group ids are separate
+/// namespaces in the kernel (a column and a group may share a string).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElementId {
+    Column(ColumnId),
+    Group(GroupId),
+}
+
+/// A slot in a parent's children, anchored on a **sibling id** rather
+/// than an index: `before: Some(id)` inserts in front of that child,
+/// `before: None` appends. Ids survive concurrent edits the way
+/// positions do not — an index is only meaningful against the tree
+/// the editor last saw — and the two cases reach both ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placement {
     pub parent: Parent,
-    pub position: Option<usize>,
+    pub before: Option<ElementId>,
 }
 
 impl Placement {
@@ -44,7 +56,7 @@ impl Placement {
     pub fn root() -> Self {
         Self {
             parent: Parent::Root,
-            position: None,
+            before: None,
         }
     }
 
@@ -52,22 +64,15 @@ impl Placement {
     pub fn in_group(group: GroupId) -> Self {
         Self {
             parent: Parent::Group(group),
-            position: None,
+            before: None,
         }
     }
 
-    pub fn at(mut self, position: usize) -> Self {
-        self.position = Some(position);
+    /// Insert in front of `sibling` (which must be a child of the parent).
+    pub fn before(mut self, sibling: ElementId) -> Self {
+        self.before = Some(sibling);
         self
     }
-}
-
-/// Either kind of element, by id. Column and group ids are separate
-/// namespaces in the kernel (a column and a group may share a string).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ElementId {
-    Column(ColumnId),
-    Group(GroupId),
 }
 
 /// Fields of a column an edit may change; `None` leaves a field alone.
@@ -91,8 +96,10 @@ pub enum EditError {
     UnknownParent(GroupId),
     #[error("no such element: {0:?}")]
     UnknownElement(ElementId),
-    #[error("position {position} is past the end ({len} children)")]
-    PositionOutOfRange { position: usize, len: usize },
+    /// The `before` anchor is not a child of the placement's parent
+    /// (or, on a move, is the moved element itself).
+    #[error("{anchor:?} is not a child of {parent:?}")]
+    AnchorNotInParent { parent: Parent, anchor: ElementId },
     /// The edit produced a schema the kernel rejects (duplicate id,
     /// nesting beyond policy, …). The draft is unchanged.
     #[error("the edit leaves the schema invalid: {}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))]
@@ -162,8 +169,9 @@ pub fn update_group(schema: &mut Schema, id: &GroupId, patch: GroupPatch) -> Res
 
 /// Moves an element (a group moves with its subtree) to `placement`.
 /// Moving a group into itself or one of its descendants fails with
-/// [`EditError::UnknownParent`]: once the subtree is lifted out, that
-/// parent no longer exists.
+/// [`EditError::UnknownParent`], and anchoring an element before
+/// itself with [`EditError::AnchorNotInParent`]: once the subtree is
+/// lifted out, neither exists.
 pub fn move_element(
     schema: &mut Schema,
     id: &ElementId,
@@ -202,11 +210,15 @@ fn commit(
 
 fn insert(schema: &mut Schema, placement: &Placement, element: Element) -> Result<(), EditError> {
     let children = children_mut(schema, &placement.parent)?;
-    let len = children.len();
-    let position = placement.position.unwrap_or(len);
-    if position > len {
-        return Err(EditError::PositionOutOfRange { position, len });
-    }
+    let position = match &placement.before {
+        None => children.len(),
+        Some(anchor) => children.iter().position(|e| is(e, anchor)).ok_or_else(|| {
+            EditError::AnchorNotInParent {
+                parent: placement.parent.clone(),
+                anchor: anchor.clone(),
+            }
+        })?,
+    };
     children.insert(position, element);
     Ok(())
 }
@@ -239,12 +251,7 @@ fn children_mut<'a>(
 /// Index path from the root to the element with `id`.
 fn locate(elements: &[Element], id: &ElementId) -> Option<Vec<usize>> {
     for (i, element) in elements.iter().enumerate() {
-        let hit = match (element, id) {
-            (Element::Column(c), ElementId::Column(want)) => &c.id == want,
-            (Element::Group(g), ElementId::Group(want)) => &g.id == want,
-            _ => false,
-        };
-        if hit {
+        if is(element, id) {
             return Some(vec![i]);
         }
         if let Element::Group(Group { children, .. }) = element
@@ -255,6 +262,14 @@ fn locate(elements: &[Element], id: &ElementId) -> Option<Vec<usize>> {
         }
     }
     None
+}
+
+fn is(element: &Element, id: &ElementId) -> bool {
+    match (element, id) {
+        (Element::Column(c), ElementId::Column(want)) => &c.id == want,
+        (Element::Group(g), ElementId::Group(want)) => &g.id == want,
+        _ => false,
+    }
 }
 
 /// The children vector reached by following `path` through groups.
@@ -342,9 +357,9 @@ mod tests {
     }
 
     #[test]
-    fn add_at_root_and_in_group_at_positions() {
+    fn add_at_root_and_in_group_before_anchors() {
         let mut s = fixture();
-        add_element(&mut s, &Placement::root().at(0), column("z")).unwrap();
+        add_element(&mut s, &Placement::root().before(cid("a")), column("z")).unwrap();
         assert_eq!(ids(&s.root), ["z", "a", "g1", "d"]);
         add_element(
             &mut s,
@@ -355,15 +370,18 @@ mod tests {
         assert_eq!(ids(children_of(&s, "g1")), ["b", "g2", "y"]);
         add_element(
             &mut s,
-            &Placement::in_group(GroupId::new("g2")).at(0),
+            &Placement::in_group(GroupId::new("g2")).before(cid("c")),
             column("x"),
         )
         .unwrap();
         assert_eq!(ids(children_of(&s, "g2")), ["x", "c"]);
+        // Anchoring before a group works the same as before a column.
+        add_element(&mut s, &Placement::root().before(gid("g1")), column("w")).unwrap();
+        assert_eq!(ids(&s.root), ["z", "a", "w", "g1", "d"]);
     }
 
     #[test]
-    fn add_rejects_bad_parent_position_and_duplicate_id() {
+    fn add_rejects_bad_parent_anchor_and_duplicate_id() {
         let mut s = fixture();
         let before = s.clone();
         assert_eq!(
@@ -374,11 +392,12 @@ mod tests {
             ),
             Err(EditError::UnknownParent(GroupId::new("nope")))
         );
+        // `c` exists, but not as a child of the root.
         assert_eq!(
-            add_element(&mut s, &Placement::root().at(4), column("z")),
-            Err(EditError::PositionOutOfRange {
-                position: 4,
-                len: 3
+            add_element(&mut s, &Placement::root().before(cid("c")), column("z")),
+            Err(EditError::AnchorNotInParent {
+                parent: Parent::Root,
+                anchor: cid("c")
             })
         );
         assert!(matches!(
@@ -438,15 +457,25 @@ mod tests {
     #[test]
     fn move_across_levels_and_reorder() {
         let mut s = fixture();
-        move_element(&mut s, &cid("c"), &Placement::root().at(0)).unwrap();
+        move_element(&mut s, &cid("c"), &Placement::root().before(cid("a"))).unwrap();
         assert_eq!(ids(&s.root), ["c", "a", "g1", "d"]);
         assert!(children_of(&s, "g2").is_empty());
         move_element(&mut s, &gid("g2"), &Placement::root()).unwrap();
         assert_eq!(ids(&s.root), ["c", "a", "g1", "d", "g2"]);
         assert_eq!(ids(children_of(&s, "g1")), ["b"]);
-        // Reorder within the same parent: positions are taken after removal.
-        move_element(&mut s, &cid("d"), &Placement::root().at(0)).unwrap();
+        // Reorder within the same parent, in both directions.
+        move_element(&mut s, &cid("d"), &Placement::root().before(cid("c"))).unwrap();
         assert_eq!(ids(&s.root), ["d", "c", "a", "g1", "g2"]);
+        move_element(&mut s, &cid("d"), &Placement::root().before(gid("g2"))).unwrap();
+        assert_eq!(ids(&s.root), ["c", "a", "g1", "d", "g2"]);
+        // An element cannot anchor before itself.
+        assert_eq!(
+            move_element(&mut s, &cid("d"), &Placement::root().before(cid("d"))),
+            Err(EditError::AnchorNotInParent {
+                parent: Parent::Root,
+                anchor: cid("d")
+            })
+        );
     }
 
     #[test]
