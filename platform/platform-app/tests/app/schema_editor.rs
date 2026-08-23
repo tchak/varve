@@ -269,7 +269,7 @@ async fn the_editing_journey() {
     assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
     assert!(html.contains("aria-current=\"true\""), "{html}");
     assert!(html.contains("Column: Nom"), "{html}");
-    assert!(html.contains("1 columns, 0 groups"), "{html}");
+    assert!(html.contains("1 column, 0 groups"), "{html}");
     assert!(html.contains("Discard the draft"), "{html}");
     assert!(
         html.contains(&format!("data-element-form=\"{nom}\"")),
@@ -352,7 +352,7 @@ async fn the_editing_journey() {
         element_ids(&html),
         [nom.clone(), adresse.clone(), ville.clone(), rue.clone()]
     );
-    assert!(html.contains("3 columns, 1 groups"), "{html}");
+    assert!(html.contains("3 columns, 1 group"), "{html}");
 
     // Move down, up, into the group, back to the top level.
     let relocate = |id: &str| format!("{editor}/elements/{id}/relocate");
@@ -609,4 +609,6 @@ async fn the_editor_speaks_french() {
     assert!(html.contains("Colonne\u{a0}: Nom"), "{html}");
     assert!(html.contains("Actions pour Nom"), "{html}");
     assert!(html.contains("Abandonner le brouillon"), "{html}");
+    // CLDR plural rules, not `(s)`: French "one" covers 0 and 1.
+    assert!(html.contains("1 colonne, 0 groupe \u{2014}"), "{html}");
 }

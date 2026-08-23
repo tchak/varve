@@ -304,7 +304,10 @@ the panels never move when a notice comes or goes; notices name what
 they acted on ("Added the column “Nom”.") and use the platform's own
 `notice` component — a soft green or red tint, the one colour outside
 the theme tokens (Tailwind emerald/rose with dark values; recorded
-here as the a11y contract asks). **No
+here as the a11y contract asks); a confirmation fades out a few
+seconds after render (pure CSS in `app.css`, `motion-safe:` only, the
+live-region announcement unaffected), a refusal stays. Counts in the
+header are CLDR-plural messages (CLAUDE.md, *UI strings*). **No
 drag and drop**: moving is *up*, *down*, and *move to* (a group or
 the top level) — named actions a keyboard and a screen reader reach,
 and exactly what the API's sibling-anchored placement expresses;

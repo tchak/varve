@@ -90,6 +90,23 @@ journeys (focus order, Escape, focus return) and the axe-core rule
 engine. A violation inside a vendored registry component is an
 upstream fix, not a local patch.
 
+## UI strings: MessageFormat 2, not string assembly
+
+Every user-facing string of the platform app lives in
+`platform/platform-app/src/strings.rs` as `(id, MF2 source)` pairs,
+English and French (the container format is provisional, P.3), read
+through `i18n::t(cx, id)` / `t_args(cx, id, &args)`. Write the
+*message*, never assemble it from fragments in Rust: counts use CLDR
+plural categories (`.input {$n :integer}` + `.match $n` with `one`
+/ `*` variants — several selectors at once are supported, `.match $a
+$b` with `one one`, `one *`, …; French `one` covers 0 and 1), dates
+use `{$date :date style=long}` (CLDR-formatted per locale; pass
+`utc_date_arg`), and names ride as arguments (`{$label}`) so word
+order stays the translator's. French keeps U+00A0 before `:` `;` `?`
+`!` and inside « », written as `\u{a0}` so it stays visible. Both
+tables must carry the same ids (a test checks); a message that only
+differs by a number is one id with a `.match`, not two ids.
+
 ## Module paths: `crate::`, not `super` chains
 
 `super` is allowed only one level deep, and only in `use` statements,

@@ -1,0 +1,15 @@
+/* The Tailwind input: the vendored theme (pinned by
+   tests/registry_sync.rs, never edited) plus the app's own additions.
+
+   `varve-notice-fade` — a confirmation notice fades out after it has
+   been read (applied under `motion-safe:` only, so reduced-motion users
+   keep it; its live-region announcement happened at render and is
+   unaffected). Refusals never fade. */
+@import "./styles.css";
+
+@keyframes varve-notice-fade {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}

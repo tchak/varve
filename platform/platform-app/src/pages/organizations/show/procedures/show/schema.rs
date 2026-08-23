@@ -732,8 +732,17 @@ async fn editor_page(
                                 NoticeKind::Status => "status",
                                 NoticeKind::Alert => "alert",
                             })
-                            data-schema-notice=""
+                            class=(match notice.kind {
+                                NoticeKind::Status => {
+                                    "motion-safe:animate-[varve-notice-fade_0.8s_ease-in_6s_forwards]"
+                                }
+                                NoticeKind::Alert => "",
+                            })
+                            data-schema-notice="" // A confirmation fades once read (app.css);
+                            // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }

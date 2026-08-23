@@ -118,7 +118,13 @@ pub const EN: &[(&str, &str)] = &[
     ),
     (
         "procedure.draft.summary",
-        "{$columns} columns and {$groups} groups, saved {$date :date style=long}.",
+        ".input {$columns :integer}\n\
+         .input {$groups :integer}\n\
+         .match $columns $groups\n\
+         one one {{{$columns} column and {$groups} group, saved {$date :date style=long}.}}\n\
+         one * {{{$columns} column and {$groups} groups, saved {$date :date style=long}.}}\n\
+         * one {{{$columns} columns and {$groups} group, saved {$date :date style=long}.}}\n\
+         * * {{{$columns} columns and {$groups} groups, saved {$date :date style=long}.}}",
     ),
     ("procedure.draft.edit", "Edit the schema"),
     ("schema.title", "Schema of {$procedure}"),
@@ -129,7 +135,13 @@ pub const EN: &[(&str, &str)] = &[
     ),
     (
         "schema.state.draft",
-        "{$columns} columns, {$groups} groups \u{2014} saved {$date :date style=long}.",
+        ".input {$columns :integer}\n\
+         .input {$groups :integer}\n\
+         .match $columns $groups\n\
+         one one {{{$columns} column, {$groups} group \u{2014} saved {$date :date style=long}.}}\n\
+         one * {{{$columns} column, {$groups} groups \u{2014} saved {$date :date style=long}.}}\n\
+         * one {{{$columns} columns, {$groups} group \u{2014} saved {$date :date style=long}.}}\n\
+         * * {{{$columns} columns, {$groups} groups \u{2014} saved {$date :date style=long}.}}",
     ),
     ("schema.discard", "Discard the draft"),
     (
@@ -409,7 +421,13 @@ pub const FR: &[(&str, &str)] = &[
     ),
     (
         "procedure.draft.summary",
-        "{$columns} colonnes et {$groups} groupes, enregistré le {$date :date style=long}.",
+        ".input {$columns :integer}\n\
+         .input {$groups :integer}\n\
+         .match $columns $groups\n\
+         one one {{{$columns} colonne et {$groups} groupe, enregistré le {$date :date style=long}.}}\n\
+         one * {{{$columns} colonne et {$groups} groupes, enregistré le {$date :date style=long}.}}\n\
+         * one {{{$columns} colonnes et {$groups} groupe, enregistré le {$date :date style=long}.}}\n\
+         * * {{{$columns} colonnes et {$groups} groupes, enregistré le {$date :date style=long}.}}",
     ),
     ("procedure.draft.edit", "Modifier le schéma"),
     ("schema.title", "Schéma de {$procedure}"),
@@ -420,7 +438,13 @@ pub const FR: &[(&str, &str)] = &[
     ),
     (
         "schema.state.draft",
-        "{$columns} colonnes, {$groups} groupes \u{2014} enregistré le {$date :date style=long}.",
+        ".input {$columns :integer}\n\
+         .input {$groups :integer}\n\
+         .match $columns $groups\n\
+         one one {{{$columns} colonne, {$groups} groupe \u{2014} enregistré le {$date :date style=long}.}}\n\
+         one * {{{$columns} colonne, {$groups} groupes \u{2014} enregistré le {$date :date style=long}.}}\n\
+         * one {{{$columns} colonnes, {$groups} groupe \u{2014} enregistré le {$date :date style=long}.}}\n\
+         * * {{{$columns} colonnes, {$groups} groupes \u{2014} enregistré le {$date :date style=long}.}}",
     ),
     ("schema.discard", "Abandonner le brouillon"),
     (
