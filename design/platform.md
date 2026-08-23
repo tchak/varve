@@ -289,6 +289,63 @@ version carries the schema only; the **surface draft joins the same
 administrator edits one form, and publishes schema and surface
 together. Open: P.9 Q15.
 
+**Surfaces on the draft (settled 2026-08-23).** Publication emits
+**two kernel surfaces** over the same revision — the applicant form
+and the reviewer screen. The published pair is forced by the kernel,
+not chosen: entry visibility filters the log by a surface's *static
+column set* (DESIGN §2.9), checkpoints freeze the writable set of
+the surface they are taken through, and instruction locks the
+applicant surface's writable set (per Q12) — so a reviewer-only
+column must be genuinely *absent* from the applicant surface, not
+flagged hidden, or the applicant's redacted log would leak
+instructor writes. The draft, however, holds **one authored surface
+tree**: the reviewer-ordered superset, each element (column or
+group) carrying a **`private` marker** — DN's annotations privées —
+and publication deterministically compiles the pair from it:
+reviewer = the full tree, applicant = the tree with private subtrees
+pruned, plus the write-policy differences. One tree, not two
+maintained drafts, because every structural edit lands once — two
+hand-kept trees drift, and the characteristic drift failure is a
+private column left on the applicant tree, a privacy breach authored
+by tooling, which pruning makes unrepresentable — and because
+interleaving falls out: DN's trailing "annotations privées" section
+was an artifact of keeping two lists, while here a private element
+sits wherever the administrator put it, the deliberate improvement
+over DN. The marker is one more per-element property in the editor's
+element-operation shape. The reviewer view badges private elements
+from the marker, which survives on the published version — the
+compiled surfaces cannot disagree with it, so no surface diffing;
+even from the surfaces alone the badge would be a membership check
+against the applicant surface's static column set, the set entry
+filtering already uses. The kernel stays out of it: no `private` on
+kernel surface nodes — privacy is a relation between *paired*
+surfaces, and the kernel has neither surface pairing nor actors
+(DESIGN §2.9). Structural constraints, checked at edit and publish
+time: a private node's whole subtree is private (a public child
+under a private parent would be an orphan on the applicant surface —
+refused); a private column inside a public `many` group is legal — a
+per-item reviewer note, expressible where DN was not. The marker is
+a bool for now — the corpus shows exactly DN's public/private pair;
+a third interleaved audience would grow it into an enum on the same
+tree, and genuinely independent surfaces (export layouts, print
+templates) remain their own authored artifacts, never compiled from
+this one.
+
+**Conditions across the privacy boundary (settled with the above).**
+The authoring surfaces adopt DN's upstream-only rule, which DESIGN
+§4.1 anticipates ("surfaces may impose the stronger upstream-only
+authoring rule"): a rule's source columns must sit *above* the
+conditioned element in document order. The privacy direction
+composes with it into one statement: **sources must be upper in the
+tree and at least as public as the conditioned element.** A private
+element conditioned on public columns is the common DN case and
+stays legal; a public element conditioned on a private column is
+forbidden at edit and publication time — it would leak private data
+through visibility flicker on the applicant form and make applicant
+admissibility depend on columns the applicant cannot see. The kernel
+keeps only acyclicity (DESIGN §4.1); both halves of this rule are
+platform authoring/publication constraints.
+
 **The schema editor (settled 2026-08-23).** `platform-app`'s
 `/organizations/{id}/procedures/{pid}/schema`, over the G.7 client
 operations — the app is integrator #1 (P.1). Shape: **master–detail
