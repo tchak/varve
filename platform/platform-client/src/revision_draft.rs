@@ -27,8 +27,19 @@ pub struct ProcedureRevisionDraftQuery {
 pub struct ProcedureRevisionDraft {
     pub id: cynic::Id,
     pub title: String,
+    pub description: String,
+    pub updated_at: jiff::Timestamp,
+    pub organization: DraftOrganization,
     /// `None` when no draft is in progress.
     pub revision_draft: Option<RevisionDraft>,
+}
+
+/// The owning organization, as the editor names it.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "OrganizationRef")]
+pub struct DraftOrganization {
+    pub id: cynic::Id,
+    pub name: String,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]

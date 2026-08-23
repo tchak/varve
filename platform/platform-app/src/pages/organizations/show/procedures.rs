@@ -4,6 +4,8 @@
 //! and a free-text description. The one-404 rule holds on GET and
 //! POST alike (the teams module docs).
 
+pub(super) mod show;
+
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::procedure::{
     CreateProcedure, CreateProcedureInput, CreateProcedureVariables, OrganizationProcedures,
@@ -115,7 +117,16 @@ async fn procedures_page(
                                     data-procedure-id=(procedure.id.inner())
                                     class="text-sm font-medium"
                                 >
-                                    (procedure.title.as_str())
+                                    <a
+                                        href=(href!(
+                                            show::page,
+                                            OrganizationId(organization_id),
+                                            show::ProcedureId(procedure.id.inner().parse()?)
+                                        ))
+                                        class="underline-offset-4 hover:underline"
+                                    >
+                                        (procedure.title.as_str())
+                                    </a>
                                 </li>
                             }
                         </ul>

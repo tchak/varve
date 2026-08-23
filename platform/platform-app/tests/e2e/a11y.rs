@@ -279,6 +279,97 @@ async fn axe_scenario(
         .to_be_visible()
         .await?;
     check_axe(&page, "/organizations/{id}/procedures (populated)").await?;
+
+    // The procedure page, then the schema editor in the states an
+    // administrator meets: empty, with a column added and selected
+    // (the detail form), a refused edit (a blank label saved through
+    // the form — whitespace, the field is `required`), and the
+    // discard confirmation.
+    page.locator(locator!("li[data-procedure-id] a"))
+        .click(None)
+        .await?;
+    expect(
+        page.get_by_role(
+            AriaRole::Link,
+            Some(
+                GetByRoleOptions::default()
+                    .name("Edit the schema")
+                    .exact(true),
+            ),
+        ),
+    )
+    .to_be_visible()
+    .await?;
+    check_axe(&page, "/organizations/{id}/procedures/{pid}").await?;
+    page.get_by_role(
+        AriaRole::Link,
+        Some(
+            GetByRoleOptions::default()
+                .name("Edit the schema")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("#add-label")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/procedures/{pid}/schema (empty)").await?;
+    page.locator(locator!("#add-label"))
+        .fill("Nom", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Add").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("li[data-element-id] a[aria-current='true']")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema (column selected)",
+    )
+    .await?;
+    let editor_url = page.url();
+    page.locator(locator!("#element-label"))
+        .fill("   ", None)
+        .await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(GetByRoleOptions::default().name("Save").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("[role='alert']")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema (refused edit)",
+    )
+    .await?;
+    page.goto(&editor_url, None).await?;
+    page.get_by_role(
+        AriaRole::Link,
+        Some(
+            GetByRoleOptions::default()
+                .name("Discard the draft")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("[role='alertdialog']")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema (discard confirmation)",
+    )
+    .await?;
+
     page.goto(&app.url("/organizations"), None).await?;
     check_axe(&page, "/organizations (populated)").await?;
     Ok(())

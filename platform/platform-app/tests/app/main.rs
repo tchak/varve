@@ -35,6 +35,7 @@ mod harness;
 mod i18n;
 mod organizations;
 mod procedures;
+mod schema_editor;
 mod settings;
 mod shell;
 mod teams;

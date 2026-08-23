@@ -289,6 +289,40 @@ version carries the schema only; the **surface draft joins the same
 administrator edits one form, and publishes schema and surface
 together. Open: P.9 Q15.
 
+**The schema editor (settled 2026-08-23).** `platform-app`'s
+`/organizations/{id}/procedures/{pid}/schema`, over the G.7 client
+operations — the app is integrator #1 (P.1). Shape: **master–detail
+with the state in the URL** (`?selected=<id>` picks the element whose
+form the detail panel shows, `aria-current` on its row; deep-linkable,
+readable, no client-side selection state), the structure as nested
+lists with a row per element (label, type and multiplicity badges, an
+actions menu), the draft's state in the header (badge, counts, last
+save), and a one-shot notice after every action (`role=status` /
+`role=alert`, the server's reason verbatim on a refused edit). **No
+drag and drop**: moving is *up*, *down*, and *move to* (a group or
+the top level) — named actions a keyboard and a screen reader reach,
+and exactly what the API's sibling-anchored placement expresses;
+*up/down* are computed server-side from document order. **Every
+action is a form** (post → 303 → get), so the editor is complete with
+no script and the router-level tests prove all of it; the topcoat
+runtime is layered on top: the detail form **autosaves on change**
+through a `#[procedure]` (the same field application the form POST
+uses), reports through a `role=status` line, and bumps a signal that
+re-renders the structure panel, a `#[shard]`; kind-dependent
+fieldsets hide when the kind cannot use them. Procedure and shard
+authorize themselves through the client — they are public endpoints.
+Enum options keep an explicit *Save* (rows interplay). One runtime
+constraint shaped the code and is recorded for the next interactive
+page: a runtime closure can reach **signals declared in its own
+`view!` and the event only** — captured locals are bound inside the
+expression's block and do not outlive it (topcoat 0.6.2) — so the
+handlers, the `revision` signal, and the shard call share one
+`view!`, and the ids and texts a handler needs travel as signals.
+The editor's inputs and selects that carry handlers are plain
+elements styled like the vendored components for the same reason.
+Out of scope, deliberately: publishing, surface properties, blocks
+and published nomenclatures, undo.
+
 ## P.5 GraphQL schema
 
 **Moved to `design/graphql.md` (2026-08-22).** The schema design grew

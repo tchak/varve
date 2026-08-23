@@ -99,6 +99,15 @@ async fn redirect_to(cx: &Cx, location: String) -> Result {
     }
 }
 
+/// Several message arguments at once.
+fn args<const N: usize>(pairs: [(&str, ArgValue); N]) -> Args {
+    let mut args = Args::new();
+    for (name, value) in pairs {
+        args.insert(name.to_owned(), value);
+    }
+    args
+}
+
 /// One `{$email}` / `{$name}`-style argument map.
 fn one_arg(name: &str, value: impl Into<ArgValue>) -> Args {
     let mut args = Args::new();
@@ -132,6 +141,16 @@ fn stylesheet_href(cx: &Cx) -> Option<String> {
     try_app_context::<AssetConfig>(cx)
         .filter(|config| config.get(stylesheet).is_some())
         .map(|config| config.resolve(stylesheet))
+}
+
+/// Whether the runtime's browser script can be linked: it is an asset
+/// like the stylesheet, so the same bundle rule applies (absent in
+/// router-level tests, where pages render without it — every
+/// interactive page must also work without the script).
+fn runtime_script_available(cx: &Cx) -> bool {
+    try_app_context::<AssetConfig>(cx)
+        .map(|config| config.get(topcoat::runtime::SCRIPT).is_some())
+        .unwrap_or(false)
 }
 
 /// The classes giving the account menu's settings *link* the same row
@@ -190,6 +209,9 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                 <title>(title.as_str())</title>
                 if let Some(stylesheet) = stylesheet_href(cx) {
                     <link rel="stylesheet" href=(stylesheet)>
+                }
+                if runtime_script_available(cx) {
+                    topcoat::runtime::script()
                 }
             </head>
             <body class="flex min-h-screen flex-col bg-background text-foreground">
