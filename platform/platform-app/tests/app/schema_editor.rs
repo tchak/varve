@@ -260,7 +260,7 @@ async fn the_editing_journey() {
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Column added."), "{html}");
     assert!(html.contains("role=\"status\""), "{html}");
-    assert_eq!(element_ids(&html), [nom.clone()]);
+    assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
     assert!(html.contains("aria-current=\"true\""), "{html}");
     assert!(html.contains("Column: Nom"), "{html}");
     assert!(html.contains("1 columns, 0 groups"), "{html}");
@@ -269,6 +269,14 @@ async fn the_editing_journey() {
         html.contains(&format!("data-element-form=\"{nom}\"")),
         "{html}"
     );
+    // With a row selected the add form is gone from the detail panel;
+    // the structure heading's "Add an element" leads back to it.
+    assert!(!html.contains("id=\"add-label\""), "{html}");
+    assert!(html.contains(&format!("href=\"{editor}\"")), "{html}");
+    assert!(html.contains("data-schema-add"), "{html}");
+    let html = page(&router, &cookie, &editor).await;
+    assert!(html.contains("id=\"add-label\""), "{html}");
+    assert!(!html.contains("data-schema-add"), "{html}");
 
     // A group, then columns inside it: appended, then before an anchor.
     let to = act(
@@ -465,7 +473,7 @@ async fn the_editing_journey() {
     let to = act(&router, &cookie, &remove(&adresse), &[]).await;
     assert!(!to.to.contains("selected="), "{}", to.to);
     let html = landed(&router, &cookie, &to).await;
-    assert_eq!(element_ids(&html), [nom.clone()]);
+    assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
 
     // Discard: a confirmation state first, then the draft is gone.
     let html = page(&router, &cookie, &format!("{editor}?discard=confirm")).await;

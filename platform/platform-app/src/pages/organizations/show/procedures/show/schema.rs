@@ -457,6 +457,7 @@ async fn editor_page(
     let discard_confirm = t(cx, "schema.discard.confirm").await?;
     let discard_keep = t(cx, "schema.discard.keep").await?;
     let structure_heading = t(cx, "schema.structure.title").await?;
+    let add_element_label = t(cx, "schema.add.title").await?;
     let selected_element = selected
         .as_deref()
         .and_then(|id| elements.iter().find(|e| id_of(e) == id).cloned());
@@ -644,12 +645,26 @@ async fn editor_page(
             }
             <div class="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 <section aria-labelledby="schema-structure-heading" class="min-w-0">
-                    <h2
-                        id="schema-structure-heading"
-                        class="mb-3 text-sm font-semibold"
-                    >
-                        (structure_heading)
-                    </h2>
+                    <div class="mb-3 flex items-center justify-between gap-3">
+                        <h2 id="schema-structure-heading" class="text-sm font-semibold">
+                            (structure_heading)
+                        </h2>
+                        // The add form lives in the detail panel's unselected
+                        // state; this is the way back to it once a row is
+                        // selected.
+                        if selected_id.is_some() {
+                            <a
+                                href=(page_href())
+                                class=(button_variants(
+                                    ButtonVariant::Outline,
+                                    ButtonSize::Sm,
+                                ))
+                                data-schema-add=""
+                            >
+                                (add_element_label.as_str())
+                            </a>
+                        }
+                    </div>
                     structure(
                         procedure_id: $(pid.get()),
                         selected: $(eid.get()),
