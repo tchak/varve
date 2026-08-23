@@ -419,21 +419,21 @@ storage_ty = { Timestamp = 6 }
 
 [[schema.tables.columns]]
 id = { table = 7, index = 6 }
-name = "draft"
+name = "revision_draft"
 ty = "Bool"
 storage_ty = "Boolean"
 nullable = true
 
 [[schema.tables.columns]]
 id = { table = 7, index = 7 }
-name = "draft_schema"
+name = "revision_draft_schema"
 ty = "Bytes"
 storage_ty = "Blob"
 nullable = true
 
 [[schema.tables.columns]]
 id = { table = 7, index = 8 }
-name = "draft_base"
+name = "revision_draft_base"
 ty = "String"
 storage_ty = "Text"
 nullable = true

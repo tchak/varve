@@ -19,7 +19,7 @@ use platform_core::{
     create_organization, create_organization_for, create_procedure, create_session, create_team,
     delete_account_sessions, delete_session, destroy_api_token, destroy_session, discard_draft,
     draft_schema, edit_draft, find_live_api_token, find_live_session, find_organization_by_slug,
-    find_procedure, find_procedure_with_draft, is_organization_member, list_account_organizations,
+    find_procedure, find_procedure_with_revision_draft, is_organization_member, list_account_organizations,
     list_account_teams, list_live_api_tokens, list_live_sessions, list_organization_procedures,
     list_organization_teams, new_column_id, register, remove_organization_member,
     remove_team_member, sweep_expired, sweep_expired_api_tokens, update_profile,
@@ -910,7 +910,7 @@ async fn procedure_draft_round_trips_through_edits() {
 
     // A fresh procedure has no draft; the first edit starts one from
     // the empty schema.
-    let mut procedure = find_procedure_with_draft(&mut db, created.id)
+    let mut procedure = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .expect("exists");
@@ -934,7 +934,7 @@ async fn procedure_draft_round_trips_through_edits() {
 
     // The stored bytes decode to the same value on a fresh load, and
     // the next edit builds on them; the catalog lookup never loads it.
-    let mut reloaded = find_procedure_with_draft(&mut db, created.id)
+    let mut reloaded = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
@@ -944,7 +944,7 @@ async fn procedure_draft_round_trips_through_edits() {
             .await
             .unwrap()
             .unwrap()
-            .draft
+            .revision_draft
             .is_unloaded()
     );
     let stored = edit_draft(&mut db, &mut reloaded, |schema| {
@@ -971,7 +971,7 @@ async fn procedure_draft_round_trips_through_edits() {
     .await
     .unwrap_err();
     assert!(matches!(err, DraftError::Edit(_)));
-    let again = find_procedure_with_draft(&mut db, created.id)
+    let again = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
@@ -984,13 +984,13 @@ async fn procedure_draft_round_trips_through_edits() {
         .unwrap_err();
     assert!(matches!(conflict, DraftError::Db(_)), "{conflict}");
 
-    let mut fresh = find_procedure_with_draft(&mut db, created.id)
+    let mut fresh = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
     discard_draft(&mut db, &mut fresh).await.expect("discard");
     assert_eq!(draft_schema(&fresh).unwrap(), None);
-    let after = find_procedure_with_draft(&mut db, created.id)
+    let after = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();

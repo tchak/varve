@@ -57,8 +57,8 @@ pub use organization::{
 };
 pub use principal::Principal;
 pub use procedure::{
-    DraftError, Procedure, ProcedureDraft, SchemaBytes, create_procedure, discard_draft,
-    draft_schema, edit_draft, find_procedure, find_procedure_with_draft, list_account_procedures,
+    DraftError, Procedure, RevisionDraft, SchemaBytes, create_procedure, discard_draft,
+    draft_schema, edit_draft, find_procedure, find_procedure_with_revision_draft, list_account_procedures,
     list_organization_procedures,
 };
 pub use schema_edit::{

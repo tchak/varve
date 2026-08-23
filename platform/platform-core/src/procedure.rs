@@ -1,5 +1,5 @@
 //! The procedure catalog row (P.4): title, description, owning
-//! organization — and the **procedure draft**, the schema being
+//! organization — and the **revision draft**, the schema being
 //! edited before it is published (P.4, *Procedure drafts*). The
 //! revision DAG, surfaces, rules, and the open/closed lifecycle still
 //! arrive with the kernel edge (`varve-service`); until then the
@@ -9,7 +9,7 @@
 //! of the catalog `SELECT`: its schema travels as the kernel's own
 //! wire-canonical bytes ([`varve_wire::schema_bytes`]), so what is
 //! stored is exactly the value that will be published — no platform
-//! mirror of the schema type. Edits go through [`edit_draft`], which
+//! mirror of the schema type. Edits go through [`edit_revision_draft`], which
 //! composes the pure operations of [`crate::schema_edit`] with a load
 //! and a version-checked store.
 
@@ -52,8 +52,8 @@ pub struct Procedure {
     pub updated_at: jiff::Timestamp,
 
     /// The unpublished schema being edited; `None` when nothing is in
-    /// progress. Deferred: loaded only by [`find_procedure_with_draft`].
-    pub draft: Deferred<Option<ProcedureDraft>>,
+    /// progress. Deferred: loaded only by [`find_procedure_with_revision_draft`].
+    pub revision_draft: Deferred<Option<RevisionDraft>>,
 
     /// Optimistic concurrency (toasty-managed): two editors saving the
     /// draft from the same loaded row cannot silently overwrite each
@@ -63,10 +63,12 @@ pub struct Procedure {
     pub version: u64,
 }
 
-/// The draft of a procedure's next revision. Holds the schema today;
-/// the surface draft joins it when the editor grows a surface side.
+/// The draft of a procedure's next **revision** — named for what it
+/// publishes as, since "draft" alone will also be a case-file state.
+/// Holds the schema today; the surface draft joins it when the editor
+/// grows a surface side, and both publish together as one revision.
 #[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
-pub struct ProcedureDraft {
+pub struct RevisionDraft {
     /// The schema under edit, wire-canonical.
     pub schema: SchemaBytes,
 
@@ -134,25 +136,25 @@ pub async fn find_procedure(
 }
 
 /// Looks a procedure up by id with its draft loaded.
-pub async fn find_procedure_with_draft(
+pub async fn find_procedure_with_revision_draft(
     db: &mut toasty::Db,
     id: uuid::Uuid,
 ) -> toasty::Result<Option<Procedure>> {
     Procedure::filter_by_id(id)
-        .include(Procedure::fields().draft())
+        .include(Procedure::fields().revision_draft())
         .first()
         .exec(db)
         .await
 }
 
 /// The draft schema of a procedure loaded by
-/// [`find_procedure_with_draft`]: `None` when no draft is in progress.
+/// [`find_procedure_with_revision_draft`]: `None` when no draft is in progress.
 ///
 /// # Panics
 ///
 /// If the draft was not loaded (the catalog lookups defer it).
 pub fn draft_schema(procedure: &Procedure) -> Result<Option<Schema>, DraftError> {
-    Ok(match procedure.draft.get() {
+    Ok(match procedure.revision_draft.get() {
         Some(draft) => Some(draft.schema.decode()?),
         None => None,
     })
@@ -161,7 +163,7 @@ pub fn draft_schema(procedure: &Procedure) -> Result<Option<Schema>, DraftError>
 /// Applies `edit` to the procedure's draft schema and stores the
 /// result, returning the schema as stored. With no draft in progress
 /// the edit starts one from the empty schema. The procedure must come
-/// from [`find_procedure_with_draft`]; on success it is updated in
+/// from [`find_procedure_with_revision_draft`]; on success it is updated in
 /// place (draft, `version`, `updated_at`).
 ///
 /// Atomic: `edit` errors (a rejected operation) store nothing, and a
@@ -172,14 +174,14 @@ pub async fn edit_draft(
     procedure: &mut Procedure,
     edit: impl FnOnce(&mut Schema) -> Result<(), EditError>,
 ) -> Result<Schema, DraftError> {
-    let (mut schema, base) = match procedure.draft.get() {
+    let (mut schema, base) = match procedure.revision_draft.get() {
         Some(draft) => (draft.schema.decode()?, draft.base.clone()),
         None => (Schema::default(), None),
     };
     edit(&mut schema)?;
     procedure
         .update()
-        .draft(Some(ProcedureDraft {
+        .revision_draft(Some(RevisionDraft {
             schema: SchemaBytes::encode(&schema),
             base,
         }))
@@ -189,9 +191,9 @@ pub async fn edit_draft(
 }
 
 /// Drops the procedure's draft, if any. Same loading and concurrency
-/// contract as [`edit_draft`].
+/// contract as [`edit_revision_draft`].
 pub async fn discard_draft(db: &mut toasty::Db, procedure: &mut Procedure) -> toasty::Result<()> {
-    procedure.update().draft(None).exec(db).await
+    procedure.update().revision_draft(None).exec(db).await
 }
 
 /// The procedures `account_id` administers — those owned by any

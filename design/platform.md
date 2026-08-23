@@ -255,9 +255,10 @@ that value once published and content-addressed (DESIGN §2.1), and
 `RevisionStore` holds publication events and objects only — an
 unpublished, constantly changing schema has no place in the
 hash-chained, erasure-bound kernel store and should not get one. The
-draft is therefore **platform state**: `ProcedureDraft`, a nullable
-embedded object on the catalog row (`platform-core::procedure`),
-holding the schema as the kernel's own **wire-canonical bytes**
+draft is therefore **platform state**: `RevisionDraft` (named for
+what it publishes as — "draft" alone will also be a case-file state),
+a nullable embedded object on the catalog row
+(`platform-core::procedure`), holding the schema as the kernel's own **wire-canonical bytes**
 (`varve_wire::schema_bytes`, the body of a `revision` line, DESIGN §5)
 plus `base`, the id of the published revision it forks from (the
 publication's parent; `None` until the revision DAG lands). Rationale

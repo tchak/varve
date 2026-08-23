@@ -31,6 +31,6 @@ name = "0005_foreign_keys.sql"
 snapshot_name = "0005_snapshot.toml"
 
 [[migrations]]
-id = 3543631723668382344
-name = "0006_procedure_draft.sql"
+id = 59429660814426073
+name = "0006_revision_draft.sql"
 snapshot_name = "0006_snapshot.toml"
