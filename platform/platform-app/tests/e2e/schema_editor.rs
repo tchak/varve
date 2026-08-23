@@ -104,7 +104,7 @@ async fn editor_with_columns(
         .click(None)
         .await?;
         expect(page.locator(locator!("li[data-element-id] a[aria-current='true']")))
-            .to_have_text(*label)
+            .to_have_text(label)
             .await?;
     }
     Ok(editor)
