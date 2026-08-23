@@ -161,7 +161,7 @@ async fn keyboard_scenario(
     .await?;
     keyboard.press("Enter", None).await?;
     expect(page.locator(locator!("[data-schema-notice]")))
-        .to_have_text("Moved.")
+        .to_have_text("Moved \u{201c}Nom\u{201d}.")
         .await?;
     assert_eq!(row_labels(&page).await?, ["Prénom", "Nom"]);
     Ok(())
@@ -198,7 +198,7 @@ async fn autosave_scenario(
         .await?;
     page.keyboard().press("Tab", None).await?;
     expect(page.locator(locator!("[data-save-status]")))
-        .to_have_text("Saved.")
+        .to_have_text("Saved your changes.")
         .await?;
     expect(page.locator(locator!("li[data-element-id] a[aria-current='true']")))
         .to_have_text("Nom de famille")
@@ -217,13 +217,13 @@ async fn autosave_scenario(
         .to_be_visible()
         .await?;
     expect(page.locator(locator!("[data-save-status]")))
-        .to_have_text("Saved.")
+        .to_have_text("Saved your changes.")
         .await?;
     page.locator(locator!("#element-unit"))
         .select_option("m2", None)
         .await?;
     expect(page.locator(locator!("[data-save-status]")))
-        .to_have_text("Saved.")
+        .to_have_text("Saved your changes.")
         .await?;
     expect(page.locator(locator!("li[data-element-id]")))
         .to_contain_text("Decimal (m2)")

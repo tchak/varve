@@ -247,6 +247,9 @@ async fn the_editing_journey() {
     assert!(html.contains("data-schema-empty"), "{html}");
     assert!(html.contains("id=\"add-label\""), "{html}");
     assert!(!html.contains("Discard the draft"), "{html}");
+    // The notice slot is there even with nothing to say (no jump).
+    assert!(html.contains("data-schema-notices"), "{html}");
+    assert!(!html.contains("data-schema-notice="), "{html}");
 
     // Add a column at the root: selected, listed, noticed, counted.
     let to = act(
@@ -258,7 +261,10 @@ async fn the_editing_journey() {
     .await;
     let nom = selected_of(&to.to);
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Column added."), "{html}");
+    assert!(
+        html.contains("Added the column \u{201c}Nom\u{201d}."),
+        "{html}"
+    );
     assert!(html.contains("role=\"status\""), "{html}");
     assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
     assert!(html.contains("aria-current=\"true\""), "{html}");
@@ -316,7 +322,10 @@ async fn the_editing_journey() {
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Group: Adresse"), "{html}");
     assert!(html.contains("Add inside this group"), "{html}");
-    assert!(html.contains("Group added."), "{html}");
+    assert!(
+        html.contains("Added the group \u{201c}Adresse\u{201d}."),
+        "{html}"
+    );
     let to = act(
         &router,
         &cookie,
@@ -353,7 +362,7 @@ async fn the_editing_journey() {
         element_ids(&html),
         [adresse.clone(), ville.clone(), rue.clone(), nom.clone()]
     );
-    assert!(html.contains("Moved."), "{html}");
+    assert!(html.contains("Moved \u{201c}Nom\u{201d}."), "{html}");
     let to = act(&router, &cookie, &relocate(&nom), &[("direction", "up")]).await;
     let html = landed(&router, &cookie, &to).await;
     assert_eq!(
@@ -392,7 +401,7 @@ async fn the_editing_journey() {
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Column: Surface"), "{html}");
     assert!(html.contains("Decimal (m2)"), "{html}");
-    assert!(html.contains("Saved."), "{html}");
+    assert!(html.contains("Saved your changes."), "{html}");
     assert!(html.contains("value=\"m2\" selected"), "{html}");
     // Many values is offered on choices, attachments and geometries
     // only: posted with a decimal it is ignored (the select is hidden,
@@ -448,7 +457,10 @@ async fn the_editing_journey() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Option added."), "{html}");
+    assert!(
+        html.contains("Added the option \u{201c}Paris\u{201d}."),
+        "{html}"
+    );
     let to = act(
         &router,
         &cookie,
@@ -480,7 +492,10 @@ async fn the_editing_journey() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Option removed."), "{html}");
+    assert!(
+        html.contains("Removed the option \u{201c}Lyon\u{201d}."),
+        "{html}"
+    );
     assert!(!html.contains("value=\"Lyon\""), "{html}");
     // The last option can go too: an empty choice is a draft state.
     let to = act(
@@ -547,7 +562,7 @@ async fn the_editing_journey() {
     let to = act(&router, &cookie, &remove(&rue), &[]).await;
     assert_eq!(selected_of(&to.to), adresse);
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Removed."), "{html}");
+    assert!(html.contains("Removed \u{201c}Rue\u{201d}."), "{html}");
     assert_eq!(
         element_ids(&html),
         [adresse.clone(), ville.clone(), lignes.clone(), nom.clone()]
@@ -564,7 +579,7 @@ async fn the_editing_journey() {
     assert!(html.contains("Keep editing"), "{html}");
     let to = act(&router, &cookie, &format!("{editor}/discard"), &[]).await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Draft discarded."), "{html}");
+    assert!(html.contains("The draft has been discarded."), "{html}");
     assert!(html.contains("data-schema-empty"), "{html}");
     assert!(html.contains("No draft yet"), "{html}");
 }
@@ -585,7 +600,10 @@ async fn the_editor_speaks_french() {
     )
     .await;
     let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("Colonne ajoutée."), "{html}");
+    assert!(
+        html.contains("La colonne «\u{a0}Nom\u{a0}» a été ajoutée."),
+        "{html}"
+    );
     assert!(html.contains("lang=\"fr\""), "{html}");
     assert!(html.contains("Schéma de Bourse"), "{html}");
     assert!(html.contains("Colonne\u{a0}: Nom"), "{html}");

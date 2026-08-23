@@ -26,8 +26,8 @@ use crate::{client, i18n::t};
 
 use super::super::procedure_draft;
 use super::{
-    Notice, NoticeKind, back_to_editor, done, id_of, kind_of, parent_of, refused, unit_from_name,
-    unit_of,
+    Notice, NoticeKind, back_to_editor, done, done_with, id_of, kind_of, label_of, parent_of,
+    refused, unit_from_name, unit_of,
 };
 
 /// A submitted form as ordered pairs — repeated names (the enum
@@ -400,6 +400,11 @@ pub(super) mod element {
                 .as_ref()
                 .map(|d| d.schema.elements.as_slice())
                 .unwrap_or_default();
+            let moved_label = elements
+                .iter()
+                .find(|e| id_of(e) == element_id.as_str())
+                .map(|e| label_of(e).to_owned())
+                .unwrap_or_default();
             let placement = match input.parent {
                 Some(parent) => PlacementInput {
                     parent_id: (!parent.is_empty()).then(|| cynic::Id::new(parent)),
@@ -452,7 +457,7 @@ pub(super) mod element {
             )
             .await;
             let notice = match result {
-                Ok(_) => done(cx, "schema.notice.moved").await?,
+                Ok(_) => done_with(cx, "schema.notice.moved", &moved_label).await?,
                 Err(error) => refused(cx, error).await?,
             };
             back_to_editor(cx, Some(&element_id), Some(notice)).await
@@ -470,13 +475,14 @@ pub(super) mod element {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
-            let parent = procedure.revision_draft.as_ref().and_then(|d| {
+            let removed = procedure.revision_draft.as_ref().and_then(|d| {
                 d.schema
                     .elements
                     .iter()
                     .find(|e| id_of(e) == element_id.as_str())
-                    .and_then(parent_of)
             });
+            let parent = removed.and_then(parent_of);
+            let removed_label = removed.map(|e| label_of(e).to_owned()).unwrap_or_default();
             let result: std::result::Result<_, Error> = platform_client::run(
                 &client,
                 RemoveElement::build(RemoveElementVariables {
@@ -489,7 +495,7 @@ pub(super) mod element {
             .await;
             match result {
                 Ok(_) => {
-                    let notice = done(cx, "schema.notice.removed").await?;
+                    let notice = done_with(cx, "schema.notice.removed", &removed_label).await?;
                     back_to_editor(cx, parent.as_deref(), Some(notice)).await
                 }
                 Err(error) => {
@@ -544,10 +550,13 @@ pub(super) mod element {
                     match enum_column(cx, &procedure, &element_id).await? {
                         Err(notice) => notice,
                         Ok((_, mut options)) => {
+                            let added = label.clone();
                             options.push(EnumOptionInput { id: None, label });
                             match set_options(cx, &client, &procedure, &element_id, options).await?
                             {
-                                Ok(()) => done(cx, "schema.notice.option-added").await?,
+                                Ok(()) => {
+                                    done_with(cx, "schema.notice.option-added", &added).await?
+                                }
                                 Err(notice) => notice,
                             }
                         }
@@ -597,6 +606,14 @@ pub(super) mod element {
                 let notice = match enum_column(cx, &procedure, &element_id).await? {
                     Err(notice) => notice,
                     Ok((_, options)) => {
+                        let removed = options
+                            .iter()
+                            .find(|o| {
+                                o.id.as_ref()
+                                    .is_some_and(|id| id.inner() == input.option_id)
+                            })
+                            .map(|o| o.label.clone())
+                            .unwrap_or_default();
                         let kept: Vec<EnumOptionInput> = options
                             .into_iter()
                             .filter(|o| {
@@ -604,7 +621,9 @@ pub(super) mod element {
                             })
                             .collect();
                         match set_options(cx, &client, &procedure, &element_id, kept).await? {
-                            Ok(()) => done(cx, "schema.notice.option-removed").await?,
+                            Ok(()) => {
+                                done_with(cx, "schema.notice.option-removed", &removed).await?
+                            }
                             Err(notice) => notice,
                         }
                     }

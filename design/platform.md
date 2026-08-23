@@ -298,7 +298,13 @@ readable, no client-side selection state), the structure as nested
 lists with a row per element (label, type and multiplicity badges, an
 actions menu), the draft's state in the header (badge, counts, last
 save), and a one-shot notice after every action (`role=status` /
-`role=alert`, the server's reason verbatim on a refused edit). **No
+`role=alert`, the server's reason verbatim on a refused edit) in a
+**slot that is always there at one height** (`aria-live=polite`), so
+the panels never move when a notice comes or goes; notices name what
+they acted on ("Added the column “Nom”.") and use the platform's own
+`notice` component — a soft green or red tint, the one colour outside
+the theme tokens (Tailwind emerald/rose with dark values; recorded
+here as the a11y contract asks). **No
 drag and drop**: moving is *up*, *down*, and *move to* (a group or
 the top level) — named actions a keyboard and a screen reader reach,
 and exactly what the API's sibling-anchored placement expresses;

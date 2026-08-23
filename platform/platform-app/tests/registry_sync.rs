@@ -36,7 +36,7 @@ fn components_dir() -> PathBuf {
 /// The components that are ours, not the registry's: created following
 /// the registry components' conventions and exempt from the sync
 /// checks. Keep in step with the "Ours" list in `src/components.rs`.
-const OURS: &[&str] = &["field.rs", "page_title.rs", "site_header.rs"];
+const OURS: &[&str] = &["field.rs", "notice.rs", "page_title.rs", "site_header.rs"];
 
 /// The built-in registry, loaded from the `topcoat-ui-registry` crate's
 /// source directory as resolved by `cargo metadata`.

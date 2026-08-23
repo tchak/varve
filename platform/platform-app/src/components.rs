@@ -26,6 +26,7 @@ pub mod tabs;
 
 // Ours (not in the registry; listed in `tests/registry_sync.rs`).
 pub mod field;
+pub mod notice;
 pub mod page_title;
 pub mod site_header;
 

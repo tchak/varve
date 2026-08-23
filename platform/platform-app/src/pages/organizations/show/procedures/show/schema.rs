@@ -77,6 +77,7 @@ use crate::{
         },
         field::field,
         label::label,
+        notice::{NoticeTone, notice as notice_box},
         page_title::page_title,
     },
     flash,
@@ -182,6 +183,14 @@ pub(super) async fn done(cx: &Cx, id: &str) -> Result<Notice> {
     })
 }
 
+/// A confirmed action's notice naming what it acted on.
+pub(super) async fn done_with(cx: &Cx, id: &str, subject: &str) -> Result<Notice> {
+    Ok(Notice {
+        kind: NoticeKind::Status,
+        text: t_args(cx, id, &one_arg("label", subject.to_owned())).await?,
+    })
+}
+
 /// An add submission: a column or a group, its label, where it goes.
 #[derive(Deserialize)]
 pub(super) struct Addition {
@@ -208,6 +217,7 @@ pub(super) mod add {
         let client = client(cx).await?;
         let procedure = procedure_draft(cx).await?;
         let new_label = input.label.trim().to_owned();
+        let label_for_notice = new_label.clone();
         let parent = (!input.parent.is_empty()).then_some(input.parent.as_str());
         let before = (!input.before.is_empty()).then_some(input.before.as_str());
         if new_label.is_empty() {
@@ -260,13 +270,14 @@ pub(super) mod add {
                     .map(|d| d.schema.elements.as_slice())
                     .unwrap_or_default();
                 let created = new_element_id(elements, parent, before);
-                let notice = done(
+                let notice = done_with(
                     cx,
                     if input.what == "group" {
                         "schema.notice.group-added"
                     } else {
                         "schema.notice.column-added"
                     },
+                    &label_for_notice,
                 )
                 .await?;
                 back_to_editor(cx, created.as_deref(), Some(notice)).await
@@ -707,22 +718,26 @@ async fn editor_page(
                     )
                 )
             }
-            if let Some(notice) = &notice {
-                alert(
-                    variant: match notice.kind {
-                        NoticeKind::Status => AlertVariant::Neutral,
-                        NoticeKind::Alert => AlertVariant::Destructive,
-                    },
-                    attrs: attributes! {
-                        role=(match notice.kind {
-                            NoticeKind::Status => "status",
-                            NoticeKind::Alert => "alert",
-                        })
-                        data-schema-notice=""
-                    },
-                    alert_description((notice.text.as_str()))
-                )
-            }
+            // The notice slot is always there, at one height, so the
+            // panels below never move when a notice comes or goes.
+            <div class="min-h-12" aria-live="polite" data-schema-notices="">
+                if let Some(notice) = &notice {
+                    notice_box(
+                        tone: match notice.kind {
+                            NoticeKind::Status => NoticeTone::Success,
+                            NoticeKind::Alert => NoticeTone::Error,
+                        },
+                        attrs: attributes! {
+                            role=(match notice.kind {
+                                NoticeKind::Status => "status",
+                                NoticeKind::Alert => "alert",
+                            })
+                            data-schema-notice=""
+                        },
+                        (notice.text.as_str())
+                    )
+                }
+            </div>
             <div class="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 <section aria-labelledby="schema-structure-heading" class="min-w-0">
                     <div class="mb-3 flex items-center justify-between gap-3">

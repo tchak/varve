@@ -191,8 +191,14 @@ pub const EN: &[(&str, &str)] = &[
     ("schema.options.add", "Add option"),
     ("schema.options.remove", "Remove option {$label}"),
     ("schema.options.default", "Option 1"),
-    ("schema.notice.option-added", "Option added."),
-    ("schema.notice.option-removed", "Option removed."),
+    (
+        "schema.notice.option-added",
+        "Added the option \u{201c}{$label}\u{201d}.",
+    ),
+    (
+        "schema.notice.option-removed",
+        "Removed the option \u{201c}{$label}\u{201d}.",
+    ),
     ("schema.attachment.accept", "Accepted types"),
     (
         "schema.attachment.accept.help",
@@ -201,13 +207,19 @@ pub const EN: &[(&str, &str)] = &[
     ("schema.attachment.max-bytes", "Maximum size (bytes)"),
     ("schema.save", "Save"),
     ("schema.status.saving", "Saving\u{2026}"),
-    ("schema.status.saved", "Saved."),
-    ("schema.notice.column-added", "Column added."),
-    ("schema.notice.group-added", "Group added."),
-    ("schema.notice.saved", "Saved."),
-    ("schema.notice.moved", "Moved."),
-    ("schema.notice.removed", "Removed."),
-    ("schema.notice.discarded", "Draft discarded."),
+    ("schema.status.saved", "Saved your changes."),
+    (
+        "schema.notice.column-added",
+        "Added the column \u{201c}{$label}\u{201d}.",
+    ),
+    (
+        "schema.notice.group-added",
+        "Added the group \u{201c}{$label}\u{201d}.",
+    ),
+    ("schema.notice.saved", "Saved your changes."),
+    ("schema.notice.moved", "Moved \u{201c}{$label}\u{201d}."),
+    ("schema.notice.removed", "Removed \u{201c}{$label}\u{201d}."),
+    ("schema.notice.discarded", "The draft has been discarded."),
     ("schema.error.label-required", "A label is required."),
     (
         "schema.error.options-required",
@@ -470,8 +482,14 @@ pub const FR: &[(&str, &str)] = &[
     ("schema.options.add", "Ajouter l'option"),
     ("schema.options.remove", "Supprimer l'option {$label}"),
     ("schema.options.default", "Option 1"),
-    ("schema.notice.option-added", "Option ajoutée."),
-    ("schema.notice.option-removed", "Option supprimée."),
+    (
+        "schema.notice.option-added",
+        "L'option «\u{a0}{$label}\u{a0}» a été ajoutée.",
+    ),
+    (
+        "schema.notice.option-removed",
+        "L'option «\u{a0}{$label}\u{a0}» a été supprimée.",
+    ),
     ("schema.attachment.accept", "Types acceptés"),
     (
         "schema.attachment.accept.help",
@@ -480,13 +498,31 @@ pub const FR: &[(&str, &str)] = &[
     ("schema.attachment.max-bytes", "Taille maximale (octets)"),
     ("schema.save", "Enregistrer"),
     ("schema.status.saving", "Enregistrement\u{2026}"),
-    ("schema.status.saved", "Enregistré."),
-    ("schema.notice.column-added", "Colonne ajoutée."),
-    ("schema.notice.group-added", "Groupe ajouté."),
-    ("schema.notice.saved", "Enregistré."),
-    ("schema.notice.moved", "Déplacé."),
-    ("schema.notice.removed", "Supprimé."),
-    ("schema.notice.discarded", "Brouillon abandonné."),
+    (
+        "schema.status.saved",
+        "Vos modifications sont enregistrées.",
+    ),
+    (
+        "schema.notice.column-added",
+        "La colonne «\u{a0}{$label}\u{a0}» a été ajoutée.",
+    ),
+    (
+        "schema.notice.group-added",
+        "Le groupe «\u{a0}{$label}\u{a0}» a été ajouté.",
+    ),
+    (
+        "schema.notice.saved",
+        "Vos modifications sont enregistrées.",
+    ),
+    (
+        "schema.notice.moved",
+        "«\u{a0}{$label}\u{a0}» a été déplacé.",
+    ),
+    (
+        "schema.notice.removed",
+        "«\u{a0}{$label}\u{a0}» a été supprimé.",
+    ),
+    ("schema.notice.discarded", "Le brouillon a été abandonné."),
     ("schema.error.label-required", "Un libellé est requis."),
     (
         "schema.error.options-required",

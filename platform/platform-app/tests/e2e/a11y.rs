@@ -338,7 +338,7 @@ async fn axe_scenario(
         .select_option("ENUM", None)
         .await?;
     expect(page.locator(locator!("[data-save-status]")))
-        .to_have_text("Saved.")
+        .to_have_text("Saved your changes.")
         .await?;
     expect(page.locator(locator!("[data-options-empty]")))
         .to_be_visible()
