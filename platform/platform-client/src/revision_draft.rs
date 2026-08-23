@@ -112,10 +112,9 @@ pub enum Unit {
     Percent,
 }
 
-#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 #[cynic(graphql_type = "ColumnTypeKind")]
 pub enum ColumnTypeKind {
-    #[default]
     Text,
     Boolean,
     Integer,
@@ -210,19 +209,100 @@ pub struct GeometryType {
     pub kind: ColumnTypeKind,
 }
 
-/// A column type on input: `kind` plus only the facts that kind
-/// carries (`INVALID_INPUT` otherwise).
+/// A column type on input (`@oneOf`): set exactly one member. Marker
+/// constructors are `Some(true)`.
 #[derive(cynic::InputObject, Debug, Clone, Default)]
 pub struct ColumnTypeInput {
-    pub kind: ColumnTypeKind,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub text: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub boolean: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub integer: Option<NumberTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub decimal: Option<NumberTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub date: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub datetime: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    #[cynic(rename = "enum")]
+    pub enum_: Option<EnumTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<AttachmentTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<bool>,
+}
+
+impl ColumnTypeInput {
+    pub fn text() -> Self {
+        Self {
+            text: Some(true),
+            ..Default::default()
+        }
+    }
+    pub fn boolean() -> Self {
+        Self {
+            boolean: Some(true),
+            ..Default::default()
+        }
+    }
+    pub fn integer(unit: Option<Unit>) -> Self {
+        Self {
+            integer: Some(NumberTypeInput { unit }),
+            ..Default::default()
+        }
+    }
+    pub fn decimal(unit: Option<Unit>) -> Self {
+        Self {
+            decimal: Some(NumberTypeInput { unit }),
+            ..Default::default()
+        }
+    }
+    pub fn date() -> Self {
+        Self {
+            date: Some(true),
+            ..Default::default()
+        }
+    }
+    pub fn datetime() -> Self {
+        Self {
+            datetime: Some(true),
+            ..Default::default()
+        }
+    }
+    pub fn enumeration(options: Vec<EnumOptionInput>) -> Self {
+        Self {
+            enum_: Some(EnumTypeInput { options }),
+            ..Default::default()
+        }
+    }
+    pub fn attachment(accept: Vec<String>, max_bytes: Option<i32>) -> Self {
+        Self {
+            attachment: Some(AttachmentTypeInput {
+                accept: Some(accept),
+                max_bytes,
+            }),
+            ..Default::default()
+        }
+    }
+    pub fn geometry() -> Self {
+        Self {
+            geometry: Some(true),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(cynic::InputObject, Debug, Clone, Default)]
+pub struct NumberTypeInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub unit: Option<Unit>,
-    #[cynic(skip_serializing_if = "Option::is_none")]
-    pub options: Option<Vec<EnumOptionInput>>,
-    #[cynic(skip_serializing_if = "Option::is_none")]
-    pub accept: Option<Vec<String>>,
-    #[cynic(skip_serializing_if = "Option::is_none")]
-    pub max_bytes: Option<i32>,
+}
+
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct EnumTypeInput {
+    pub options: Vec<EnumOptionInput>,
 }
 
 /// An enum option on input; keep an existing option's `id`, omit it
@@ -232,6 +312,14 @@ pub struct EnumOptionInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub id: Option<cynic::Id>,
     pub label: String,
+}
+
+#[derive(cynic::InputObject, Debug, Clone, Default)]
+pub struct AttachmentTypeInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub accept: Option<Vec<String>>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<i32>,
 }
 
 /// Where an element goes: `parent_id` a group (`None` = root),
@@ -433,11 +521,7 @@ mod tests {
                 procedure_id: cynic::Id::new("abc"),
                 placement: None,
                 label: "Nom".into(),
-                ty: ColumnTypeInput {
-                    kind: ColumnTypeKind::Integer,
-                    unit: Some(Unit::SquareMetre),
-                    ..Default::default()
-                },
+                ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
                 arity: None,
             },
         });
@@ -449,9 +533,10 @@ mod tests {
                 .contains("addColumn(input: $input)")
         );
         let input = &document["variables"]["input"];
-        assert_eq!(input["type"]["kind"], "INTEGER");
-        assert_eq!(input["type"]["unit"], "SQUARE_METRE");
-        assert!(input["type"].get("options").is_none());
+        assert_eq!(
+            input["type"],
+            serde_json::json!({ "integer": { "unit": "SQUARE_METRE" } })
+        );
         assert!(input.get("placement").is_none());
     }
 }

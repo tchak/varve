@@ -239,13 +239,20 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
    AttachmentType { accept maxBytes } | …` — G.2.5 applied to types:
    no nullable `unit` on a text column. Each member carries `kind:
    ColumnTypeKind` so a client that only wants the constructor need
-   not match on `__typename`. On input the same facts ride one
-   **`ColumnTypeInput { kind, unit, options, accept, maxBytes }`**
-   validated server-side (a fact foreign to the kind is
-   `INVALID_INPUT`) rather than a `@oneOf`: marker constructors
-   (`TEXT`, `DATE`, …) have no payload, and `@oneOf` over empty
-   members reads worse than a discriminant. Enum columns are
-   inline-backed only (DESIGN §2.12) until published nomenclatures
+   not match on `__typename`. On input the mirror is a **`@oneOf`
+   `ColumnTypeInput`** — `{ text: true }`, `{ integer: { unit } }`,
+   `{ enum: { options } }`, `{ attachment: { accept maxBytes } }` —
+   so the validator, not a resolver, keeps a unit off a text column,
+   and introspection shows which facts go with which constructor.
+   Constructors without facts are `Boolean` markers (`false` is
+   `INVALID_INPUT`); the cosmetic cost of that idiom is outweighed by
+   what comes next: once the surface joins the editor, presentation
+   options (placeholder, text length, …) attach per constructor, and
+   a `kind` + nullable-fields input would degrade into a bag of
+   fields while `@oneOf` members each grow their own. Same mechanism
+   as the G.2.3 filters — one way to say "pick one variant".
+   Enum columns are inline-backed only (DESIGN §2.12) until
+   published nomenclatures
    have a platform home; option ids are kept when the client sends
    them and minted when omitted (identity, DESIGN §2.11).
 3. **Mutations are element operations**, one `input` each, all

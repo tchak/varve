@@ -59,6 +59,20 @@ type AttachmentType {
 	maxBytes: Int
 }
 
+"""
+`ATTACHMENT`: representability constraints (DESIGN §2.15).
+"""
+input AttachmentTypeInput {
+	"""
+	IANA media-type patterns; omitted or empty = unrestricted.
+	"""
+	accept: [String!]
+	"""
+	Per-file byte limit; omitted = unlimited.
+	"""
+	maxBytes: Int
+}
+
 type BooleanType {
 	kind: ColumnTypeKind!
 }
@@ -78,32 +92,25 @@ facts that constructor has.
 union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType
 
 """
-A column type on input: `kind` plus the facts that kind carries.
-A fact that does not belong to the kind is `INVALID_INPUT`.
+A column type on input: `@oneOf`, one member per constructor.
+Constructors without facts are `Boolean` markers (`{ text: true }`;
+`false` is `INVALID_INPUT`); the others carry their own input.
 """
-input ColumnTypeInput {
-	kind: ColumnTypeKind!
-	"""
-	`INTEGER` / `DECIMAL` only.
-	"""
-	unit: Unit
-	"""
-	`ENUM` only; required there.
-	"""
-	options: [EnumOptionInput!]
-	"""
-	`ATTACHMENT` only.
-	"""
-	accept: [String!]
-	"""
-	`ATTACHMENT` only.
-	"""
-	maxBytes: Int
+input ColumnTypeInput @oneOf {
+	text: Boolean
+	boolean: Boolean
+	integer: NumberTypeInput
+	decimal: NumberTypeInput
+	date: Boolean
+	datetime: Boolean
+	enum: EnumTypeInput
+	attachment: AttachmentTypeInput
+	geometry: Boolean
 }
 
 """
-The type constructors, shared by the output union (as each
-member's `kind`) and [`ColumnTypeInput`].
+The type constructors, carried by every output union member as
+`kind` for clients that only need the constructor.
 """
 enum ColumnTypeKind {
 	TEXT
@@ -224,6 +231,13 @@ type EnumType {
 	options: [EnumOption!]!
 }
 
+"""
+`ENUM`: the inline options, at least one.
+"""
+input EnumTypeInput {
+	options: [EnumOptionInput!]!
+}
+
 type GeometryType {
 	kind: ColumnTypeKind!
 }
@@ -305,6 +319,13 @@ type Mutation {
 	afterwards.
 	"""
 	discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!
+}
+
+"""
+`INTEGER` / `DECIMAL`: an optional unit (DESIGN §2.14).
+"""
+input NumberTypeInput {
+	unit: Unit
 }
 
 type Organization {
@@ -569,6 +590,10 @@ type Viewer {
 Directs the executor to include this field or fragment only when the `if` argument is true.
 """
 directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Indicates that an Input Object is a OneOf Input Object (and thus requires exactly one of its field be provided)
+"""
+directive @oneOf on INPUT_OBJECT
 """
 Directs the executor to skip this field or fragment when the `if` argument is true.
 """

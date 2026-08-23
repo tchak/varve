@@ -3,11 +3,11 @@
 //! `parentId`, in document order — no recursive output type (G.2,
 //! G.5 Q1), and the tree rebuilds in one pass. Column types are a
 //! union from the kernel's `ScalarType` (G.2.5: facts live where they
-//! are meaningful — no nullable `unit` on a text column); on input the
-//! same facts ride one `ColumnTypeInput` keyed by `kind`, validated
-//! here so a resolver only ever sees a well-formed `ScalarType`.
+//! are meaningful — no nullable `unit` on a text column), and on input
+//! the mirror `@oneOf` `ColumnTypeInput`, so the validator — not a
+//! resolver — keeps a unit off a text column.
 
-use async_graphql::{Enum, ID, InputObject, SimpleObject, Union};
+use async_graphql::{Enum, ID, InputObject, OneofObject, SimpleObject, Union};
 use platform_core::{ElementId, Parent, Placement};
 use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{
@@ -145,8 +145,8 @@ pub enum Unit {
     Percent,
 }
 
-/// The type constructors, shared by the output union (as each
-/// member's `kind`) and [`ColumnTypeInput`].
+/// The type constructors, carried by every output union member as
+/// `kind` for clients that only need the constructor.
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ColumnTypeKind {
     Text,
@@ -289,19 +289,32 @@ impl From<&ScalarType> for ColumnType {
     }
 }
 
-/// A column type on input: `kind` plus the facts that kind carries.
-/// A fact that does not belong to the kind is `INVALID_INPUT`.
-#[derive(InputObject, Debug, Clone)]
-pub struct ColumnTypeInput {
-    pub kind: ColumnTypeKind,
-    /// `INTEGER` / `DECIMAL` only.
+/// A column type on input: `@oneOf`, one member per constructor.
+/// Constructors without facts are `Boolean` markers (`{ text: true }`;
+/// `false` is `INVALID_INPUT`); the others carry their own input.
+#[derive(OneofObject, Debug, Clone)]
+pub enum ColumnTypeInput {
+    Text(bool),
+    Boolean(bool),
+    Integer(NumberTypeInput),
+    Decimal(NumberTypeInput),
+    Date(bool),
+    Datetime(bool),
+    Enum(EnumTypeInput),
+    Attachment(AttachmentTypeInput),
+    Geometry(bool),
+}
+
+/// `INTEGER` / `DECIMAL`: an optional unit (DESIGN §2.14).
+#[derive(InputObject, Debug, Clone, Default)]
+pub struct NumberTypeInput {
     pub unit: Option<Unit>,
-    /// `ENUM` only; required there.
-    pub options: Option<Vec<EnumOptionInput>>,
-    /// `ATTACHMENT` only.
-    pub accept: Option<Vec<String>>,
-    /// `ATTACHMENT` only.
-    pub max_bytes: Option<u64>,
+}
+
+/// `ENUM`: the inline options, at least one.
+#[derive(InputObject, Debug, Clone)]
+pub struct EnumTypeInput {
+    pub options: Vec<EnumOptionInput>,
 }
 
 /// An enum option on input. Pass an existing option's `id` to keep
@@ -313,63 +326,38 @@ pub struct EnumOptionInput {
     pub label: String,
 }
 
+/// `ATTACHMENT`: representability constraints (DESIGN §2.15).
+#[derive(InputObject, Debug, Clone, Default)]
+pub struct AttachmentTypeInput {
+    /// IANA media-type patterns; omitted or empty = unrestricted.
+    pub accept: Option<Vec<String>>,
+    /// Per-file byte limit; omitted = unlimited.
+    pub max_bytes: Option<u64>,
+}
+
 impl ColumnTypeInput {
     pub fn into_scalar_type(self) -> async_graphql::Result<ScalarType> {
-        let ColumnTypeInput {
-            kind,
-            unit,
-            options,
-            accept,
-            max_bytes,
-        } = self;
-        let only = |allowed: &[&str]| {
-            let present = [
-                ("unit", unit.is_some()),
-                ("options", options.is_some()),
-                ("accept", accept.is_some()),
-                ("maxBytes", max_bytes.is_some()),
-            ];
-            match present
-                .iter()
-                .find(|(name, set)| *set && !allowed.contains(name))
-            {
-                Some((name, _)) => Err(invalid_input(format!(
-                    "{name} does not apply to a {kind:?} column"
-                ))),
-                None => Ok(()),
+        let marker = |name: &str, set: bool, ty: ScalarType| {
+            if set {
+                Ok(ty)
+            } else {
+                Err(invalid_input(format!("{name} must be true")))
             }
         };
-        Ok(match kind {
-            ColumnTypeKind::Text => {
-                only(&[])?;
-                ScalarType::Text
-            }
-            ColumnTypeKind::Boolean => {
-                only(&[])?;
-                ScalarType::Boolean
-            }
-            ColumnTypeKind::Integer => {
-                only(&["unit"])?;
-                ScalarType::Integer(unit.map(Into::into))
-            }
-            ColumnTypeKind::Decimal => {
-                only(&["unit"])?;
-                ScalarType::Decimal(unit.map(Into::into))
-            }
-            ColumnTypeKind::Date => {
-                only(&[])?;
-                ScalarType::Date
-            }
-            ColumnTypeKind::Datetime => {
-                only(&[])?;
-                ScalarType::Datetime
-            }
-            ColumnTypeKind::Enum => {
-                only(&["options"])?;
-                let options = options
-                    .filter(|o| !o.is_empty())
-                    .ok_or_else(|| invalid_input("an ENUM column needs at least one option"))?;
-                let rows = options
+        Ok(match self {
+            ColumnTypeInput::Text(set) => marker("text", set, ScalarType::Text)?,
+            ColumnTypeInput::Boolean(set) => marker("boolean", set, ScalarType::Boolean)?,
+            ColumnTypeInput::Date(set) => marker("date", set, ScalarType::Date)?,
+            ColumnTypeInput::Datetime(set) => marker("datetime", set, ScalarType::Datetime)?,
+            ColumnTypeInput::Geometry(set) => marker("geometry", set, ScalarType::Geometry)?,
+            ColumnTypeInput::Integer(n) => ScalarType::Integer(n.unit.map(Into::into)),
+            ColumnTypeInput::Decimal(n) => ScalarType::Decimal(n.unit.map(Into::into)),
+            ColumnTypeInput::Enum(e) => {
+                if e.options.is_empty() {
+                    return Err(invalid_input("an ENUM column needs at least one option"));
+                }
+                let rows = e
+                    .options
                     .into_iter()
                     .map(|option| {
                         if option.label.trim().is_empty() {
@@ -392,17 +380,10 @@ impl ColumnTypeInput {
                 }
                 ScalarType::Enum(NomenclatureRef::Inline(rows))
             }
-            ColumnTypeKind::Attachment => {
-                only(&["accept", "maxBytes"])?;
-                ScalarType::Attachment(AttachmentConstraints {
-                    accept: accept.unwrap_or_default(),
-                    max_bytes,
-                })
-            }
-            ColumnTypeKind::Geometry => {
-                only(&[])?;
-                ScalarType::Geometry
-            }
+            ColumnTypeInput::Attachment(a) => ScalarType::Attachment(AttachmentConstraints {
+                accept: a.accept.unwrap_or_default(),
+                max_bytes: a.max_bytes,
+            }),
         })
     }
 }

@@ -6,7 +6,7 @@
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
 use platform_client::revision_draft::{
-    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, ColumnTypeKind,
+    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput,
     ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, SchemaElement, Unit,
 };
 use platform_client::viewer::ViewerQuery;
@@ -587,7 +587,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": " Nom ", "type": { "kind": "TEXT" } }),
+            json!({ "procedureId": pid, "label": " Nom ", "type": { "text": true } }),
         )
         .await;
     assert!(p["revisionDraft"]["base"].is_null());
@@ -614,7 +614,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Rue", "type": { "kind": "TEXT" },
+            json!({ "procedureId": pid, "label": "Rue", "type": { "text": true },
                     "placement": { "parentId": adresses } }),
         )
         .await;
@@ -624,7 +624,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Ville", "type": { "kind": "TEXT" },
+            json!({ "procedureId": pid, "label": "Ville", "type": { "text": true },
                     "placement": { "parentId": adresses, "beforeId": rue } }),
         )
         .await;
@@ -653,7 +653,7 @@ async fn revision_draft_editing_journey() {
             "updateColumn",
             "UpdateColumnInput",
             json!({ "procedureId": pid, "id": nom, "label": " Surface ",
-                    "type": { "kind": "DECIMAL", "unit": "SQUARE_METRE" }, "arity": "MANY" }),
+                    "type": { "decimal": { "unit": "SQUARE_METRE" } }, "arity": "MANY" }),
         )
         .await;
     let surface = &p["revisionDraft"]["schema"]["elements"][2];
@@ -670,8 +670,8 @@ async fn revision_draft_editing_journey() {
             "updateColumn",
             "UpdateColumnInput",
             json!({ "procedureId": pid, "id": ville,
-                    "type": { "kind": "ENUM", "options": [
-                        { "label": "Paris" }, { "id": "lyon", "label": "Lyon" } ] } }),
+                    "type": { "enum": { "options": [
+                        { "label": "Paris" }, { "id": "lyon", "label": "Lyon" } ] } } }),
         )
         .await;
     let options = &p["revisionDraft"]["schema"]["elements"][1]["type"]["options"];
@@ -742,7 +742,7 @@ async fn revision_draft_errors_are_structured() {
         .await;
     let procedure = api.create_procedure(&alice, &id_of(&org), "Permis").await;
     let pid = id_of(&procedure);
-    let text = json!({ "kind": "TEXT" });
+    let text = json!({ "text": true });
 
     // FORBIDDEN: a non-member, a missing procedure — the same answer.
     for who in [&bob, &alice] {
@@ -762,14 +762,14 @@ async fn revision_draft_errors_are_structured() {
         assert_eq!(code, "FORBIDDEN");
     }
 
-    // INVALID_INPUT: malformed id, blank label, a fact foreign to the
-    // kind, an enum without options.
+    // INVALID_INPUT: malformed id, blank label, a false marker, an enum
+    // without options. (Two members, or none, fail `@oneOf` validation
+    // before any resolver — no code, a plain validation error.)
     for input in [
         json!({ "procedureId": "nope", "label": "x", "type": text }),
         json!({ "procedureId": pid, "label": "  ", "type": text }),
-        json!({ "procedureId": pid, "label": "x", "type": { "kind": "TEXT", "unit": "METRE" } }),
-        json!({ "procedureId": pid, "label": "x", "type": { "kind": "ENUM" } }),
-        json!({ "procedureId": pid, "label": "x", "type": { "kind": "ATTACHMENT", "options": [] } }),
+        json!({ "procedureId": pid, "label": "x", "type": { "date": false } }),
+        json!({ "procedureId": pid, "label": "x", "type": { "enum": { "options": [] } } }),
     ] {
         let code = api
             .edit_error(&alice, "addColumn", "AddColumnInput", input)
@@ -869,11 +869,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 procedure_id: cynic::Id::new(id_of(&procedure)),
                 placement: None,
                 label: "Surface".into(),
-                ty: ColumnTypeInput {
-                    kind: ColumnTypeKind::Integer,
-                    unit: Some(Unit::SquareMetre),
-                    ..Default::default()
-                },
+                ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
                 arity: None,
             },
         }),
@@ -913,7 +909,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                     before_id: None,
                 }),
                 label: "Inside a column".into(),
-                ty: ColumnTypeInput::default(),
+                ty: ColumnTypeInput::text(),
                 arity: None,
             },
         }),
