@@ -1,18 +1,21 @@
-//! `RevisionDraft` and the schema it carries (G.6, revision-draft
-//! slice): the kernel `Schema` flattened into a list of elements with
+//! `RevisionDraft` and the authored tree it carries (G.7, amended
+//! 2026-08-24): the tree flattened into a list of elements with
 //! `parentId`, in document order — no recursive output type (G.2,
-//! G.5 Q1), and the tree rebuilds in one pass. Column types are a
-//! union from the kernel's `ScalarType` (G.2.5: facts live where they
-//! are meaningful — no nullable `unit` on a text column), and on input
-//! the mirror `@oneOf` `ColumnTypeInput`, so the validator — not a
-//! resolver — keeps a unit off a text column.
+//! G.5 Q1), and the tree rebuilds in one pass. Four element kinds —
+//! column, group, section, note — each carrying its `audience`
+//! (platform P.4: `REVIEWER` is DN's private; the effective audience
+//! is the narrowest along the ancestor path). Column types are a
+//! union from the kernel's `ScalarType` (G.2.5: facts live where
+//! they are meaningful — no nullable `unit` on a text column), and on
+//! input the mirror `@oneOf` `ColumnTypeInput`, so the validator —
+//! not a resolver — keeps a unit off a text column.
 
 use async_graphql::{Enum, ID, InputObject, OneofObject, SimpleObject, Union};
-use platform_core::{ElementId, Parent, Placement};
-use varve_core::{ColumnId, GroupId, OptionId};
-use varve_schema::{
-    AttachmentConstraints, Column, Element, Group, NomenclatureRef, OptionRow, ScalarType, Schema,
+use platform_core::{
+    ElementId, Parent, Placement, Tree, TreeColumn, TreeElement, TreeGroup, TreeNote, TreeSection,
 };
+use varve_core::{ColumnId, GroupId, OptionId};
+use varve_schema::{AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType};
 
 use crate::error::invalid_input;
 
@@ -22,84 +25,136 @@ pub struct RevisionDraft {
     /// The published revision this draft forks from; `null` until the
     /// procedure has one.
     pub base: Option<ID>,
-    /// The schema under edit.
-    pub schema: DraftSchema,
+    /// Every element of the authored tree, **document order** (a
+    /// container precedes its children; siblings in their order),
+    /// each naming its parent.
+    pub elements: Vec<DraftElement>,
 }
 
 impl RevisionDraft {
-    pub fn new(base: Option<&str>, schema: &Schema) -> Self {
+    pub fn new(base: Option<&str>, tree: &Tree) -> Self {
+        let mut elements = Vec::new();
+        push_elements(&mut elements, None, &tree.elements);
         Self {
             base: base.map(ID::from),
-            schema: DraftSchema::flatten(schema),
+            elements,
         }
     }
 }
 
-/// The schema as a flat list.
-#[derive(SimpleObject)]
-pub struct DraftSchema {
-    /// Every element, **document order** (a group precedes its
-    /// children; siblings in their order), each naming its parent.
-    pub elements: Vec<SchemaElement>,
-}
-
-impl DraftSchema {
-    fn flatten(schema: &Schema) -> Self {
-        let mut elements = Vec::new();
-        push_elements(&mut elements, None, &schema.root);
-        Self { elements }
-    }
-}
-
-fn push_elements(out: &mut Vec<SchemaElement>, parent: Option<&GroupId>, elements: &[Element]) {
+fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[TreeElement]) {
     for element in elements {
-        let parent_id = parent.map(|g| ID::from(g.as_str()));
+        let parent_id = parent.cloned();
         match element {
-            Element::Column(c) => out.push(SchemaElement::Column(SchemaColumn {
+            TreeElement::Column(c) => out.push(DraftElement::Column(DraftColumn {
                 id: ID::from(c.id.as_str()),
                 parent_id,
                 label: c.label.clone(),
                 ty: column_type(&c.ty, c.arity),
+                audience: c.audience.into(),
             })),
-            Element::Group(g) => {
-                out.push(SchemaElement::Group(SchemaGroup {
-                    id: ID::from(g.id.as_str()),
+            TreeElement::Group(g) => {
+                let id = ID::from(g.id.as_str());
+                out.push(DraftElement::Group(DraftGroup {
+                    id: id.clone(),
                     parent_id,
                     label: g.label.clone(),
                     cardinality: g.cardinality.into(),
+                    audience: g.audience.into(),
                 }));
-                push_elements(out, Some(&g.id), &g.children);
+                push_elements(out, Some(&id), &g.children);
             }
+            TreeElement::Section(s) => {
+                let id = ID::from(s.id.as_str());
+                out.push(DraftElement::Section(DraftSection {
+                    id: id.clone(),
+                    parent_id,
+                    title: s.title.clone(),
+                    help: s.help.clone(),
+                    audience: s.audience.into(),
+                }));
+                push_elements(out, Some(&id), &s.children);
+            }
+            TreeElement::Note(n) => out.push(DraftElement::Note(DraftNote {
+                id: ID::from(n.id.as_str()),
+                parent_id,
+                title: n.title.clone(),
+                body: n.body.clone(),
+                audience: n.audience.into(),
+            })),
         }
     }
 }
 
-/// A column or a group.
+/// A column, a group, a section or a note.
 #[derive(Union)]
-pub enum SchemaElement {
-    Column(SchemaColumn),
-    Group(SchemaGroup),
+pub enum DraftElement {
+    Column(DraftColumn),
+    Group(DraftGroup),
+    Section(DraftSection),
+    Note(DraftNote),
+}
+
+/// Who sees an element (platform P.4): `REVIEWER` is DN's private.
+/// The *effective* audience of an element is the narrowest along its
+/// ancestor path — an `ALL` element inside a `REVIEWER` section is
+/// reviewer-only.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+#[graphql(remote = "platform_core::Audience")]
+pub enum Audience {
+    /// Every surface: the applicant form and the reviewer screen.
+    All,
+    /// The reviewer surface only.
+    Reviewer,
 }
 
 /// A typed field (DESIGN §2.1).
 #[derive(SimpleObject)]
-pub struct SchemaColumn {
+pub struct DraftColumn {
     pub id: ID,
-    /// The containing group; `null` at the root.
+    /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnType,
+    pub audience: Audience,
 }
 
 /// An ordered container of elements (DESIGN §2.1).
 #[derive(SimpleObject)]
-pub struct SchemaGroup {
+pub struct DraftGroup {
     pub id: ID,
-    /// The containing group; `null` at the root.
+    /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,
     pub label: String,
     pub cardinality: Cardinality,
+    pub audience: Audience,
+}
+
+/// A header section: presentation, may contain elements (DESIGN
+/// §2.6). Its id is a kernel `NodeId` (§2.6, surface node identity).
+#[derive(SimpleObject)]
+pub struct DraftSection {
+    pub id: ID,
+    /// The containing group or section; `null` at the root.
+    pub parent_id: Option<ID>,
+    pub title: String,
+    /// Help text under the title; `null` when none.
+    pub help: Option<String>,
+    pub audience: Audience,
+}
+
+/// An explication: prose, no data. A `REVIEWER` note is authored
+/// guidance for instructors.
+#[derive(SimpleObject)]
+pub struct DraftNote {
+    pub id: ID,
+    /// The containing group or section; `null` at the root.
+    pub parent_id: Option<ID>,
+    /// Heading; `null` when none.
+    pub title: Option<String>,
+    pub body: String,
+    pub audience: Audience,
 }
 
 /// A group holds one row or many (DESIGN §2.2).
@@ -422,8 +477,9 @@ impl ColumnTypeInput {
     }
 }
 
-/// Where to put an element: `parentId` names a group (`null` = root),
-/// `beforeId` a sibling to insert in front of (`null` = append).
+/// Where to put an element: `parentId` names a group or a section
+/// (`null` = root), `beforeId` a sibling to insert in front of
+/// (`null` = append).
 #[derive(InputObject, Debug, Clone, Default)]
 pub struct PlacementInput {
     pub parent_id: Option<ID>,
@@ -431,57 +487,109 @@ pub struct PlacementInput {
 }
 
 impl PlacementInput {
-    /// Resolves the anchor against `schema`: `beforeId` must name an
-    /// element in the draft (which kind is looked up, since the API
-    /// carries one `ID` for both). An unknown anchor is reported by
-    /// the edit as [`platform_core::EditError::UnknownElement`].
-    pub fn resolve(&self, schema: &Schema) -> Result<Placement, platform_core::EditError> {
+    /// Resolves parent and anchor against `tree`: both must name
+    /// elements in the draft (which kind is looked up, since the API
+    /// carries one `ID` for all four). A parent that is not a group
+    /// or section — or unknown — is [`platform_core::EditError::UnknownParent`].
+    pub fn resolve(&self, tree: &Tree) -> Result<Placement, platform_core::EditError> {
         Ok(Placement {
             parent: match &self.parent_id {
                 None => Parent::Root,
-                Some(id) => Parent::Group(GroupId::new(id.as_str())),
+                Some(id) => match element_id(tree, id) {
+                    Ok(ElementId::Group(group)) => Parent::Group(group),
+                    Ok(ElementId::Section(section)) => Parent::Section(section),
+                    _ => {
+                        return Err(platform_core::EditError::UnknownParent(Parent::Group(
+                            GroupId::new(id.as_str()),
+                        )));
+                    }
+                },
             },
             before: match &self.before_id {
                 None => None,
-                Some(id) => Some(element_id(schema, id)?),
+                Some(id) => Some(element_id(tree, id)?),
             },
         })
     }
 }
 
-/// The kernel identity behind a draft `ID`: column or group, whichever
-/// the draft holds under that string.
-pub fn element_id(schema: &Schema, id: &ID) -> Result<ElementId, platform_core::EditError> {
-    fn find(elements: &[Element], id: &str) -> Option<ElementId> {
+/// The kernel identity behind a draft `ID`: whichever kind the draft
+/// holds under that string.
+pub fn element_id(tree: &Tree, id: &ID) -> Result<ElementId, platform_core::EditError> {
+    fn find(elements: &[TreeElement], id: &str) -> Option<ElementId> {
         elements.iter().find_map(|e| match e {
-            Element::Column(c) if c.id.as_str() == id => Some(ElementId::Column(c.id.clone())),
-            Element::Group(g) if g.id.as_str() == id => Some(ElementId::Group(g.id.clone())),
-            Element::Group(g) => find(&g.children, id),
-            Element::Column(_) => None,
+            TreeElement::Column(c) if c.id.as_str() == id => Some(ElementId::Column(c.id.clone())),
+            TreeElement::Group(g) if g.id.as_str() == id => Some(ElementId::Group(g.id.clone())),
+            TreeElement::Section(s) if s.id.as_str() == id => {
+                Some(ElementId::Section(s.id.clone()))
+            }
+            TreeElement::Note(n) if n.id.as_str() == id => Some(ElementId::Note(n.id.clone())),
+            TreeElement::Group(g) => find(&g.children, id),
+            TreeElement::Section(s) => find(&s.children, id),
+            _ => None,
         })
     }
-    find(&schema.root, id.as_str()).ok_or_else(|| {
+    find(&tree.elements, id.as_str()).ok_or_else(|| {
         platform_core::EditError::UnknownElement(ElementId::Column(ColumnId::new(id.as_str())))
     })
 }
 
 /// A new column as `addColumn` builds it.
-pub fn new_column(label: String, ty: ScalarType, arity: varve_schema::Arity) -> Element {
-    Element::Column(Column {
+pub fn new_column(
+    label: String,
+    ty: ScalarType,
+    arity: varve_schema::Arity,
+    audience: platform_core::Audience,
+) -> TreeElement {
+    TreeElement::Column(TreeColumn {
         id: platform_core::new_column_id(),
         label,
         ty,
         arity,
+        audience,
     })
 }
 
 /// A new group as `addGroup` builds it.
-pub fn new_group(label: String, cardinality: Cardinality) -> Element {
-    Element::Group(Group {
+pub fn new_group(
+    label: String,
+    cardinality: Cardinality,
+    audience: platform_core::Audience,
+) -> TreeElement {
+    TreeElement::Group(TreeGroup {
         id: platform_core::new_group_id(),
         label,
         cardinality: cardinality.into(),
+        audience,
         children: Vec::new(),
-        included_from: None,
+    })
+}
+
+/// A new section as `addSection` builds it.
+pub fn new_section(
+    title: String,
+    help: Option<String>,
+    audience: platform_core::Audience,
+) -> TreeElement {
+    TreeElement::Section(TreeSection {
+        id: platform_core::new_node_id(),
+        title,
+        help,
+        audience,
+        children: Vec::new(),
+    })
+}
+
+/// A new note as `addNote` builds it.
+pub fn new_note(
+    title: Option<String>,
+    body: String,
+    audience: platform_core::Audience,
+) -> TreeElement {
+    TreeElement::Note(TreeNote {
+        id: platform_core::new_node_id(),
+        title,
+        body,
+        audience,
     })
 }

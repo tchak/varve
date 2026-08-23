@@ -1,17 +1,18 @@
 //! The mutation root (G.2.7): one `input` each, verb-first, the full
 //! object returned, errors structural ([`crate::error`]).
 
-use async_graphql::{Context, ID, InputObject, Object};
+use async_graphql::{Context, ID, InputObject, MaybeUndefined, Object};
 use platform_core::{
-    ColumnPatch, CreateOrganizationError, EditError, GroupPatch, RevisionDraftError,
+    ColumnPatch, CreateOrganizationError, EditError, GroupPatch, NotePatch, RevisionDraftError,
+    SectionPatch, Tree,
 };
-use varve_schema::Schema;
 
 use crate::error::{Code, coded, forbidden, internal, invalid_input};
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::Procedure;
 use crate::revision_draft::{
-    Cardinality, ColumnTypeInput, PlacementInput, element_id, new_column, new_group,
+    Audience, Cardinality, ColumnTypeInput, PlacementInput, element_id, new_column, new_group,
+    new_note, new_section,
 };
 use crate::slug::Slug;
 use crate::team::Team;
@@ -62,6 +63,9 @@ pub struct AddColumnInput {
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnTypeInput,
+    /// Clamped to the parent's effective audience (P.4).
+    #[graphql(default_with = "Audience::All")]
+    pub audience: Audience,
 }
 
 /// `addGroup` input.
@@ -74,6 +78,39 @@ pub struct AddGroupInput {
     pub label: String,
     #[graphql(default_with = "Cardinality::One")]
     pub cardinality: Cardinality,
+    /// Clamped to the parent's effective audience (P.4).
+    #[graphql(default_with = "Audience::All")]
+    pub audience: Audience,
+}
+
+/// `addSection` input.
+#[derive(InputObject)]
+pub struct AddSectionInput {
+    pub procedure_id: ID,
+    /// Where the section goes; omitted = appended at the root.
+    #[graphql(default)]
+    pub placement: PlacementInput,
+    pub title: String,
+    /// Help text under the title; omitted or blank = none.
+    pub help: Option<String>,
+    /// Clamped to the parent's effective audience (P.4).
+    #[graphql(default_with = "Audience::All")]
+    pub audience: Audience,
+}
+
+/// `addNote` input.
+#[derive(InputObject)]
+pub struct AddNoteInput {
+    pub procedure_id: ID,
+    /// Where the note goes; omitted = appended at the root.
+    #[graphql(default)]
+    pub placement: PlacementInput,
+    /// Heading; omitted or blank = none.
+    pub title: Option<String>,
+    pub body: String,
+    /// Clamped to the parent's effective audience (P.4).
+    #[graphql(default_with = "Audience::All")]
+    pub audience: Audience,
 }
 
 /// `updateColumn` input: an omitted field is left as it is.
@@ -84,6 +121,9 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[graphql(name = "type")]
     pub ty: Option<ColumnTypeInput>,
+    /// Wider than the parent's effective audience is `INVALID_EDIT`
+    /// (P.4: the marker would lie).
+    pub audience: Option<Audience>,
 }
 
 /// `updateGroup` input: an omitted field is left as it is.
@@ -93,13 +133,39 @@ pub struct UpdateGroupInput {
     pub id: ID,
     pub label: Option<String>,
     pub cardinality: Option<Cardinality>,
+    /// Wider than the parent's effective audience is `INVALID_EDIT`.
+    pub audience: Option<Audience>,
+}
+
+/// `updateSection` input: an omitted field is left as it is.
+#[derive(InputObject)]
+pub struct UpdateSectionInput {
+    pub procedure_id: ID,
+    pub id: ID,
+    pub title: Option<String>,
+    /// `null` or blank clears the help; omitted leaves it.
+    pub help: MaybeUndefined<String>,
+    /// Wider than the parent's effective audience is `INVALID_EDIT`.
+    pub audience: Option<Audience>,
+}
+
+/// `updateNote` input: an omitted field is left as it is.
+#[derive(InputObject)]
+pub struct UpdateNoteInput {
+    pub procedure_id: ID,
+    pub id: ID,
+    /// `null` or blank clears the title; omitted leaves it.
+    pub title: MaybeUndefined<String>,
+    pub body: Option<String>,
+    /// Wider than the parent's effective audience is `INVALID_EDIT`.
+    pub audience: Option<Audience>,
 }
 
 /// `moveElement` input.
 #[derive(InputObject)]
 pub struct MoveElementInput {
     pub procedure_id: ID,
-    /// A column or a group (with its subtree).
+    /// Any element (a group or section with its subtree).
     pub id: ID,
     pub placement: PlacementInput,
 }
@@ -108,7 +174,7 @@ pub struct MoveElementInput {
 #[derive(InputObject)]
 pub struct RemoveElementInput {
     pub procedure_id: ID,
-    /// A column or a group (with its subtree).
+    /// Any element (a group or section with its subtree).
     pub id: ID,
 }
 
@@ -123,6 +189,24 @@ fn validate_non_empty(field: &str, value: &str) -> async_graphql::Result<()> {
         Err(invalid_input(format!("{field} must not be empty")))
     } else {
         Ok(())
+    }
+}
+
+/// An optional text on input: trimmed, blank collapsing to none.
+fn optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|v| {
+        let trimmed = v.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
+}
+
+/// A clearable text on update: omitted leaves the field, `null` or
+/// blank clears it, text sets it (trimmed).
+fn clearable_text(value: MaybeUndefined<String>) -> Option<Option<String>> {
+    match value {
+        MaybeUndefined::Undefined => None,
+        MaybeUndefined::Null => Some(None),
+        MaybeUndefined::Value(v) => Some(optional_text(Some(v))),
     }
 }
 
@@ -175,11 +259,12 @@ async fn administered_procedure(
 }
 
 /// The shape every draft mutation shares: resolve the procedure,
-/// apply one edit to its draft, answer with the procedure as stored.
+/// apply one edit to its draft tree, answer with the procedure as
+/// stored.
 async fn edit_revision_draft(
     ctx: &Context<'_>,
     procedure_id: &ID,
-    edit: impl FnOnce(&mut Schema) -> Result<(), EditError>,
+    edit: impl FnOnce(&mut Tree) -> Result<(), EditError>,
 ) -> async_graphql::Result<Procedure> {
     let (principal, mut db) = session(ctx)?;
     let (mut procedure, organization) =
@@ -290,9 +375,13 @@ impl Mutation {
         validate_non_empty("label", &input.label)?;
         let (ty, arity) = input.ty.into_column_type()?;
         let label = input.label.trim().to_owned();
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let placement = input.placement.resolve(schema)?;
-            platform_core::add_element(schema, &placement, new_column(label, ty, arity))
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let placement = input.placement.resolve(tree)?;
+            platform_core::add_element(
+                tree,
+                &placement,
+                new_column(label, ty, arity, input.audience.into()),
+            )
         })
         .await
     }
@@ -306,16 +395,63 @@ impl Mutation {
     ) -> async_graphql::Result<Procedure> {
         validate_non_empty("label", &input.label)?;
         let label = input.label.trim().to_owned();
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let placement = input.placement.resolve(schema)?;
-            platform_core::add_element(schema, &placement, new_group(label, input.cardinality))
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let placement = input.placement.resolve(tree)?;
+            platform_core::add_element(
+                tree,
+                &placement,
+                new_group(label, input.cardinality, input.audience.into()),
+            )
         })
         .await
     }
 
-    /// Changes a column's label or type (the type carries whether it
-    /// holds many values); its id — its identity for the impact
-    /// report — never changes.
+    /// Adds an empty section to the procedure's revision draft;
+    /// placed like `addColumn`. Its id is a kernel `NodeId` (DESIGN
+    /// §2.6, surface node identity).
+    async fn add_section(
+        &self,
+        ctx: &Context<'_>,
+        input: AddSectionInput,
+    ) -> async_graphql::Result<Procedure> {
+        validate_non_empty("title", &input.title)?;
+        let title = input.title.trim().to_owned();
+        let help = optional_text(input.help);
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let placement = input.placement.resolve(tree)?;
+            platform_core::add_element(
+                tree,
+                &placement,
+                new_section(title, help, input.audience.into()),
+            )
+        })
+        .await
+    }
+
+    /// Adds a note to the procedure's revision draft; placed like
+    /// `addColumn`. A `REVIEWER` note is guidance for instructors.
+    async fn add_note(
+        &self,
+        ctx: &Context<'_>,
+        input: AddNoteInput,
+    ) -> async_graphql::Result<Procedure> {
+        validate_non_empty("body", &input.body)?;
+        let body = input.body.trim().to_owned();
+        let title = optional_text(input.title);
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let placement = input.placement.resolve(tree)?;
+            platform_core::add_element(
+                tree,
+                &placement,
+                new_note(title, body, input.audience.into()),
+            )
+        })
+        .await
+    }
+
+    /// Changes a column's label, type (the type carries whether it
+    /// holds many values) or audience; its id — its identity for the
+    /// impact report — never changes.
     async fn update_column(
         &self,
         ctx: &Context<'_>,
@@ -336,23 +472,20 @@ impl Mutation {
             label: input.label.map(|l| l.trim().to_owned()),
             ty,
             arity,
+            audience: input.audience.map(Into::into),
         };
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let id = match element_id(schema, &input.id)? {
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = match element_id(tree, &input.id)? {
                 platform_core::ElementId::Column(id) => id,
-                platform_core::ElementId::Group(id) => {
-                    return Err(EditError::UnknownElement(platform_core::ElementId::Column(
-                        varve_core::ColumnId::new(id.as_str()),
-                    )));
-                }
+                other => return Err(EditError::UnknownElement(other)),
             };
-            platform_core::update_column(schema, &id, patch)
+            platform_core::update_column(tree, &id, patch)
         })
         .await
     }
 
-    /// Changes a group's label or cardinality; its id and children
-    /// stay.
+    /// Changes a group's label, cardinality or audience; its id and
+    /// children stay.
     async fn update_group(
         &self,
         ctx: &Context<'_>,
@@ -364,44 +497,92 @@ impl Mutation {
         let patch = GroupPatch {
             label: input.label.map(|l| l.trim().to_owned()),
             cardinality: input.cardinality.map(Into::into),
+            audience: input.audience.map(Into::into),
         };
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let id = match element_id(schema, &input.id)? {
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = match element_id(tree, &input.id)? {
                 platform_core::ElementId::Group(id) => id,
-                platform_core::ElementId::Column(id) => {
-                    return Err(EditError::UnknownElement(platform_core::ElementId::Group(
-                        varve_core::GroupId::new(id.as_str()),
-                    )));
-                }
+                other => return Err(EditError::UnknownElement(other)),
             };
-            platform_core::update_group(schema, &id, patch)
+            platform_core::update_group(tree, &id, patch)
         })
         .await
     }
 
-    /// Moves a column or a group (with its subtree) to `placement`.
+    /// Changes a section's title, help or audience; its id and
+    /// children stay.
+    async fn update_section(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateSectionInput,
+    ) -> async_graphql::Result<Procedure> {
+        if let Some(title) = &input.title {
+            validate_non_empty("title", title)?;
+        }
+        let patch = SectionPatch {
+            title: input.title.map(|t| t.trim().to_owned()),
+            help: clearable_text(input.help),
+            audience: input.audience.map(Into::into),
+        };
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = match element_id(tree, &input.id)? {
+                platform_core::ElementId::Section(id) => id,
+                other => return Err(EditError::UnknownElement(other)),
+            };
+            platform_core::update_section(tree, &id, patch)
+        })
+        .await
+    }
+
+    /// Changes a note's title, body or audience; its id stays.
+    async fn update_note(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateNoteInput,
+    ) -> async_graphql::Result<Procedure> {
+        if let Some(body) = &input.body {
+            validate_non_empty("body", body)?;
+        }
+        let patch = NotePatch {
+            title: clearable_text(input.title),
+            body: input.body.map(|b| b.trim().to_owned()),
+            audience: input.audience.map(Into::into),
+        };
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = match element_id(tree, &input.id)? {
+                platform_core::ElementId::Note(id) => id,
+                other => return Err(EditError::UnknownElement(other)),
+            };
+            platform_core::update_note(tree, &id, patch)
+        })
+        .await
+    }
+
+    /// Moves an element (a group or section with its subtree) to
+    /// `placement`.
     async fn move_element(
         &self,
         ctx: &Context<'_>,
         input: MoveElementInput,
     ) -> async_graphql::Result<Procedure> {
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let id = element_id(schema, &input.id)?;
-            let placement = input.placement.resolve(schema)?;
-            platform_core::move_element(schema, &id, &placement)
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = element_id(tree, &input.id)?;
+            let placement = input.placement.resolve(tree)?;
+            platform_core::move_element(tree, &id, &placement)
         })
         .await
     }
 
-    /// Removes a column or a group (with its subtree) from the draft.
+    /// Removes an element (a group or section with its subtree) from
+    /// the draft.
     async fn remove_element(
         &self,
         ctx: &Context<'_>,
         input: RemoveElementInput,
     ) -> async_graphql::Result<Procedure> {
-        edit_revision_draft(ctx, &input.procedure_id, move |schema| {
-            let id = element_id(schema, &input.id)?;
-            platform_core::remove_element(schema, &id).map(|_| ())
+        edit_revision_draft(ctx, &input.procedure_id, move |tree| {
+            let id = element_id(tree, &input.id)?;
+            platform_core::remove_element(tree, &id).map(|_| ())
         })
         .await
     }

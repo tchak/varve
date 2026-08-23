@@ -19,6 +19,10 @@ input AddColumnInput {
 	placement: PlacementInput! = {parentId: null, beforeId: null}
 	label: String!
 	type: ColumnTypeInput!
+	"""
+	Clamped to the parent's effective audience (P.4).
+	"""
+	audience: Audience! = ALL
 }
 
 """
@@ -32,6 +36,50 @@ input AddGroupInput {
 	placement: PlacementInput! = {parentId: null, beforeId: null}
 	label: String!
 	cardinality: Cardinality! = ONE
+	"""
+	Clamped to the parent's effective audience (P.4).
+	"""
+	audience: Audience! = ALL
+}
+
+"""
+`addNote` input.
+"""
+input AddNoteInput {
+	procedureId: ID!
+	"""
+	Where the note goes; omitted = appended at the root.
+	"""
+	placement: PlacementInput! = {parentId: null, beforeId: null}
+	"""
+	Heading; omitted or blank = none.
+	"""
+	title: String
+	body: String!
+	"""
+	Clamped to the parent's effective audience (P.4).
+	"""
+	audience: Audience! = ALL
+}
+
+"""
+`addSection` input.
+"""
+input AddSectionInput {
+	procedureId: ID!
+	"""
+	Where the section goes; omitted = appended at the root.
+	"""
+	placement: PlacementInput! = {parentId: null, beforeId: null}
+	title: String!
+	"""
+	Help text under the title; omitted or blank = none.
+	"""
+	help: String
+	"""
+	Clamped to the parent's effective audience (P.4).
+	"""
+	audience: Audience! = ALL
 }
 
 """
@@ -68,6 +116,23 @@ input AttachmentTypeInput {
 	Per-file byte limit; omitted = unlimited.
 	"""
 	maxBytes: Int
+}
+
+"""
+Who sees an element (platform P.4): `REVIEWER` is DN's private.
+The *effective* audience of an element is the narrowest along its
+ancestor path — an `ALL` element inside a `REVIEWER` section is
+reviewer-only.
+"""
+enum Audience {
+	"""
+	Every surface: the applicant form and the reviewer screen.
+	"""
+	ALL
+	"""
+	The reviewer surface only.
+	"""
+	REVIEWER
 }
 
 type BooleanType {
@@ -193,14 +258,72 @@ input DiscardRevisionDraftInput {
 }
 
 """
-The schema as a flat list.
+A typed field (DESIGN §2.1).
 """
-type DraftSchema {
+type DraftColumn {
+	id: ID!
 	"""
-	Every element, **document order** (a group precedes its
-	children; siblings in their order), each naming its parent.
+	The containing group or section; `null` at the root.
 	"""
-	elements: [SchemaElement!]!
+	parentId: ID
+	label: String!
+	type: ColumnType!
+	audience: Audience!
+}
+
+"""
+A column, a group, a section or a note.
+"""
+union DraftElement = DraftColumn | DraftGroup | DraftSection | DraftNote
+
+"""
+An ordered container of elements (DESIGN §2.1).
+"""
+type DraftGroup {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	label: String!
+	cardinality: Cardinality!
+	audience: Audience!
+}
+
+"""
+An explication: prose, no data. A `REVIEWER` note is authored
+guidance for instructors.
+"""
+type DraftNote {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	"""
+	Heading; `null` when none.
+	"""
+	title: String
+	body: String!
+	audience: Audience!
+}
+
+"""
+A header section: presentation, may contain elements (DESIGN
+§2.6). Its id is a kernel `NodeId` (§2.6, surface node identity).
+"""
+type DraftSection {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	title: String!
+	"""
+	Help text under the title; `null` when none.
+	"""
+	help: String
+	audience: Audience!
 }
 
 """
@@ -281,7 +404,7 @@ type Member {
 input MoveElementInput {
 	procedureId: ID!
 	"""
-	A column or a group (with its subtree).
+	Any element (a group or section with its subtree).
 	"""
 	id: ID!
 	placement: PlacementInput!
@@ -314,22 +437,44 @@ type Mutation {
 	"""
 	addGroup(input: AddGroupInput!): Procedure!
 	"""
-	Changes a column's label or type (the type carries whether it
-	holds many values); its id — its identity for the impact
-	report — never changes.
+	Adds an empty section to the procedure's revision draft;
+	placed like `addColumn`. Its id is a kernel `NodeId` (DESIGN
+	§2.6, surface node identity).
+	"""
+	addSection(input: AddSectionInput!): Procedure!
+	"""
+	Adds a note to the procedure's revision draft; placed like
+	`addColumn`. A `REVIEWER` note is guidance for instructors.
+	"""
+	addNote(input: AddNoteInput!): Procedure!
+	"""
+	Changes a column's label, type (the type carries whether it
+	holds many values) or audience; its id — its identity for the
+	impact report — never changes.
 	"""
 	updateColumn(input: UpdateColumnInput!): Procedure!
 	"""
-	Changes a group's label or cardinality; its id and children
-	stay.
+	Changes a group's label, cardinality or audience; its id and
+	children stay.
 	"""
 	updateGroup(input: UpdateGroupInput!): Procedure!
 	"""
-	Moves a column or a group (with its subtree) to `placement`.
+	Changes a section's title, help or audience; its id and
+	children stay.
+	"""
+	updateSection(input: UpdateSectionInput!): Procedure!
+	"""
+	Changes a note's title, body or audience; its id stays.
+	"""
+	updateNote(input: UpdateNoteInput!): Procedure!
+	"""
+	Moves an element (a group or section with its subtree) to
+	`placement`.
 	"""
 	moveElement(input: MoveElementInput!): Procedure!
 	"""
-	Removes a column or a group (with its subtree) from the draft.
+	Removes an element (a group or section with its subtree) from
+	the draft.
 	"""
 	removeElement(input: RemoveElementInput!): Procedure!
 	"""
@@ -390,8 +535,9 @@ type OrganizationRef {
 }
 
 """
-Where to put an element: `parentId` names a group (`null` = root),
-`beforeId` a sibling to insert in front of (`null` = append).
+Where to put an element: `parentId` names a group or a section
+(`null` = root), `beforeId` a sibling to insert in front of
+(`null` = append).
 """
 input PlacementInput {
 	parentId: ID
@@ -460,7 +606,7 @@ type Query {
 input RemoveElementInput {
 	procedureId: ID!
 	"""
-	A column or a group (with its subtree).
+	Any element (a group or section with its subtree).
 	"""
 	id: ID!
 }
@@ -475,40 +621,11 @@ type RevisionDraft {
 	"""
 	base: ID
 	"""
-	The schema under edit.
+	Every element of the authored tree, **document order** (a
+	container precedes its children; siblings in their order),
+	each naming its parent.
 	"""
-	schema: DraftSchema!
-}
-
-"""
-A typed field (DESIGN §2.1).
-"""
-type SchemaColumn {
-	id: ID!
-	"""
-	The containing group; `null` at the root.
-	"""
-	parentId: ID
-	label: String!
-	type: ColumnType!
-}
-
-"""
-A column or a group.
-"""
-union SchemaElement = SchemaColumn | SchemaGroup
-
-"""
-An ordered container of elements (DESIGN §2.1).
-"""
-type SchemaGroup {
-	id: ID!
-	"""
-	The containing group; `null` at the root.
-	"""
-	parentId: ID
-	label: String!
-	cardinality: Cardinality!
+	elements: [DraftElement!]!
 }
 
 """
@@ -575,6 +692,11 @@ input UpdateColumnInput {
 	id: ID!
 	label: String
 	type: ColumnTypeInput
+	"""
+	Wider than the parent's effective audience is `INVALID_EDIT`
+	(P.4: the marker would lie).
+	"""
+	audience: Audience
 }
 
 """
@@ -585,6 +707,44 @@ input UpdateGroupInput {
 	id: ID!
 	label: String
 	cardinality: Cardinality
+	"""
+	Wider than the parent's effective audience is `INVALID_EDIT`.
+	"""
+	audience: Audience
+}
+
+"""
+`updateNote` input: an omitted field is left as it is.
+"""
+input UpdateNoteInput {
+	procedureId: ID!
+	id: ID!
+	"""
+	`null` or blank clears the title; omitted leaves it.
+	"""
+	title: String
+	body: String
+	"""
+	Wider than the parent's effective audience is `INVALID_EDIT`.
+	"""
+	audience: Audience
+}
+
+"""
+`updateSection` input: an omitted field is left as it is.
+"""
+input UpdateSectionInput {
+	procedureId: ID!
+	id: ID!
+	title: String
+	"""
+	`null` or blank clears the help; omitted leaves it.
+	"""
+	help: String
+	"""
+	Wider than the parent's effective audience is `INVALID_EDIT`.
+	"""
+	audience: Audience
 }
 
 type Viewer {

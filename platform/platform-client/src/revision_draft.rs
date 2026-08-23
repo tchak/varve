@@ -1,5 +1,7 @@
-//! A procedure's revision draft: the schema editor's read and its
-//! element mutations (`design/graphql.md` G.6, revision-draft slice).
+//! A procedure's revision draft: the editor's read and its element
+//! mutations (`design/graphql.md` G.7, authored-tree amendment).
+//! The draft is the authored tree — columns, groups, sections and
+//! notes, each carrying its audience — flattened in document order.
 //! Every mutation answers with the procedure's draft as stored, so an
 //! editor needs one round-trip per edit.
 
@@ -46,42 +48,70 @@ pub struct DraftOrganization {
 #[cynic(graphql_type = "RevisionDraft")]
 pub struct RevisionDraft {
     pub base: Option<cynic::Id>,
-    pub schema: DraftSchema,
-}
-
-#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftSchema")]
-pub struct DraftSchema {
-    /// Document order; each element names its parent group.
-    pub elements: Vec<SchemaElement>,
+    /// The authored tree, document order; each element names its
+    /// parent (a group or a section).
+    pub elements: Vec<DraftElement>,
 }
 
 #[derive(cynic::InlineFragments, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "SchemaElement")]
-pub enum SchemaElement {
-    Column(SchemaColumn),
-    Group(SchemaGroup),
+#[cynic(graphql_type = "DraftElement")]
+pub enum DraftElement {
+    Column(DraftColumn),
+    Group(DraftGroup),
+    Section(DraftSection),
+    Note(DraftNote),
     #[cynic(fallback)]
     Unknown,
 }
 
+/// Who sees an element (platform P.4): `Reviewer` is DN's private.
+/// The *effective* audience is the narrowest along the ancestor path.
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[cynic(graphql_type = "Audience")]
+pub enum Audience {
+    All,
+    Reviewer,
+}
+
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "SchemaColumn")]
-pub struct SchemaColumn {
+#[cynic(graphql_type = "DraftColumn")]
+pub struct DraftColumn {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnType,
+    pub audience: Audience,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "SchemaGroup")]
-pub struct SchemaGroup {
+#[cynic(graphql_type = "DraftGroup")]
+pub struct DraftGroup {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub label: String,
     pub cardinality: Cardinality,
+    pub audience: Audience,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "DraftSection")]
+pub struct DraftSection {
+    pub id: cynic::Id,
+    pub parent_id: Option<cynic::Id>,
+    pub title: String,
+    pub help: Option<String>,
+    pub audience: Audience,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "DraftNote")]
+pub struct DraftNote {
+    pub id: cynic::Id,
+    pub parent_id: Option<cynic::Id>,
+    pub title: Option<String>,
+    pub body: String,
+    pub audience: Audience,
 }
 
 #[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -344,8 +374,9 @@ pub struct GeometryTypeInput {
     pub multiple: Option<bool>,
 }
 
-/// Where an element goes: `parent_id` a group (`None` = root),
-/// `before_id` a sibling to insert in front of (`None` = append).
+/// Where an element goes: `parent_id` a group or section (`None` =
+/// root), `before_id` a sibling to insert in front of (`None` =
+/// append).
 #[derive(cynic::InputObject, Debug, Clone, Default)]
 pub struct PlacementInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -362,6 +393,9 @@ pub struct AddColumnInput {
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnTypeInput,
+    /// Omitted = `All`, clamped to the parent's effective audience.
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
 }
 
 #[derive(cynic::InputObject, Debug, Clone)]
@@ -372,6 +406,32 @@ pub struct AddGroupInput {
     pub label: String,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub cardinality: Option<Cardinality>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
+}
+
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct AddSectionInput {
+    pub procedure_id: cynic::Id,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<PlacementInput>,
+    pub title: String,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
+}
+
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct AddNoteInput {
+    pub procedure_id: cynic::Id,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub placement: Option<PlacementInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub body: String,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
 }
 
 /// An omitted field is left as it is.
@@ -383,6 +443,8 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[cynic(rename = "type", skip_serializing_if = "Option::is_none")]
     pub ty: Option<ColumnTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
 }
 
 /// An omitted field is left as it is.
@@ -394,6 +456,34 @@ pub struct UpdateGroupInput {
     pub label: Option<String>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub cardinality: Option<Cardinality>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
+}
+
+/// An omitted field is left as it is; a blank `help` clears it.
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct UpdateSectionInput {
+    pub procedure_id: cynic::Id,
+    pub id: cynic::Id,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
+}
+
+/// An omitted field is left as it is; a blank `title` clears it.
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct UpdateNoteInput {
+    pub procedure_id: cynic::Id,
+    pub id: cynic::Id,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub audience: Option<Audience>,
 }
 
 #[derive(cynic::InputObject, Debug, Clone)]
@@ -448,13 +538,42 @@ pub struct AddGroup {
     pub add_group: ProcedureRevisionDraft,
 }
 
+/// Variables of [`AddSection`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct AddSectionVariables {
+    pub input: AddSectionInput,
+}
+
+/// `addSection`: placed like `addColumn`.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "AddSectionVariables")]
+pub struct AddSection {
+    #[arguments(input: $input)]
+    pub add_section: ProcedureRevisionDraft,
+}
+
+/// Variables of [`AddNote`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct AddNoteVariables {
+    pub input: AddNoteInput,
+}
+
+/// `addNote`: placed like `addColumn`.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "AddNoteVariables")]
+pub struct AddNote {
+    #[arguments(input: $input)]
+    pub add_note: ProcedureRevisionDraft,
+}
+
 /// Variables of [`UpdateColumn`].
 #[derive(cynic::QueryVariables, Debug)]
 pub struct UpdateColumnVariables {
     pub input: UpdateColumnInput,
 }
 
-/// `updateColumn`: label or type (which carries `multiple`); the id never changes.
+/// `updateColumn`: label, type (which carries `multiple`) or
+/// audience; the id never changes.
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Mutation", variables = "UpdateColumnVariables")]
 pub struct UpdateColumn {
@@ -468,12 +587,40 @@ pub struct UpdateGroupVariables {
     pub input: UpdateGroupInput,
 }
 
-/// `updateGroup`: label or cardinality.
+/// `updateGroup`: label, cardinality or audience.
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Mutation", variables = "UpdateGroupVariables")]
 pub struct UpdateGroup {
     #[arguments(input: $input)]
     pub update_group: ProcedureRevisionDraft,
+}
+
+/// Variables of [`UpdateSection`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateSectionVariables {
+    pub input: UpdateSectionInput,
+}
+
+/// `updateSection`: title, help or audience.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "UpdateSectionVariables")]
+pub struct UpdateSection {
+    #[arguments(input: $input)]
+    pub update_section: ProcedureRevisionDraft,
+}
+
+/// Variables of [`UpdateNote`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateNoteVariables {
+    pub input: UpdateNoteInput,
+}
+
+/// `updateNote`: title, body or audience.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "UpdateNoteVariables")]
+pub struct UpdateNote {
+    #[arguments(input: $input)]
+    pub update_note: ProcedureRevisionDraft,
 }
 
 /// Variables of [`MoveElement`].
@@ -482,7 +629,7 @@ pub struct MoveElementVariables {
     pub input: MoveElementInput,
 }
 
-/// `moveElement`: a column or a group with its subtree.
+/// `moveElement`: any element (a group or section with its subtree).
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Mutation", variables = "MoveElementVariables")]
 pub struct MoveElement {
@@ -496,7 +643,7 @@ pub struct RemoveElementVariables {
     pub input: RemoveElementInput,
 }
 
-/// `removeElement`: a column or a group with its subtree.
+/// `removeElement`: any element (a group or section with its subtree).
 #[derive(cynic::QueryFragment, Debug)]
 #[cynic(graphql_type = "Mutation", variables = "RemoveElementVariables")]
 pub struct RemoveElement {
@@ -531,8 +678,11 @@ mod tests {
         let document = serde_json::to_value(&read).unwrap();
         let query = document["query"].as_str().unwrap();
         assert!(query.contains("revisionDraft"), "{query}");
-        assert!(query.contains("... on SchemaColumn"), "{query}");
+        assert!(query.contains("... on DraftColumn"), "{query}");
+        assert!(query.contains("... on DraftSection"), "{query}");
+        assert!(query.contains("... on DraftNote"), "{query}");
         assert!(query.contains("... on IntegerType"), "{query}");
+        assert!(query.contains("audience"), "{query}");
 
         let add = AddColumn::build(AddColumnVariables {
             input: AddColumnInput {
@@ -540,6 +690,7 @@ mod tests {
                 placement: None,
                 label: "Nom".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
+                audience: None,
             },
         });
         let document = serde_json::to_value(&add).unwrap();
@@ -555,5 +706,24 @@ mod tests {
             serde_json::json!({ "integer": { "unit": "SQUARE_METRE" } })
         );
         assert!(input.get("placement").is_none());
+        assert!(input.get("audience").is_none());
+
+        let add = AddNote::build(AddNoteVariables {
+            input: AddNoteInput {
+                procedure_id: cynic::Id::new("abc"),
+                placement: None,
+                title: None,
+                body: "Vérifier le SIRET.".into(),
+                audience: Some(Audience::Reviewer),
+            },
+        });
+        let document = serde_json::to_value(&add).unwrap();
+        assert!(
+            document["query"]
+                .as_str()
+                .unwrap()
+                .contains("addNote(input: $input)")
+        );
+        assert_eq!(document["variables"]["input"]["audience"], "REVIEWER");
     }
 }

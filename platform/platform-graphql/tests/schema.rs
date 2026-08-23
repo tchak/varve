@@ -6,8 +6,8 @@
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
 use platform_client::revision_draft::{
-    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput,
-    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, SchemaElement, Unit,
+    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, DraftElement,
+    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
 };
 use platform_client::viewer::ViewerQuery;
 use platform_core::{Principal, connect, register};
@@ -503,23 +503,27 @@ fn the_client_mirrors_every_error_code() {
 }
 
 /// The draft selection every draft mutation and the read share.
-const DRAFT: &str = "revisionDraft { base schema { elements {
+const DRAFT: &str = "revisionDraft { base elements {
     __typename
-    ... on SchemaColumn { id parentId label type { __typename
+    ... on DraftColumn { id parentId label audience type { __typename
         ... on IntegerType { unit } ... on DecimalType { unit }
         ... on EnumType { multiple options { id label } }
         ... on AttachmentType { multiple accept maxBytes }
         ... on GeometryType { multiple } } }
-    ... on SchemaGroup { id parentId label cardinality }
-} } }";
+    ... on DraftGroup { id parentId label cardinality audience }
+    ... on DraftSection { id parentId title help audience }
+    ... on DraftNote { id parentId title body audience }
+} }";
 
 fn draft_mutation(field: &str, input_type: &str) -> String {
     format!("mutation($input: {input_type}!) {{ {field}(input: $input) {{ id {DRAFT} }} }}")
 }
 
-/// `(typename, id, parentId, label)` of every element, document order.
+/// `(typename, id, parentId, text)` of every element, document order
+/// — the text is a column or group's label, a section's title, a
+/// note's body.
 fn outline(procedure: &Value) -> Vec<(String, String, Option<String>, String)> {
-    procedure["revisionDraft"]["schema"]["elements"]
+    procedure["revisionDraft"]["elements"]
         .as_array()
         .expect("elements")
         .iter()
@@ -528,7 +532,12 @@ fn outline(procedure: &Value) -> Vec<(String, String, Option<String>, String)> {
                 e["__typename"].as_str().unwrap().to_owned(),
                 id_of(e),
                 e["parentId"].as_str().map(str::to_owned),
-                e["label"].as_str().unwrap().to_owned(),
+                e["label"]
+                    .as_str()
+                    .or(e["title"].as_str())
+                    .or(e["body"].as_str())
+                    .unwrap()
+                    .to_owned(),
             )
         })
         .collect()
@@ -593,9 +602,9 @@ async fn revision_draft_editing_journey() {
         .await;
     assert!(p["revisionDraft"]["base"].is_null());
     assert_eq!(labels(&p), ["Nom"]);
-    let nom = id_of(&p["revisionDraft"]["schema"]["elements"][0]);
+    let nom = id_of(&p["revisionDraft"]["elements"][0]);
     assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][0]["type"]["__typename"],
+        p["revisionDraft"]["elements"][0]["type"]["__typename"],
         "TextType"
     );
 
@@ -608,7 +617,7 @@ async fn revision_draft_editing_journey() {
             json!({ "procedureId": pid, "label": "Adresses", "cardinality": "MANY" }),
         )
         .await;
-    let adresses = id_of(&p["revisionDraft"]["schema"]["elements"][1]);
+    let adresses = id_of(&p["revisionDraft"]["elements"][1]);
     let p = api
         .edit(
             &alice,
@@ -618,7 +627,7 @@ async fn revision_draft_editing_journey() {
                     "placement": { "parentId": adresses } }),
         )
         .await;
-    let rue = id_of(&p["revisionDraft"]["schema"]["elements"][2]);
+    let rue = id_of(&p["revisionDraft"]["elements"][2]);
     let p = api
         .edit(
             &alice,
@@ -629,7 +638,7 @@ async fn revision_draft_editing_journey() {
         )
         .await;
     assert_eq!(labels(&p), ["Nom", "Adresses", "Ville", "Rue"]);
-    let ville = id_of(&p["revisionDraft"]["schema"]["elements"][2]);
+    let ville = id_of(&p["revisionDraft"]["elements"][2]);
     assert_eq!(outline(&p)[2].2.as_deref(), Some(adresses.as_str()));
     assert_eq!(outline(&p)[1].2, None);
 
@@ -656,7 +665,7 @@ async fn revision_draft_editing_journey() {
                     "type": { "decimal": { "unit": "SQUARE_METRE" } } }),
         )
         .await;
-    let surface = &p["revisionDraft"]["schema"]["elements"][2];
+    let surface = &p["revisionDraft"]["elements"][2];
     assert_eq!(id_of(surface), nom);
     assert_eq!(surface["label"], "Surface");
     // Many values ride the type: only choices, attachments and
@@ -670,10 +679,7 @@ async fn revision_draft_editing_journey() {
             json!({ "procedureId": pid, "id": nom, "type": { "attachment": { "multiple": true } } }),
         )
         .await;
-    assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][2]["type"]["multiple"],
-        true
-    );
+    assert_eq!(p["revisionDraft"]["elements"][2]["type"]["multiple"], true);
     let p = api
         .edit(
             &alice,
@@ -682,10 +688,7 @@ async fn revision_draft_editing_journey() {
             json!({ "procedureId": pid, "id": nom, "type": { "geometry": {} } }),
         )
         .await;
-    assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][2]["type"]["multiple"],
-        false
-    );
+    assert_eq!(p["revisionDraft"]["elements"][2]["type"]["multiple"], false);
     // Back to a decimal: a type without the fact.
     let p = api
         .edit(
@@ -696,7 +699,7 @@ async fn revision_draft_editing_journey() {
                     "type": { "decimal": { "unit": "SQUARE_METRE" } } }),
         )
         .await;
-    let surface = &p["revisionDraft"]["schema"]["elements"][2];
+    let surface = &p["revisionDraft"]["elements"][2];
     assert!(surface["type"].get("multiple").is_none());
     assert_eq!(surface["type"]["__typename"], "DecimalType");
     assert_eq!(surface["type"]["unit"], "SQUARE_METRE");
@@ -713,7 +716,7 @@ async fn revision_draft_editing_journey() {
         )
         .await;
     assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][1]["type"]["options"],
+        p["revisionDraft"]["elements"][1]["type"]["options"],
         json!([])
     );
     let p = api
@@ -726,7 +729,7 @@ async fn revision_draft_editing_journey() {
                         { "label": "Paris" }, { "id": "lyon", "label": "Lyon" } ] } } }),
         )
         .await;
-    let options = &p["revisionDraft"]["schema"]["elements"][1]["type"]["options"];
+    let options = &p["revisionDraft"]["elements"][1]["type"]["options"];
     assert_eq!(options[0]["label"], "Paris");
     assert!(!options[0]["id"].as_str().unwrap().is_empty());
     assert_eq!(options[1], json!({ "id": "lyon", "label": "Lyon" }));
@@ -740,14 +743,8 @@ async fn revision_draft_editing_journey() {
             json!({ "procedureId": pid, "id": adresses, "label": "Adresse", "cardinality": "ONE" }),
         )
         .await;
-    assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][0]["label"],
-        "Adresse"
-    );
-    assert_eq!(
-        p["revisionDraft"]["schema"]["elements"][0]["cardinality"],
-        "ONE"
-    );
+    assert_eq!(p["revisionDraft"]["elements"][0]["label"], "Adresse");
+    assert_eq!(p["revisionDraft"]["elements"][0]["cardinality"], "ONE");
     let p = api
         .edit(
             &alice,
@@ -781,6 +778,151 @@ async fn revision_draft_editing_journey() {
         )
         .await;
     assert!(p["revisionDraft"].is_null(), "{p}");
+}
+
+#[tokio::test]
+async fn sections_notes_and_audiences_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("tree"), "Org")
+        .await;
+    let procedure = api.create_procedure(&alice, &id_of(&org), "Aide").await;
+    let pid = id_of(&procedure);
+
+    // addSection: title trimmed, blank help collapses to null.
+    let p = api
+        .edit(
+            &alice,
+            "addSection",
+            "AddSectionInput",
+            json!({ "procedureId": pid, "title": " Identité ", "help": "   " }),
+        )
+        .await;
+    let section = &p["revisionDraft"]["elements"][0];
+    assert_eq!(section["__typename"], "DraftSection");
+    assert_eq!(section["title"], "Identité");
+    assert!(section["help"].is_null());
+    assert_eq!(section["audience"], "ALL");
+    let sid = id_of(section);
+
+    // A reviewer-only note inside the section: guidance DN's
+    // annotations privées never had.
+    let p = api
+        .edit(
+            &alice,
+            "addNote",
+            "AddNoteInput",
+            json!({ "procedureId": pid, "body": "Vérifier la pièce.", "audience": "REVIEWER",
+                    "placement": { "parentId": sid } }),
+        )
+        .await;
+    let note = &p["revisionDraft"]["elements"][1];
+    assert_eq!(note["__typename"], "DraftNote");
+    assert_eq!(note["parentId"], json!(sid));
+    assert!(note["title"].is_null());
+    assert_eq!(note["audience"], "REVIEWER");
+    let nid = id_of(note);
+
+    // A column inside the section, default audience.
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": true },
+                    "placement": { "parentId": sid } }),
+        )
+        .await;
+    let nom = id_of(&p["revisionDraft"]["elements"][2]);
+    assert_eq!(p["revisionDraft"]["elements"][2]["audience"], "ALL");
+
+    // Narrow the whole section to reviewers…
+    let p = api
+        .edit(
+            &alice,
+            "updateSection",
+            "UpdateSectionInput",
+            json!({ "procedureId": pid, "id": sid, "audience": "REVIEWER", "help": "Interne" }),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["elements"][0]["audience"], "REVIEWER");
+    assert_eq!(p["revisionDraft"]["elements"][0]["help"], "Interne");
+
+    // …then explicitly widening a child is the refused contradiction
+    // (P.4), while adding with the default clamps silently.
+    let code = api
+        .edit_error(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "audience": "ALL" }),
+        )
+        .await;
+    assert_eq!(code, "INVALID_EDIT");
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Interne", "type": { "text": true },
+                    "placement": { "parentId": sid } }),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["elements"][3]["audience"], "REVIEWER");
+
+    // updateNote sets a title; an explicit null clears the section's
+    // help (omitted leaves it — MaybeUndefined).
+    let p = api
+        .edit(
+            &alice,
+            "updateNote",
+            "UpdateNoteInput",
+            json!({ "procedureId": pid, "id": nid, "title": "Attention" }),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["elements"][1]["title"], "Attention");
+    let p = api
+        .edit(
+            &alice,
+            "updateSection",
+            "UpdateSectionInput",
+            json!({ "procedureId": pid, "id": sid, "help": null }),
+        )
+        .await;
+    assert!(p["revisionDraft"]["elements"][0]["help"].is_null());
+
+    // Moving out of the reviewer-only section restores the marker's
+    // effect: the column authored ALL is ALL again at the root.
+    let p = api
+        .edit(
+            &alice,
+            "moveElement",
+            "MoveElementInput",
+            json!({ "procedureId": pid, "id": nom, "placement": {} }),
+        )
+        .await;
+    let moved = p["revisionDraft"]["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| id_of(e) == nom)
+        .unwrap()
+        .clone();
+    assert!(moved["parentId"].is_null());
+    assert_eq!(moved["audience"], "ALL");
+
+    // Removing the section takes its subtree.
+    let p = api
+        .edit(
+            &alice,
+            "removeElement",
+            "RemoveElementInput",
+            json!({ "procedureId": pid, "id": sid }),
+        )
+        .await;
+    assert_eq!(labels(&p), ["Nom"]);
 }
 
 #[tokio::test]
@@ -839,7 +981,7 @@ async fn revision_draft_errors_are_structured() {
             json!({ "procedureId": pid, "label": "Rows", "cardinality": "MANY" }),
         )
         .await;
-    let rows = id_of(&p["revisionDraft"]["schema"]["elements"][0]);
+    let rows = id_of(&p["revisionDraft"]["elements"][0]);
     let p = api
         .edit(
             &alice,
@@ -849,7 +991,7 @@ async fn revision_draft_errors_are_structured() {
                     "placement": { "parentId": rows } }),
         )
         .await;
-    let cell = id_of(&p["revisionDraft"]["schema"]["elements"][1]);
+    let cell = id_of(&p["revisionDraft"]["elements"][1]);
     for (field, input_type, input) in [
         // many inside many: depth policy
         (
@@ -922,6 +1064,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 placement: None,
                 label: "Surface".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
+                audience: None,
             },
         }),
     )
@@ -930,8 +1073,8 @@ async fn the_typed_client_edits_and_reads_the_draft() {
     .add_column;
     let draft = added.revision_draft.expect("draft started");
     assert!(draft.base.is_none());
-    let SchemaElement::Column(column) = draft.schema.elements[0].clone() else {
-        panic!("{:?}", draft.schema.elements);
+    let DraftElement::Column(column) = draft.elements[0].clone() else {
+        panic!("{:?}", draft.elements);
     };
     assert_eq!(column.label, "Surface");
     assert!(column.parent_id.is_none());
@@ -961,6 +1104,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 }),
                 label: "Inside a column".into(),
                 ty: ColumnTypeInput::text(),
+                audience: None,
             },
         }),
     )
@@ -974,13 +1118,19 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
     let sdl = schema().sdl();
     for needle in [
         "revisionDraft: RevisionDraft",
-        "elements: [SchemaElement!]!",
-        "union SchemaElement = SchemaColumn | SchemaGroup",
+        "elements: [DraftElement!]!",
+        "union DraftElement = DraftColumn | DraftGroup | DraftSection | DraftNote",
         "union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType",
+        "enum Audience",
+        "audience: Audience!",
         "addColumn(input: AddColumnInput!): Procedure!",
         "addGroup(input: AddGroupInput!): Procedure!",
+        "addSection(input: AddSectionInput!): Procedure!",
+        "addNote(input: AddNoteInput!): Procedure!",
         "updateColumn(input: UpdateColumnInput!): Procedure!",
         "updateGroup(input: UpdateGroupInput!): Procedure!",
+        "updateSection(input: UpdateSectionInput!): Procedure!",
+        "updateNote(input: UpdateNoteInput!): Procedure!",
         "moveElement(input: MoveElementInput!): Procedure!",
         "removeElement(input: RemoveElementInput!): Procedure!",
         "discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!",
@@ -988,10 +1138,12 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
     }
-    // G.2 / G.5 Q1: the tree is flat — a group names its parent and
-    // carries no children.
-    let start = sdl.find("type SchemaGroup {").expect("SchemaGroup");
-    let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
-    assert!(body.contains("parentId: ID"), "{body}");
-    assert!(!body.contains('['), "SchemaGroup has a list field:\n{body}");
+    // G.2 / G.5 Q1: the tree is flat — containers name their parent
+    // and carry no children.
+    for container in ["DraftGroup", "DraftSection"] {
+        let start = sdl.find(&format!("type {container} {{")).expect(container);
+        let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
+        assert!(body.contains("parentId: ID"), "{body}");
+        assert!(!body.contains('['), "{container} has a list field:\n{body}");
+    }
 }

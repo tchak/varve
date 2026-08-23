@@ -51,15 +51,15 @@ impl Procedure {
         if self.procedure.revision_draft.is_unloaded() {
             return Err(internal("procedure loaded without its revision draft"));
         }
-        let schema = platform_core::revision_draft_schema(&self.procedure).map_err(internal)?;
-        Ok(schema.map(|schema| {
+        let tree = platform_core::revision_draft_tree(&self.procedure).map_err(internal)?;
+        Ok(tree.map(|tree| {
             let base = self
                 .procedure
                 .revision_draft
                 .get()
                 .as_ref()
                 .and_then(|draft| draft.base.as_deref());
-            RevisionDraft::new(base, &schema)
+            RevisionDraft::new(base, &tree)
         }))
     }
 }
