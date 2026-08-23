@@ -1,24 +1,26 @@
 //! The procedure catalog row (P.4): title, description, owning
-//! organization — and the **revision draft**, the schema being
-//! edited before it is published (P.4, *Procedure drafts*). The
-//! revision DAG, surfaces, rules, and the open/closed lifecycle still
-//! arrive with the kernel edge (`varve-service`); until then the
-//! draft is the one kernel value the platform holds.
+//! organization — and the **revision draft**, the authored tree being
+//! edited before it is published (P.4, *The authored tree is the
+//! draft's single source*). The revision DAG, publication, rules and
+//! the open/closed lifecycle still arrive with the kernel edge
+//! (`varve-service`); until then the draft is the one kernel-adjacent
+//! value the platform holds.
 //!
 //! The draft is a nullable embedded object on the row, deferred out
-//! of the catalog `SELECT`: its schema travels as the kernel's own
-//! wire-canonical bytes ([`varve_wire::schema_bytes`]), so what is
-//! stored is exactly the value that will be published — no platform
-//! mirror of the schema type. Edits go through [`edit_revision_draft`], which
-//! composes the pure operations of [`crate::schema_edit`] with a load
+//! of the catalog `SELECT`: it stores the authored tree
+//! ([`crate::tree::Tree`]) as platform-owned JSON — the tree carries
+//! audiences and presentation nodes, which no kernel object holds, so
+//! publication *derives* the kernel schema from it
+//! ([`crate::tree::Tree::schema`]) rather than the store holding
+//! kernel bytes. Edits go through [`edit_revision_draft`], which
+//! composes the pure operations of [`crate::tree_edit`] with a load
 //! and a version-checked store.
 
 use toasty::Deferred;
-use varve_schema::Schema;
-use varve_wire::{ReadError, schema_bytes, schema_from_bytes};
 
 use crate::organization::Organization;
-use crate::schema_edit::EditError;
+use crate::tree::{Tree, TreeDecodeError};
+use crate::tree_edit::EditError;
 
 /// A procedure's catalog entry.
 #[derive(Debug, toasty::Model)]
@@ -51,8 +53,9 @@ pub struct Procedure {
     #[auto]
     pub updated_at: jiff::Timestamp,
 
-    /// The unpublished schema being edited; `None` when nothing is in
-    /// progress. Deferred: loaded only by [`find_procedure_with_revision_draft`].
+    /// The unpublished authored tree being edited; `None` when nothing
+    /// is in progress. Deferred: loaded only by
+    /// [`find_procedure_with_revision_draft`].
     pub revision_draft: Deferred<Option<RevisionDraft>>,
 
     /// Optimistic concurrency (toasty-managed): two editors saving the
@@ -65,12 +68,12 @@ pub struct Procedure {
 
 /// The draft of a procedure's next **revision** — named for what it
 /// publishes as, since "draft" alone will also be a case-file state.
-/// Holds the schema today; the surface draft joins it when the editor
-/// grows a surface side, and both publish together as one revision.
-#[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
+/// Holds the authored tree; publication derives the schema and
+/// compiles the surfaces from it (P.4).
+#[derive(Debug, Clone, PartialEq, toasty::Embed)]
 pub struct RevisionDraft {
-    /// The schema under edit, wire-canonical.
-    pub schema: SchemaBytes,
+    /// The authored tree under edit, as its stored JSON bytes.
+    pub tree: TreeBytes,
 
     /// The published revision this draft forks from (its id) — the
     /// publication's parent. `None` until the procedure has a first
@@ -79,20 +82,20 @@ pub struct RevisionDraft {
     pub base: Option<String>,
 }
 
-/// A kernel [`Schema`] as its wire-canonical bytes (one `BYTEA`
-/// column). Constructed from a `Schema` only, so the column never
-/// holds anything [`schema_from_bytes`] would refuse — short of
-/// corruption, which [`RevisionDraftError::Corrupt`] reports.
+/// An authored [`Tree`] as its stored JSON bytes (one `BYTEA`
+/// column). Constructed from a `Tree` only, so the column never holds
+/// anything [`Tree::from_bytes`] would refuse — short of corruption,
+/// which [`RevisionDraftError::Corrupt`] reports.
 #[derive(Debug, Clone, PartialEq, Eq, toasty::Embed)]
-pub struct SchemaBytes(Vec<u8>);
+pub struct TreeBytes(Vec<u8>);
 
-impl SchemaBytes {
-    pub fn encode(schema: &Schema) -> Self {
-        Self(schema_bytes(schema))
+impl TreeBytes {
+    pub fn encode(tree: &Tree) -> Self {
+        Self(tree.to_bytes())
     }
 
-    pub fn decode(&self) -> Result<Schema, ReadError> {
-        schema_from_bytes(&self.0)
+    pub fn decode(&self) -> Result<Tree, TreeDecodeError> {
+        Tree::from_bytes(&self.0)
     }
 }
 
@@ -104,7 +107,7 @@ pub enum RevisionDraftError {
     /// crate's writes; a database-level corruption to surface, not
     /// silently replace.
     #[error("stored draft is unreadable: {0}")]
-    Corrupt(#[from] ReadError),
+    Corrupt(#[from] TreeDecodeError),
     /// Database failure, including the optimistic-concurrency conflict
     /// (`condition_failed`) when the row changed since it was loaded.
     #[error(transparent)]
@@ -147,22 +150,23 @@ pub async fn find_procedure_with_revision_draft(
         .await
 }
 
-/// The draft schema of a procedure loaded by
-/// [`find_procedure_with_revision_draft`]: `None` when no draft is in progress.
+/// The draft tree of a procedure loaded by
+/// [`find_procedure_with_revision_draft`]: `None` when no draft is in
+/// progress.
 ///
 /// # Panics
 ///
 /// If the draft was not loaded (the catalog lookups defer it).
-pub fn revision_draft_schema(procedure: &Procedure) -> Result<Option<Schema>, RevisionDraftError> {
+pub fn revision_draft_tree(procedure: &Procedure) -> Result<Option<Tree>, RevisionDraftError> {
     Ok(match procedure.revision_draft.get() {
-        Some(draft) => Some(draft.schema.decode()?),
+        Some(draft) => Some(draft.tree.decode()?),
         None => None,
     })
 }
 
-/// Applies `edit` to the procedure's draft schema and stores the
-/// result, returning the schema as stored. With no draft in progress
-/// the edit starts one from the empty schema. The procedure must come
+/// Applies `edit` to the procedure's draft tree and stores the
+/// result, returning the tree as stored. With no draft in progress
+/// the edit starts one from the empty tree. The procedure must come
 /// from [`find_procedure_with_revision_draft`]; on success it is updated in
 /// place (draft, `version`, `updated_at`).
 ///
@@ -172,22 +176,22 @@ pub fn revision_draft_schema(procedure: &Procedure) -> Result<Option<Schema>, Re
 pub async fn edit_revision_draft(
     db: &mut toasty::Db,
     procedure: &mut Procedure,
-    edit: impl FnOnce(&mut Schema) -> Result<(), EditError>,
-) -> Result<Schema, RevisionDraftError> {
-    let (mut schema, base) = match procedure.revision_draft.get() {
-        Some(draft) => (draft.schema.decode()?, draft.base.clone()),
-        None => (Schema::default(), None),
+    edit: impl FnOnce(&mut Tree) -> Result<(), EditError>,
+) -> Result<Tree, RevisionDraftError> {
+    let (mut tree, base) = match procedure.revision_draft.get() {
+        Some(draft) => (draft.tree.decode()?, draft.base.clone()),
+        None => (Tree::default(), None),
     };
-    edit(&mut schema)?;
+    edit(&mut tree)?;
     procedure
         .update()
         .revision_draft(Some(RevisionDraft {
-            schema: SchemaBytes::encode(&schema),
+            tree: TreeBytes::encode(&tree),
             base,
         }))
         .exec(db)
         .await?;
-    Ok(schema)
+    Ok(tree)
 }
 
 /// Drops the procedure's draft, if any. Same loading and concurrency

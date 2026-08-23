@@ -13,9 +13,10 @@
 //! subscriptions, notification outbox — arrives with later phases
 //! (P1–P3), as do the kernel-facing use-case services. The first
 //! kernel edge is the **procedure draft** ([`procedure`] +
-//! [`schema_edit`]): a kernel `Schema` edited in memory and parked as
-//! its wire-canonical bytes on the catalog row until publication
-//! (P.4), which is where `varve-service` will eventually plug in.
+//! [`tree_edit`]): the authored tree (P.4) edited in memory and
+//! parked as platform JSON on the catalog row until publication —
+//! which derives the kernel schema from it ([`tree::Tree::schema`])
+//! and is where `varve-service` will eventually plug in.
 //!
 //! Deliberate boundaries:
 //!
@@ -35,9 +36,10 @@ pub mod db;
 pub mod organization;
 pub mod principal;
 pub mod procedure;
-pub mod schema_edit;
 pub mod session;
 pub mod team;
+pub mod tree;
+pub mod tree_edit;
 
 pub use account::{
     Account, AuthError, RegisterError, register, update_profile, verify_credentials,
@@ -57,15 +59,10 @@ pub use organization::{
 };
 pub use principal::Principal;
 pub use procedure::{
-    Procedure, RevisionDraft, RevisionDraftError, SchemaBytes, create_procedure,
+    Procedure, RevisionDraft, RevisionDraftError, TreeBytes, create_procedure,
     discard_revision_draft, edit_revision_draft, find_procedure,
     find_procedure_with_revision_draft, list_account_procedures, list_organization_procedures,
-    revision_draft_schema,
-};
-pub use schema_edit::{
-    ColumnPatch, EditError, ElementId, GroupPatch, Parent, Placement, add_element, list_capable,
-    move_element, new_column_id, new_group_id, new_option_id, remove_element, update_column,
-    update_group,
+    revision_draft_tree,
 };
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
@@ -74,4 +71,12 @@ pub use session::{
 pub use team::{
     Team, TeamMembership, add_team_member, create_team, find_team, is_team_member,
     list_account_teams, list_organization_teams, list_team_members, remove_team_member,
+};
+pub use tree::{
+    Audience, Tree, TreeColumn, TreeDecodeError, TreeElement, TreeGroup, TreeNote, TreeSection,
+};
+pub use tree_edit::{
+    ColumnPatch, EditError, ElementId, GroupPatch, NotePatch, Parent, Placement, SectionPatch,
+    add_element, list_capable, move_element, new_column_id, new_group_id, new_node_id,
+    new_option_id, remove_element, update_column, update_group, update_note, update_section,
 };

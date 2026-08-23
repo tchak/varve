@@ -12,7 +12,10 @@
 //! unique emails/token hashes and never asserts on global counts.
 
 use jiff::{SignedDuration, Timestamp};
-use platform_core::{ColumnPatch, Placement, RevisionDraftError, add_element, update_column};
+use platform_core::{
+    Audience, ColumnPatch, Placement, RevisionDraftError, TreeColumn, TreeElement, add_element,
+    update_column,
+};
 use platform_core::{
     CreateApiTokenError, CreateOrganizationError, DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS,
     RegisterError, add_organization_member, add_team_member, connect, create_api_token,
@@ -22,10 +25,10 @@ use platform_core::{
     find_organization_by_slug, find_procedure, find_procedure_with_revision_draft,
     is_organization_member, list_account_organizations, list_account_teams, list_live_api_tokens,
     list_live_sessions, list_organization_procedures, list_organization_teams, new_column_id,
-    register, remove_organization_member, remove_team_member, revision_draft_schema, sweep_expired,
+    register, remove_organization_member, remove_team_member, revision_draft_tree, sweep_expired,
     sweep_expired_api_tokens, update_profile, verify_credentials,
 };
-use varve_schema::{Arity, Column, Element, ScalarType};
+use varve_schema::{Arity, ScalarType};
 
 /// Connects to the test database, applying migrations; `None` (after
 /// printing why) when `VARVE_TEST_DATABASE_URL` is unset so the test
@@ -914,23 +917,24 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .expect("exists");
-    assert_eq!(revision_draft_schema(&procedure).unwrap(), None);
+    assert_eq!(revision_draft_tree(&procedure).unwrap(), None);
     let id = new_column_id();
-    let stored = edit_revision_draft(&mut db, &mut procedure, |schema| {
+    let stored = edit_revision_draft(&mut db, &mut procedure, |tree| {
         add_element(
-            schema,
+            tree,
             &Placement::root(),
-            Element::Column(Column {
+            TreeElement::Column(TreeColumn {
                 id: id.clone(),
                 label: "Nom".into(),
                 ty: ScalarType::Text,
                 arity: Arity::One,
+                audience: Audience::All,
             }),
         )
     })
     .await
     .expect("first edit");
-    assert_eq!(stored.root.len(), 1);
+    assert_eq!(stored.elements.len(), 1);
 
     // The stored bytes decode to the same value on a fresh load, and
     // the next edit builds on them; the catalog lookup never loads it.
@@ -939,7 +943,7 @@ async fn procedure_draft_round_trips_through_edits() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        revision_draft_schema(&reloaded).unwrap(),
+        revision_draft_tree(&reloaded).unwrap(),
         Some(stored.clone())
     );
     assert!(
@@ -950,9 +954,9 @@ async fn procedure_draft_round_trips_through_edits() {
             .revision_draft
             .is_unloaded()
     );
-    let stored = edit_revision_draft(&mut db, &mut reloaded, |schema| {
+    let stored = edit_revision_draft(&mut db, &mut reloaded, |tree| {
         update_column(
-            schema,
+            tree,
             &id,
             ColumnPatch {
                 label: Some("Nom de famille".into()),
@@ -962,14 +966,14 @@ async fn procedure_draft_round_trips_through_edits() {
     })
     .await
     .expect("second edit");
-    match &stored.root[0] {
-        Element::Column(c) => assert_eq!(c.label, "Nom de famille"),
+    match &stored.elements[0] {
+        TreeElement::Column(c) => assert_eq!(c.label, "Nom de famille"),
         _ => panic!(),
     }
 
     // A rejected operation stores nothing.
-    let err = edit_revision_draft(&mut db, &mut reloaded, |schema| {
-        update_column(schema, &new_column_id(), ColumnPatch::default())
+    let err = edit_revision_draft(&mut db, &mut reloaded, |tree| {
+        update_column(tree, &new_column_id(), ColumnPatch::default())
     })
     .await
     .unwrap_err();
@@ -978,7 +982,7 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(revision_draft_schema(&again).unwrap(), Some(stored));
+    assert_eq!(revision_draft_tree(&again).unwrap(), Some(stored));
 
     // `procedure` is the stale copy from before the second edit:
     // optimistic concurrency refuses its save rather than overwriting.
@@ -994,10 +998,10 @@ async fn procedure_draft_round_trips_through_edits() {
     discard_revision_draft(&mut db, &mut fresh)
         .await
         .expect("discard");
-    assert_eq!(revision_draft_schema(&fresh).unwrap(), None);
+    assert_eq!(revision_draft_tree(&fresh).unwrap(), None);
     let after = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(revision_draft_schema(&after).unwrap(), None);
+    assert_eq!(revision_draft_tree(&after).unwrap(), None);
 }

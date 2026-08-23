@@ -22,13 +22,15 @@ thiserror.workspace = true
 toasty = { version = "0.10.0", features = ["postgresql", "jiff", "migration"] }
 toasty-cli = { version = "0.10.0", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
-# `procedure`: draft column ids are minted here (v4 — no ordering to preserve).
+# `procedure`: draft element ids are minted here (v4 — no ordering to preserve).
 uuid = { version = "1", features = ["v4"] }
-# The kernel edge (P.4 procedure drafts): the draft *is* a kernel
-# `Schema`, edited in memory and parked as its wire-canonical bytes.
+# `tree`: the authored tree is stored as platform-owned JSON (P.4) —
+# it carries audiences and presentation nodes no kernel object holds.
+serde_json = "1"
+# The kernel edge (P.4 procedure drafts): the authored tree derives
+# the kernel `Schema`, validated by the kernel on every edit.
 varve-core = { path = "../../crates/varve-core" }
 varve-schema = { path = "../../crates/varve-schema" }
-varve-wire = { path = "../../crates/varve-wire" }
 
 [dev-dependencies]
 varve-schema = { path = "../../crates/varve-schema" }
