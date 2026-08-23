@@ -360,17 +360,14 @@ async fn axe_scenario(
         "/organizations/{id}/procedures/{pid}/schema (choice options)",
     )
     .await?;
+    // A refused autosave: a blank label, blurred, is reported on the
+    // status line (no Save button exists with the script running).
     page.locator(locator!("#element-label"))
         .fill("   ", None)
         .await?;
-    page.get_by_role(
-        AriaRole::Button,
-        Some(GetByRoleOptions::default().name("Save").exact(true)),
-    )
-    .click(None)
-    .await?;
-    expect(page.locator(locator!("[role='alert']")))
-        .to_be_visible()
+    page.keyboard().press("Tab", None).await?;
+    expect(page.locator(locator!("[data-save-status]")))
+        .to_have_text("A label is required.")
         .await?;
     check_axe(
         &page,

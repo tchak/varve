@@ -849,12 +849,17 @@ async fn editor_page(
                                             </p>
                                         </div>
                                     )
-                                    card_footer(
-                                        button(
-                                            attrs: attributes! { type="submit" },
-                                            (save.as_str())
+                                    // Every field autosaves with the runtime; the
+                                    // button exists for the script-less path only,
+                                    // where a `<select>` cannot submit on its own.
+                                    <noscript>
+                                        card_footer(
+                                            button(
+                                                attrs: attributes! { type="submit" },
+                                                (save.as_str())
+                                            )
                                         )
-                                    )
+                                    </noscript>
                                 </form>
                             )
                             <div class="mt-6">
@@ -1121,12 +1126,17 @@ async fn editor_page(
                                             </p>
                                         </div>
                                     )
-                                    card_footer(
-                                        button(
-                                            attrs: attributes! { type="submit" },
-                                            (save.as_str())
+                                    // Every field autosaves with the runtime; the
+                                    // button exists for the script-less path only,
+                                    // where a `<select>` cannot submit on its own.
+                                    <noscript>
+                                        card_footer(
+                                            button(
+                                                attrs: attributes! { type="submit" },
+                                                (save.as_str())
+                                            )
                                         )
-                                    )
+                                    </noscript>
                                 </form>
                             )
                             <div

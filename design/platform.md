@@ -307,7 +307,10 @@ action is a form** (post → 303 → get), so the editor is complete with
 no script and the router-level tests prove all of it; the topcoat
 runtime is layered on top: the detail form **autosaves on change**
 through a `#[procedure]` (the same field application the form POST
-uses), reports through a `role=status` line, and bumps a signal that
+uses) — there is no *Save* button with the script running; it is
+rendered in `<noscript>` for the script-less path, where a
+`<select>` cannot submit on its own — reports through a
+`role=status` line, and bumps a signal that
 re-renders the structure panel, a `#[shard]`; kind-dependent
 fieldsets hide when the kind cannot use them. Procedure and shard
 authorize themselves through the client — they are public endpoints.
