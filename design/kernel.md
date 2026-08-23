@@ -185,6 +185,39 @@ Logic splits accordingly: type-level predicates in the schema; visibility and
 requirement rules in the surface. Both compile against a specific revision and
 are re-checked on every new one.
 
+**Surface validation, the growth path (settled 2026-08-23).** The
+validation a surface performs today is exactly three findings: a
+required rule unmet, a format violated on filled text, ineligibility.
+What stays out of the surface is already settled — attachment
+accept/size are representability (§2.15), enum membership is typing
+(§2.12), units live on the type (§2.14). The published DN corpus
+carries no other validation at all (descriptors hold label,
+description, required, options — nothing else), so everything beyond
+format is beyond-DN and earns its place as *general mechanism*, never
+per-type knobs. Two mechanisms cover the coherent wishlist:
+
+- **A per-column constraint rule** — predicate + message on the
+  surface node, evaluated exactly where requiredness is (same scopes,
+  item-scoped inside a repetition; a new §4.1 attachment point). It
+  subsumes numeric min/max/range in the column's unit, date bounds and
+  cross-field comparisons (`end ≥ start`, `acompte ≤ total`), and
+  boolean must-be-true (DN's required checkbox — consent — which
+  `required` cannot express, since a filled `false` is filled). No new
+  AST: §4.1's comparisons are already unit-aware and exact.
+- **Count bounds on `many`** — element count of an arity-`many` cell
+  ("pick at most 3", "at most 5 files", feature sets) and item count
+  of a `many` group, which also yields DN's implicit *required
+  repetition* (≥ 1 item) — today inexpressible, group nodes having no
+  requiredness. The one structural gap: the logic AST has `is_empty`
+  and item aggregates but no count (open question 22).
+
+Text length limits are `Format::Regex` sugar (`.{0,500}` — full-match,
+linear-time), not a mechanism. Refused: geometry containment ("inside
+the commune") — the kernel never computes geometry; if wanted it is a
+platform or resolver check. Deferred until demanded: per-surface
+narrowing of an enum's offered options. Rules referencing the current
+date route to open question 21 — the kernel has no clock.
+
 ## 2.7 External resolvers (SIRET-style externally-fed fields)
 
 A key goes to an external source; a payload comes back; cells are derived from
@@ -1384,6 +1417,10 @@ care about document order.
 **Attachment points, all sharing one AST:**
 
 - **Visibility / requiredness** — per surface node (§2.6).
+- **Column constraints** — a per-column admissibility predicate
+  (+ message) on the surface node (§2.6, settled 2026-08-23): bounds,
+  cross-field comparisons, must-be-true — evaluated exactly where
+  requiredness is.
 - **Ineligibility** — a record-scoped admissibility predicate on the
   submission surface (+ message): DN blocks submission when it holds.
   Nothing new in the kernel — it is a surface admissibility rule.
@@ -2317,6 +2354,26 @@ Only then: `surface`, `store`, service.
     migration carries full history (§2.9). Build when a platform needs
     partial disclosure — likely alongside §2.10's finer-grained
     erasure, which rides the same mechanism.
+
+21. **`today` in admissibility rules.** Date bounds of the "not in
+    the past" kind need the current date, and the kernel has no clock
+    — timestamps are inputs (§7). If admitted, `today` is an explicit
+    evaluation input (an `EvalContext` field, like `pending`), and
+    admissibility becomes **time-varying by design**: a record
+    admissible at submission can lapse with no entry written. That is
+    honest (the fact changed), but every consumer must then pin the
+    date it evaluated with — reports, checkpoints, replays. Decide on
+    first real demand for a relative date bound, against the
+    alternative of fixed-date bounds only; DN had neither.
+22. **Count in the logic language, or bounds beside it.** §2.6's
+    count bounds need element/item count, which the AST lacks
+    (`is_empty`, item aggregates — no `count()`). Either a `count()`
+    atom — then the per-column constraint rule subsumes count bounds
+    (one mechanism, but the §4.3 solver meets integer arithmetic over
+    counts) — or dedicated `min_count`/`max_count` fields on surface
+    nodes (statically trivial, one more mechanism beside rules).
+    Decide when count bounds are first built; the choice is invisible
+    to the wire until then.
 
 ## 11. Prior art to consult
 
