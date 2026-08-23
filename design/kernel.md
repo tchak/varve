@@ -218,6 +218,28 @@ platform or resolver check. Deferred until demanded: per-surface
 narrowing of an enum's offered options. Rules referencing the current
 date route to open question 21 — the kernel has no clock.
 
+**Surface nodes carry identity (settled 2026-08-23).** §3's rule —
+ids are identity; a change must never masquerade as removal plus
+addition — extends to surfaces: without node identity, a retitled
+section is indistinguishable from remove+add, and any surface diff
+(between procedure versions, or "what changed since the revision I
+instructed under") degrades to positional guessing. Sections and
+notes therefore carry **minted ids** — opaque, minted once at
+authoring time, outside the kernel like column ids and salts — and
+data nodes carry none: a column/group node's identity *is* the
+schema id it references (each column appears at most once per
+surface — `validate` already enforces it; group nodes get the same
+rule), and a second minted id there would create double identity —
+same column, different node id, a phantom recreate in the diff. Ids
+are part of the surface's canonical bytes and are **stable across
+the compiled applicant/reviewer pair and across revisions**: the
+authoring side mints them, republication preserves them, which is
+what makes surface diffs longitudinal rather than merely
+structural. An id-keyed change table for surfaces (retitle, rule
+change, move between sections) becomes writable when demand
+arrives; retrofitting identity later would be the expensive
+direction — back-minting with no authored history to mint from.
+
 ## 2.7 External resolvers (SIRET-style externally-fed fields)
 
 A key goes to an external source; a payload comes back; cells are derived from

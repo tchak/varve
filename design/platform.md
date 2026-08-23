@@ -346,6 +346,43 @@ admissibility depend on columns the applicant cannot see. The kernel
 keeps only acyclicity (DESIGN §4.1); both halves of this rule are
 platform authoring/publication constraints.
 
+**The authored tree is the draft's single source (settled
+2026-08-23; revises the storage rationale above).** Sections and
+notes — 18.3% of DN's descriptors (M0) — are surface nodes with no
+place in the schema (DESIGN §2.6), so the tree the editor edits is
+the authored surface tree itself: columns and groups interleaved
+with sections and notes, each element carrying its surface
+properties and the private marker. The draft stores that tree, and
+publication *derives* everything from it: project the schema (strip
+presentation nodes; schema document order = authored order),
+validate and publish the revision, then compile the applicant and
+reviewer surfaces (pruning, above) against it. Storing schema and
+surface drafts side by side was rejected: keeping them in sync
+reintroduces the drift class the single tree exists to kill —
+orphan columns placed on no surface, double placements, order
+disagreements. The stored draft is therefore no longer the kernel's
+schema bytes ("byte-for-byte what publishRevision hashes") but a
+platform object — it holds private markers, which no kernel object
+carries — and the guarantee weakens only from "stored = hashed" to
+"published is deterministically derived from stored", the property
+surface compilation already relies on. The API and editor grow
+accordingly (G.7): `addSection` / `addNote` and their updates
+(title / help; text), the same sibling-anchored placement with
+presentation nodes in the sibling universe, and *move to* gaining
+sections as targets — moving into a group is a schema edit (scope,
+row paths, impact); moving into a section is presentation only, and
+the schema projection is what gets diffed, so the impact story
+stays honest. Private composes: a private section hides its subtree
+from the applicant (the subtree rule above); a private note is
+reviewer-facing guidance DN's annotations privées never had. Node
+identity is kernel identity (DESIGN §2.6, surface node identity):
+sections and notes carry minted ids the editor's `?selected=`,
+anchors and moves use directly — the same ids the compiled surfaces
+carry, nothing platform-only. DN import maps flat HeaderSection
+runs to container sections — a header swallows everything up to the
+next same-level header — deterministic, stated here so the importer
+and the editor agree.
+
 **The schema editor (settled 2026-08-23).** `platform-app`'s
 `/organizations/{id}/procedures/{pid}/schema`, over the G.7 client
 operations — the app is integrator #1 (P.1). Shape: **master–detail
