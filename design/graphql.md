@@ -296,3 +296,27 @@ design argument on top of G.2 and the kernel model (DESIGN §2.1, §2.6,
 Platform P.9 Q15 (granular vs whole-tree mutations) is thereby
 answered for P0 by construction — granular — and stays open only as
 to whether a whole-tree `editRevision` is ever worth adding beside it.
+
+**The authored-tree amendment (settled 2026-08-24, from platform
+P.4's authored-tree and audience records).** The draft's tree stops
+being only a schema, and the API says so:
+
+- `RevisionDraft.elements: [DraftElement!]!` replaces
+  `schema { elements }` — the wrapper named the wrong thing once
+  presentation nodes joined. Union `DraftElement = DraftColumn |
+  DraftGroup | DraftSection | DraftNote`, still flattened in document
+  order with `parentId` (which may now name a group *or a section*;
+  sections nest, mirroring the kernel). Section and note ids are the
+  kernel's minted `NodeId`s (DESIGN §2.6, surface node identity).
+- Every member carries `audience: Audience!` (`ALL | REVIEWER`; P.4:
+  `reviewer` is DN's private, effective audience is the narrowest
+  along the ancestor path, and explicitly authoring wider than the
+  parent's effective audience is `INVALID_EDIT`). Add inputs take
+  `audience: Audience! = ALL`; update inputs take it optional.
+- Mutations grow `addSection` (title, optional help), `addNote`
+  (optional title, body), `updateSection`, `updateNote` — same
+  placement, same anchor semantics, presentation nodes in the
+  sibling universe; `moveElement` / `removeElement` cover all four
+  kinds. Surface *properties* (prompts, required/visibility rules,
+  formats) are still not here — they attach per element in a later
+  slice, as item 2 anticipates.
