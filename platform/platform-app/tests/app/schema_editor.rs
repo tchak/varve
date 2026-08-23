@@ -279,6 +279,32 @@ async fn the_editing_journey() {
     assert!(!html.contains("data-schema-add"), "{html}");
 
     // A group, then columns inside it: appended, then before an anchor.
+    // The add form offers the column's type in the same step.
+    assert!(html.contains("id=\"add-type\""), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[
+            ("what", "column"),
+            ("label", "Date de naissance"),
+            ("kind", "DATE"),
+        ],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains(">Date<"), "{html}");
+    assert!(html.contains("value=\"DATE\" selected"), "{html}");
+    let naissance = selected_of(&to.to);
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{naissance}/remove"),
+        &[],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(element_ids(&html), [nom.clone()]);
     let to = act(
         &router,
         &cookie,

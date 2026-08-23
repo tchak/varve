@@ -47,6 +47,23 @@ impl Fields {
     }
 }
 
+/// A fresh column's type from its kind alone (no unit, options, or
+/// constraints yet — those come through the detail form). Unknown
+/// kinds are text.
+pub(super) fn kind_input(kind: &str) -> ColumnTypeInput {
+    match kind {
+        "BOOLEAN" => ColumnTypeInput::boolean(),
+        "INTEGER" => ColumnTypeInput::integer(None),
+        "DECIMAL" => ColumnTypeInput::decimal(None),
+        "DATE" => ColumnTypeInput::date(),
+        "DATETIME" => ColumnTypeInput::datetime(),
+        "ENUM" => ColumnTypeInput::enumeration(Vec::new()),
+        "ATTACHMENT" => ColumnTypeInput::attachment(Vec::new(), None),
+        "GEOMETRY" => ColumnTypeInput::geometry(),
+        _ => ColumnTypeInput::text(),
+    }
+}
+
 /// A column's inline options as inputs that keep their ids.
 fn current_options(column: &SchemaColumn) -> Vec<EnumOptionInput> {
     match &column.ty {

@@ -43,7 +43,7 @@ pub(super) mod elements;
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, AddGroup, AddGroupInput, AddGroupVariables,
-    Arity, AttachmentType, Cardinality, ColumnType, ColumnTypeInput, DiscardRevisionDraft,
+    Arity, AttachmentType, Cardinality, ColumnType, DiscardRevisionDraft,
     DiscardRevisionDraftInput, DiscardRevisionDraftVariables, PlacementInput,
     ProcedureRevisionDraft, ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables,
     SchemaColumn, SchemaElement, SchemaGroup, Unit,
@@ -78,7 +78,6 @@ use crate::{
         field::field,
         label::label,
         page_title::page_title,
-        select::select,
     },
     flash,
     i18n::{t, t_args},
@@ -188,6 +187,9 @@ pub(super) async fn done(cx: &Cx, id: &str) -> Result<Notice> {
 pub(super) struct Addition {
     what: String,
     label: String,
+    /// The column's kind (`KINDS`); absent or unknown = text.
+    #[serde(default)]
+    kind: String,
     #[serde(default)]
     parent: String,
     #[serde(default)]
@@ -242,7 +244,7 @@ pub(super) mod add {
                         procedure_id,
                         placement,
                         label: new_label,
-                        ty: ColumnTypeInput::text(),
+                        ty: elements::kind_input(&input.kind),
                         arity: None,
                     },
                 }),
@@ -1613,14 +1615,24 @@ async fn add_form(
     let column_label = t(cx, "schema.kind.column").await?;
     let group_label = t(cx, "schema.kind.group").await?;
     let label_label = t(cx, "form.label").await?;
+    let type_label = t(cx, "schema.type").await?;
     let submit = t(cx, "schema.add.submit").await?;
+    let mut kind_names = Vec::new();
+    for kind in KINDS {
+        kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
+    }
     let prefix = match &parent {
         Some(id) => format!("add-{id}"),
         None => "add".to_owned(),
     };
     let what_id = format!("{prefix}-what");
+    let type_id = format!("{prefix}-type");
     let label_id = format!("{prefix}-label");
     view! {
+        // The type select shows for a column only; the signal is this
+        // form's own (a handler reaches its own `view!`'s signals).
+        signal what = "column".to_owned();
+
         card(
             card_header(
                 if heading_level_top {
@@ -1649,11 +1661,30 @@ async fn add_form(
                                 attrs: attributes! { for=(what_id.as_str()) },
                                 (what_label)
                             )
-                            select(
-                                attrs: attributes! { id=(what_id.as_str()) name="what" },
+                            <select
+                                id=(what_id.as_str())
+                                class=(SELECT)
+                                name="what"
+                                @change=$(|e: Event| what.set(e.target.value))
+                            >
                                 <option value="column">(column_label)</option>
                                 <option value="group">(group_label)</option>
+                            </select>
+                        </div>
+                        <div
+                            class="flex flex-col gap-2"
+                            :hidden=$(what.get() != "column")
+                            data-facet="add-type"
+                        >
+                            label(
+                                attrs: attributes! { for=(type_id.as_str()) },
+                                (type_label)
                             )
+                            <select id=(type_id.as_str()) class=(SELECT) name="kind">
+                                for (kind_value, name) in &kind_names {
+                                    <option value=(*kind_value)>(name.as_str())</option>
+                                }
+                            </select>
                         </div>
                         field(
                             id: label_id.as_str(),
