@@ -21,6 +21,9 @@ varve-core = { path = "../../crates/varve-core" }
 varve-impact = { path = "../../crates/varve-impact" }
 varve-schema = { path = "../../crates/varve-schema" }
 varve-surface = { path = "../../crates/varve-surface" }
+# `RevisionDraft.report` reads the draft's base schema through the
+# kernel store (the reading-lens point lookup).
+varve-store = { path = "../../crates/varve-store" }
 # `publishRevision` is the composition point (P.4 *Publication*): the
 # mutation opens the transaction, scopes the kernel store over it,
 # and calls the platform-core use case.

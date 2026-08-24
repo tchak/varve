@@ -504,3 +504,10 @@ The G.1 mutation made concrete, on platform P.4 *Publication*.
    any state, from `Closed` it is the reopen; the `published` event
    carries `{ revision, base }` facts and the trail's `PUBLISHED`
    kind gains its writer.
+5. **`RevisionDraft.report` (amended 2026-08-24).** The same
+   classification `publishRevision` gates on, computed at read time
+   against the draft's base (the empty schema when none): impact is
+   visible while editing — the editor shows what a publication would
+   do without one being attempted. `publishRevision` stays the only
+   writer; the read is the store's point lookup of the base schema
+   plus the pure classifier.

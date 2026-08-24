@@ -160,6 +160,23 @@ where
     Ok(PublishProcedureOutcome::Published { revision, report })
 }
 
+/// The report `publish_procedure` would gate on, computable at any
+/// time from a draft's derived schema against its base's (G.10,
+/// *RevisionDraft.report*): the editor shows impact live without
+/// attempting a publication. `None` base classifies against the
+/// empty schema — the same one-code-path rule publication uses.
+pub fn draft_report(
+    base: Option<&varve_schema::Schema>,
+    next: &varve_schema::Schema,
+) -> Result<ImpactReport, varve_schema::CastError> {
+    let empty = varve_schema::Schema::default();
+    varve_impact::classify(
+        base.unwrap_or(&empty),
+        next,
+        &varve_schema::NomenclatureTable::new(),
+    )
+}
+
 /// G.7: the editor never seeds an option, an empty choice is a draft
 /// state, and publication is where it is refused.
 fn refuse_empty_enums(tree: &Tree) -> Result<(), PublishProcedureError> {

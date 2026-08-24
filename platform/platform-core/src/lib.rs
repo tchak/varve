@@ -73,7 +73,7 @@ pub use procedure_event::{
 };
 pub use procedure_state::{CorruptState, ProcedureState, ProcedureStateValue, TransitionError};
 pub use publish::{
-    PublishProcedureError, PublishProcedureOutcome, SharedExecutor, publish_procedure,
+    PublishProcedureError, PublishProcedureOutcome, SharedExecutor, draft_report, publish_procedure,
 };
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,

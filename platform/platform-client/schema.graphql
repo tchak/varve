@@ -866,6 +866,14 @@ type RevisionDraft {
 	each naming its parent.
 	"""
 	elements: [Element!]!
+	"""
+	The report `publishRevision` would return, computed at read
+	time against the draft's base (G.10 *RevisionDraft.report*):
+	impact is visible while editing, without attempting a
+	publication. A base-less draft classifies against the empty
+	schema — every column `ADDED`, `SAFE`.
+	"""
+	report: ImpactReport!
 }
 
 """

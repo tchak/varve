@@ -18,10 +18,11 @@ use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType};
 use varve_surface::Format;
 
-use crate::error::invalid_input;
+use crate::error::{internal, invalid_input};
 
 /// The draft of a procedure's next revision.
 #[derive(SimpleObject)]
+#[graphql(complex)]
 pub struct RevisionDraft {
     /// The published revision this draft forks from; `null` until the
     /// procedure has one.
@@ -30,6 +31,9 @@ pub struct RevisionDraft {
     /// container precedes its children; siblings in their order),
     /// each naming its parent.
     pub elements: Vec<Element>,
+    /// The draft's derived kernel schema, kept for [`Self::report`].
+    #[graphql(skip)]
+    schema: varve_schema::Schema,
 }
 
 impl RevisionDraft {
@@ -39,7 +43,41 @@ impl RevisionDraft {
         Self {
             base: base.map(ID::from),
             elements,
+            schema: tree.schema(),
         }
+    }
+}
+
+#[async_graphql::ComplexObject]
+impl RevisionDraft {
+    /// The report `publishRevision` would return, computed at read
+    /// time against the draft's base (G.10 *RevisionDraft.report*):
+    /// impact is visible while editing, without attempting a
+    /// publication. A base-less draft classifies against the empty
+    /// schema — every column `ADDED`, `SAFE`.
+    async fn report(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<crate::impact::ImpactReport> {
+        use varve_store::RevisionStore;
+        let (_, mut db) = crate::session(ctx)?;
+        let base = match &self.base {
+            Some(id) => {
+                let shared: platform_core::SharedExecutor =
+                    tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
+                let store = platform_store::PlatformStore::new(&shared);
+                Some(
+                    store
+                        .schema(&varve_core::RevisionId::new(id.as_str()))
+                        .await
+                        .map_err(internal)?
+                        .ok_or_else(|| internal("draft's base revision is not in the store"))?,
+                )
+            }
+            None => None,
+        };
+        let report = platform_core::draft_report(base.as_ref(), &self.schema).map_err(internal)?;
+        Ok(crate::impact::ImpactReport::from(&report))
     }
 }
 

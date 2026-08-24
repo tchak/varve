@@ -4423,6 +4423,7 @@ dependencies = [
  "varve-core",
  "varve-impact",
  "varve-schema",
+ "varve-store",
  "varve-surface",
 ]
 

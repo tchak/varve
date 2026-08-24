@@ -1612,3 +1612,72 @@ async fn a_breaking_publication_gates_through_the_api() {
         2
     );
 }
+
+#[tokio::test]
+async fn the_draft_report_reads_live() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("draft-report"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Bourse").await);
+    const REPORT: &str = "query($id: ID!) {
+        procedure(id: $id) {
+            revisionDraft { report { worst columns { columnId class change } } }
+        }
+    }";
+
+    // A base-less draft classifies against the empty schema: ADDED,
+    // SAFE.
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Champ", "type": { "text": {} } }),
+        )
+        .await;
+    let column_id = p["revisionDraft"]["elements"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let data = api.data(&alice, REPORT, json!({ "id": pid })).await;
+    let report = &data["procedure"]["revisionDraft"]["report"];
+    assert_eq!(report["worst"], "SAFE");
+    assert_eq!(report["columns"][0]["change"], "ADDED");
+
+    // Published, then retyped: the report shows the breaking change
+    // while editing — nothing was published to see it.
+    api.data(
+        &alice,
+        "mutation($input: PublishRevisionInput!) {
+            publishRevision(input: $input) { published }
+        }",
+        json!({ "input": { "procedureId": pid } }),
+    )
+    .await;
+    api.edit(
+        &alice,
+        "updateColumn",
+        "UpdateColumnInput",
+        json!({ "procedureId": pid, "id": column_id, "type": { "geometry": {} } }),
+    )
+    .await;
+    let data = api.data(&alice, REPORT, json!({ "id": pid })).await;
+    let report = &data["procedure"]["revisionDraft"]["report"];
+    assert_eq!(report["worst"], "BREAKING");
+    assert_eq!(report["columns"][0]["columnId"], column_id);
+    assert_eq!(report["columns"][0]["change"], "FORBIDDEN");
+    // Still one publication: reading the report wrote nothing.
+    let lifecycle = api
+        .data(&alice, PROCEDURE_LIFECYCLE, json!({ "id": pid }))
+        .await;
+    let kinds: Vec<&str> = lifecycle["procedure"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["CREATED", "PUBLISHED"]);
+}
