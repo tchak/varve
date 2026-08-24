@@ -241,7 +241,6 @@ pub const EN: &[(&str, &str)] = &[
     ("schema.options.new", "New option"),
     ("schema.options.add", "Add option"),
     ("schema.options.remove", "Remove option {$label}"),
-    ("schema.options.default", "Option 1"),
     (
         "schema.notice.option-added",
         "Added the option \u{201c}{$label}\u{201d}.",
@@ -279,10 +278,6 @@ pub const EN: &[(&str, &str)] = &[
     ("schema.error.label-required", "A label is required."),
     ("schema.error.title-required", "A title is required."),
     ("schema.error.body-required", "A text is required."),
-    (
-        "schema.error.options-required",
-        "A choice needs at least one option.",
-    ),
     ("schema.error.unit", "Unknown unit."),
     (
         "schema.error.max-bytes",
@@ -590,7 +585,6 @@ pub const FR: &[(&str, &str)] = &[
     ("schema.options.new", "Nouvelle option"),
     ("schema.options.add", "Ajouter l'option"),
     ("schema.options.remove", "Supprimer l'option {$label}"),
-    ("schema.options.default", "Option 1"),
     (
         "schema.notice.option-added",
         "L'option «\u{a0}{$label}\u{a0}» a été ajoutée.",
@@ -640,10 +634,6 @@ pub const FR: &[(&str, &str)] = &[
     ("schema.error.label-required", "Un libellé est requis."),
     ("schema.error.title-required", "Un titre est requis."),
     ("schema.error.body-required", "Un texte est requis."),
-    (
-        "schema.error.options-required",
-        "Un choix a besoin d'au moins une option.",
-    ),
     ("schema.error.unit", "Unité inconnue."),
     (
         "schema.error.max-bytes",

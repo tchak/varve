@@ -12,7 +12,39 @@
 //! widest value rather than panicking.
 
 use platform_client::revision_draft::{Audience, ColumnType, Element, TextFormat, Unit};
-use topcoat::icon::{IconData, iconify::iconify_icon};
+use topcoat::{
+    Result,
+    icon::{IconData, icon, iconify::iconify_icon},
+    view::{attributes, component, view},
+};
+
+use crate::components::badge::{BadgeVariant, badge};
+
+/// The **audience marker**: the badge a reviewer-only element wears,
+/// in the editor's tree and on the preview's captions alike.
+///
+/// It must not read as one more type badge, so it takes an amber
+/// tint — a colour outside the theme tokens, with dark values of its
+/// own, recorded in platform.md P.4 as the a11y contract asks — and
+/// an eye-off glyph. The text is what carries the meaning; the
+/// colour never does.
+#[component]
+pub(in crate::pages) async fn reviewer_badge(text: String) -> Result {
+    view! {
+        badge(
+            variant: BadgeVariant::Outline,
+            attrs: attributes! {
+                class="border-transparent bg-amber-100 text-amber-900 \
+                    dark:bg-amber-500/15 dark:text-amber-300"
+            },
+            icon(
+                data: iconify_icon!("feather:eye-off"),
+                attrs: attributes! { class="size-3" }
+            )
+            (text.as_str())
+        )
+    }
+}
 
 pub(in crate::pages) fn id_of(element: &Element) -> &str {
     match element {

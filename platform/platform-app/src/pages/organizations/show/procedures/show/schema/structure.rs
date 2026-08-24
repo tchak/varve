@@ -25,7 +25,7 @@ use platform_client::revision_draft::{
 use topcoat::{
     Result,
     context::Cx,
-    icon::{icon, iconify::iconify_icon},
+    icon::icon,
     router::{
         error::{RouterErrorExt, not_found},
         href,
@@ -53,7 +53,7 @@ use super::super::super::super::OrganizationId;
 use super::super::ProcedureId;
 use super::element::{
     effectively_reviewer, element_icon, element_kind, id_of, kind_message_id, label_of,
-    multiple_of_type, parent_of, unit_name, unit_of,
+    multiple_of_type, parent_of, reviewer_badge, unit_name, unit_of,
 };
 use super::elements::element::ElementId;
 use super::{elements, page};
@@ -327,23 +327,7 @@ async fn tree_row(
                     badge(variant: BadgeVariant::Secondary, (multiplicity.as_str()))
                 }
                 if reviewer_only {
-                    // The audience marker must not read as one more
-                    // type badge: an amber tint (dark values too — a
-                    // colour outside the theme tokens, recorded in
-                    // platform.md P.4 as the a11y contract asks) and
-                    // an eye-off glyph set it apart; the text stays
-                    // the carrier, never the colour alone.
-                    badge(
-                        variant: BadgeVariant::Outline,
-                        attrs: attributes! {
-                            class="border-transparent bg-amber-100 text-amber-900                                    dark:bg-amber-500/15 dark:text-amber-300"
-                        },
-                        icon(
-                            data: iconify_icon!("feather:eye-off"),
-                            attrs: attributes! { class="size-3" }
-                        )
-                        (tree.labels.reviewer.as_str())
-                    )
+                    reviewer_badge(text: tree.labels.reviewer.clone())
                 }
                 row_actions(
                     tree: tree,

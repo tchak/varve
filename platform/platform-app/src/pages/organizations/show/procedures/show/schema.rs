@@ -64,6 +64,7 @@ pub(super) mod detail;
 pub(super) mod edit;
 pub(super) mod element;
 pub(super) mod elements;
+pub(super) mod header;
 pub(super) mod preview;
 pub(super) mod structure;
 
@@ -87,19 +88,16 @@ use crate::{
     client,
     components::{
         alert::{AlertVariant, alert, alert_description},
-        badge::{BadgeVariant, badge},
         button::{ButtonSize, ButtonVariant, button, button_variants},
         notice::{NoticeTone, notice as notice_box},
-        page_title::page_title,
-        tabs::{tabs, tabs_list, tabs_trigger},
     },
     flash,
     i18n::{t, t_args},
-    pages::{args, one_arg, utc_date_arg},
+    pages::one_arg,
 };
 
 use super::super::super::OrganizationId;
-use super::{ProcedureId, counts, procedure_draft};
+use super::{ProcedureId, procedure_draft};
 use add_form::AddFacts;
 use element::{effectively_reviewer, id_of, parent_of};
 
@@ -418,43 +416,16 @@ async fn editor_page(
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
-    let title = t_args(
-        cx,
-        "schema.title",
-        &one_arg("procedure", procedure.title.clone()),
-    )
-    .await?;
-    let back = t(cx, "schema.back").await?;
-    let draft_badge = t(cx, "procedure.draft.badge").await?;
     let elements = procedure
         .revision_draft
         .as_ref()
         .map(|d| d.elements.clone())
         .unwrap_or_default();
-    let (columns, groups) = counts(&elements);
-    let state = match &procedure.revision_draft {
-        Some(_) => {
-            t_args(
-                cx,
-                "schema.state.draft",
-                &args([
-                    ("columns", (columns as i64).into()),
-                    ("groups", (groups as i64).into()),
-                    ("date", utc_date_arg(procedure.updated_at)),
-                ]),
-            )
-            .await?
-        }
-        None => t(cx, "schema.state.none").await?,
-    };
-    let discard_label = t(cx, "schema.discard").await?;
     let discard_question = t(cx, "schema.discard.question").await?;
     let discard_confirm = t(cx, "schema.discard.confirm").await?;
     let discard_keep = t(cx, "schema.discard.keep").await?;
     let structure_heading = t(cx, "schema.structure.title").await?;
     let add_element_label = t(cx, "schema.add.title").await?;
-    let tab_editor = t(cx, "schema.tab.editor").await?;
-    let tab_preview = t(cx, "schema.tab.preview").await?;
     let selected_element = selected
         .as_deref()
         .and_then(|id| elements.iter().find(|e| id_of(e) == id).cloned());
@@ -482,11 +453,6 @@ async fn editor_page(
         OrganizationId(organization_id),
         ProcedureId(procedure_id)
     );
-    let preview_href = href!(
-        preview::page,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
     let procedure_id_string = procedure_id.to_string();
     let selected_string = selected_id.clone().unwrap_or_default();
 
@@ -499,48 +465,10 @@ async fn editor_page(
         signal eid = selected_string.clone();
 
         <div class="flex flex-col gap-6">
-            <div class="flex flex-col gap-2">
-                page_title((title))
-                <p class="text-sm text-muted-foreground">
-                    <a
-                        href=(href!(super::page, OrganizationId(organization_id), ProcedureId(procedure_id)))
-                        class="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                        (back)
-                    </a>
-                </p>
-                <div
-                    class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
-                >
-                    if procedure.revision_draft.is_some() {
-                        badge(variant: BadgeVariant::Secondary, (draft_badge))
-                    }
-                    <span data-schema-state="">(state)</span>
-                    if procedure.revision_draft.is_some() && !confirm_discard {
-                        <a
-                            href=(page_href().query(&[("discard", "confirm")]))
-                            class=(button_variants(
-                                ButtonVariant::Ghost,
-                                ButtonSize::Sm,
-                            ))
-                        >
-                            (discard_label)
-                        </a>
-                    }
-                </div>
-            </div>
-            tabs(
-                tabs_list(
-                    tabs_trigger(
-                        active: true,
-                        attrs: attributes! { href=(page_href()) },
-                        (tab_editor)
-                    )
-                    tabs_trigger(
-                        attrs: attributes! { href=(preview_href) },
-                        (tab_preview)
-                    )
-                )
+            header::header(
+                procedure: procedure.clone(),
+                tab: header::Tab::Editor,
+                offer_discard: !confirm_discard
             )
             if confirm_discard {
                 alert(

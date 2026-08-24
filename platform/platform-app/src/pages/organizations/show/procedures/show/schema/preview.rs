@@ -24,8 +24,7 @@ use platform_client::revision_draft::{
 use topcoat::{
     Result,
     context::Cx,
-    icon::{icon, iconify::iconify_icon},
-    router::{href, page},
+    router::page,
     view::{attributes, component, view},
 };
 
@@ -34,16 +33,13 @@ use crate::{
         badge::{BadgeVariant, badge},
         input::input,
         label::label,
-        page_title::page_title,
         select::select,
-        tabs::{tabs, tabs_list, tabs_trigger},
     },
-    i18n::{t, t_args},
-    pages::{args, one_arg, utc_date_arg},
+    i18n::t,
 };
 
-use super::element::{effectively_reviewer, id_of, parent_of, unit_name, unit_of};
-use super::{OrganizationId, ProcedureId, counts, procedure_draft};
+use super::element::{effectively_reviewer, id_of, parent_of, reviewer_badge, unit_name, unit_of};
+use super::{header, procedure_draft};
 
 /// The preview page.
 #[page]
@@ -80,41 +76,11 @@ impl Preview {
 /// the tab rail with *Preview* active, and the rendered form.
 #[component]
 async fn preview_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
-    let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
-    let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
-    let title = t_args(
-        cx,
-        "schema.title",
-        &one_arg("procedure", procedure.title.clone()),
-    )
-    .await?;
-    let back = t(cx, "schema.back").await?;
-    let draft_badge = t(cx, "procedure.draft.badge").await?;
-    let tab_editor = t(cx, "schema.tab.editor").await?;
-    let tab_preview = t(cx, "schema.tab.preview").await?;
-    let panel_heading = tab_preview.clone();
-    let empty = t(cx, "schema.preview.empty").await?;
     let elements = procedure
         .revision_draft
         .as_ref()
         .map(|d| d.elements.clone())
         .unwrap_or_default();
-    let (columns, groups) = counts(&elements);
-    let state = match &procedure.revision_draft {
-        Some(_) => {
-            t_args(
-                cx,
-                "schema.state.draft",
-                &args([
-                    ("columns", (columns as i64).into()),
-                    ("groups", (groups as i64).into()),
-                    ("date", utc_date_arg(procedure.updated_at)),
-                ]),
-            )
-            .await?
-        }
-        None => t(cx, "schema.state.none").await?,
-    };
     let tree = Preview {
         elements,
         reviewer: t(cx, "schema.audience.reviewer").await?,
@@ -122,54 +88,14 @@ async fn preview_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
         geometry: t(cx, "schema.preview.geometry").await?,
     };
     let is_empty = tree.elements.is_empty();
-    let editor_href = href!(
-        super::page,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
-    let preview_href = href!(
-        page,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
-    let procedure_href = href!(
-        super::super::page,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
+    let panel_heading = t(cx, "schema.tab.preview").await?;
+    let empty = t(cx, "schema.preview.empty").await?;
     view! {
         <div class="flex flex-col gap-6">
-            <div class="flex flex-col gap-2">
-                page_title((title))
-                <p class="text-sm text-muted-foreground">
-                    <a
-                        href=(procedure_href)
-                        class="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                        (back)
-                    </a>
-                </p>
-                <div
-                    class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
-                >
-                    if procedure.revision_draft.is_some() {
-                        badge(variant: BadgeVariant::Secondary, (draft_badge))
-                    }
-                    <span data-schema-state="">(state)</span>
-                </div>
-            </div>
-            tabs(
-                tabs_list(
-                    tabs_trigger(
-                        attrs: attributes! { href=(editor_href) },
-                        (tab_editor)
-                    )
-                    tabs_trigger(
-                        active: true,
-                        attrs: attributes! { href=(preview_href) },
-                        (tab_preview)
-                    )
-                )
+            header::header(
+                procedure: procedure.clone(),
+                tab: header::Tab::Preview,
+                offer_discard: false
             )
             <h2 class="sr-only">(panel_heading)</h2>
             if is_empty {
@@ -429,27 +355,6 @@ async fn preview_column(tree: &Preview, column: Column, reviewer_only: bool) -> 
                 )
             }
         }
-    }
-}
-
-/// The editor's amber audience marker, on the preview's captions:
-/// the eye-off glyph and the text carry it, never the colour alone
-/// (platform P.4).
-#[component]
-async fn reviewer_badge(text: String) -> Result {
-    view! {
-        badge(
-            variant: BadgeVariant::Outline,
-            attrs: attributes! {
-                class="border-transparent bg-amber-100 text-amber-900 \
-                    dark:bg-amber-500/15 dark:text-amber-300"
-            },
-            icon(
-                data: iconify_icon!("feather:eye-off"),
-                attrs: attributes! { class="size-3" }
-            )
-            (text.as_str())
-        )
     }
 }
 
