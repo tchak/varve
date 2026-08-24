@@ -884,6 +884,29 @@ async fn sections_notes_and_audience_journey() {
     .await;
     let html = landed(&router, &cookie, &to).await;
     assert!(!html.contains("id=\"element-audience\""), "{html}");
+
+    // Required rides the column detail as a switch: born reviewer-only
+    // means optional by default…
+    assert!(html.contains("id=\"element-required\""), "{html}");
+    assert!(html.contains("data-required=\"false\""), "{html}");
+    // …born public means required by default, and the switch toggles
+    // it (the hidden `false` is overridden by the checked value).
+    let html = page(&router, &cookie, &format!("{editor}?selected={ville}")).await;
+    assert!(html.contains("data-required=\"true\""), "{html}");
+    assert!(html.contains("checked"), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&ville),
+        &[("required", "false"), ("required", "true")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("data-required=\"true\""), "{html}");
+    let to = act(&router, &cookie, &update(&ville), &[("required", "false")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("data-required=\"false\""), "{html}");
+    assert!(html.contains("Saved your changes."), "{html}");
 }
 
 #[tokio::test]

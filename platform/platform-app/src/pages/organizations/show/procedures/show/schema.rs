@@ -297,6 +297,7 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         ty: elements::kind_input(&input.kind),
+                        required: None,
                         audience,
                     },
                 }),
@@ -617,6 +618,7 @@ async fn editor_page(
     let title_label = t(cx, "form.title").await?;
     let section_help_label = t(cx, "schema.section.help").await?;
     let note_body_label = t(cx, "schema.note.body").await?;
+    let required_label = t(cx, "schema.required").await?;
     let options_label = t(cx, "schema.options").await?;
     let options_help = t(cx, "schema.options.help").await?;
     let option_label = t(cx, "schema.options.label").await?;
@@ -828,6 +830,10 @@ async fn editor_page(
                             data-schema-notice="" // A confirmation fades once read (app.css);
                             // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
@@ -1291,6 +1297,53 @@ async fn editor_page(
                                                         (arity_many.as_str())
                                                     </option>
                                                 </select>
+                                            </div>
+                                            <div
+                                                class="flex items-center gap-2"
+                                                data-required=(if c.column.required {
+                                                    "true"
+                                                } else {
+                                                    "false"
+                                                })
+                                            >
+                                                <input type="hidden" name="required" value="false">
+                                                <span class="relative inline-flex shrink-0">
+                                                    <input
+                                                        id="element-required"
+                                                        type="checkbox"
+                                                        role="switch"
+                                                        class=(SWITCH_TRACK)
+                                                        name="required"
+                                                        value="true"
+                                                        checked=(c.column.required.then_some(""))
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let value = if e.target.checked {
+                                                                "true".to_owned()
+                                                            } else {
+                                                                "false".to_owned()
+                                                            };
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "required".to_owned(),
+                                                                    value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
+                                                    >
+                                                    <span class=(SWITCH_THUMB)></span>
+                                                </span>
+                                                label(
+                                                    attrs: attributes! { for="element-required" },
+                                                    (required_label.as_str())
+                                                )
                                             </div>
                                             if !audience_locked {
                                                 <div class="flex flex-col gap-2">
@@ -1813,6 +1866,21 @@ const TEXTAREA: StaticClass = class!(
      placeholder:text-muted-foreground \
      focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
      focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+);
+
+/// The vendored switch's look for the required toggle, which carries
+/// a runtime handler (a handler cannot travel through `attributes!`
+/// into a component). Kept in step with `components::switch`.
+const SWITCH_TRACK: StaticClass = class!(
+    "peer h-4.5 w-8 shrink-0 appearance-none rounded-full \
+     bg-foreground/20 shadow-xs transition-colors outline-none checked:bg-primary \
+     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
+     focus-visible:ring-offset-background disabled:pointer-events-none",
+);
+
+const SWITCH_THUMB: StaticClass = class!(
+    "pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 \
+     rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-3.5",
 );
 
 const SELECT: StaticClass = class!(

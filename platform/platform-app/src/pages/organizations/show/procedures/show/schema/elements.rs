@@ -48,6 +48,17 @@ impl Fields {
             .find(|(n, _)| n == name)
             .map(|(_, v)| v.as_str())
     }
+
+    /// The last value under `name` — for controls that post a hidden
+    /// fallback before the real input (the required switch: hidden
+    /// `false`, then the checkbox's `true` when checked).
+    fn last(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
 }
 
 /// A fresh column's type from its kind alone (no unit, options, or
@@ -106,6 +117,7 @@ pub(super) async fn set_options(
                     options,
                     multiple_of(&column.ty),
                 )),
+                required: None,
                 audience: None,
             },
         }),
@@ -254,6 +266,7 @@ pub(super) async fn apply_update(
                         id,
                         label,
                         ty,
+                        required: fields.last("required").map(|value| value == "true"),
                         audience,
                     },
                 }),
