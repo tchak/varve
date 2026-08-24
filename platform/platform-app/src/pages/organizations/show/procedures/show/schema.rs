@@ -822,6 +822,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }

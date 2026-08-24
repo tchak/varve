@@ -12,7 +12,8 @@ use topcoat::{
 const HEADER: StaticClass = class!("border-b border-border bg-background");
 
 /// The classes for the navigation row inside the bar.
-const NAV: StaticClass = class!("mx-auto flex w-full max-w-3xl items-center gap-4 px-6 py-3");
+const NAV: StaticClass =
+    class!("mx-auto flex w-full max-w-3xl items-center gap-4 px-6 py-3 lg:max-w-5xl xl:max-w-6xl",);
 
 /// The site-wide top bar: a brand link home and a right-aligned
 /// navigation area, inside `<header>`/`<nav>` landmarks.

@@ -284,7 +284,11 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                         </a>
                     }
                 )
-                <main class="mx-auto w-full max-w-3xl flex-1 px-6 py-10">(slot?)</main>
+                <main
+                    class="mx-auto w-full max-w-3xl flex-1 px-6 py-10 lg:max-w-5xl xl:max-w-6xl"
+                >
+                    (slot?)
+                </main>
             </body>
         </html>
     }
