@@ -1,0 +1,10 @@
+# Migration configuration for the project-local `migrate` CLI
+# (src/bin/migrate.rs, feature `migrate-cli`). See design/platform.md
+# P.3 (*migrations and registration*): this crate owns the kernel
+# tables' migration set; `platform-core::connect_with` applies it
+# beside the platform's own.
+[migration]
+path = "toasty"
+prefix_style = "Sequential"
+checksums = false
+statement_breakpoints = true

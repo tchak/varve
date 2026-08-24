@@ -4444,6 +4444,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "platform-core",
+ "thiserror 2.0.20",
+ "toasty",
+ "toasty-cli",
+ "tokio",
+ "varve-core",
+ "varve-revision",
+ "varve-schema",
+ "varve-store",
+ "varve-surface",
+ "varve-wire",
+]
+
+[[package]]
 name = "playwright-rs"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

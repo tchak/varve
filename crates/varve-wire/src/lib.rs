@@ -34,7 +34,7 @@ pub use import::{
 };
 pub use line::{Intent, ItemLine, Line, Manifest, Mode, RecordLine, SnapshotRecord};
 pub use read::{ReadError, Stream, read_stream, snapshot_records};
-pub use standalone::{schema_bytes, schema_from_bytes};
+pub use standalone::{canonical_from_bytes, schema_bytes, schema_from_bytes};
 pub use write::{WriteError, write_history, write_lines, write_snapshot};
 
 /// Format version carried on line 1 (§5: fail fast on line 1).

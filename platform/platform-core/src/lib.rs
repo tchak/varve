@@ -51,7 +51,7 @@ pub use api_token::{
     MAX_API_TOKEN_NAME_CHARS, api_token_lifetime, create_api_token, destroy_api_token,
     find_live_api_token, list_live_api_tokens, sweep_expired_api_tokens,
 };
-pub use db::{MIGRATIONS, connect};
+pub use db::{MIGRATIONS, connect, connect_with};
 pub use organization::{
     CreateOrganizationError, Member, Organization, OrganizationMembership, add_organization_member,
     count_organization_members, count_organization_procedures, count_organization_teams,

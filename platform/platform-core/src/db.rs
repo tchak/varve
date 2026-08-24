@@ -52,10 +52,25 @@ pub static MIGRATIONS: toasty::migration::MigrationSet = toasty::embed_migration
 /// outlives a crashed caller either, since Postgres drops it with
 /// the session.
 pub async fn connect(url: &str) -> toasty::Result<toasty::Db> {
-    let db = toasty::Db::builder()
-        .models(toasty::models!(crate::*))
-        .connect(url)
-        .await?;
+    connect_with(url, toasty::ModelSet::new(), &[]).await
+}
+
+/// [`connect`] with additional model and migration sets from crates
+/// that own tables in the same database — today `platform-store`'s
+/// kernel tables (P.3, *migrations and registration*): one database,
+/// one `__toasty_migrations` table, each crate owning its files.
+/// Extra sets apply after this crate's, inside the same advisory
+/// lock.
+pub async fn connect_with(
+    url: &str,
+    extra_models: toasty::ModelSet,
+    extra_migrations: &[&toasty::migration::MigrationSet],
+) -> toasty::Result<toasty::Db> {
+    let mut models = toasty::models!(crate::*);
+    for model in extra_models {
+        models.add(model);
+    }
+    let db = toasty::Db::builder().models(models).connect(url).await?;
     // Advisory locks are per session, so the lock and unlock must
     // run on the same pinned connection; `apply` draws its own from
     // the pool, which the lock serializes across callers, not
@@ -65,7 +80,15 @@ pub async fn connect(url: &str) -> toasty::Result<toasty::Db> {
         .bind(MIGRATION_LOCK)
         .exec(&mut conn)
         .await?;
-    let applied = MIGRATIONS.apply(&db).await;
+    let mut applied = MIGRATIONS.apply(&db).await;
+    if applied.is_ok() {
+        for set in extra_migrations {
+            applied = set.apply(&db).await;
+            if applied.is_err() {
+                break;
+            }
+        }
+    }
     let unlocked = toasty::sql::query("SELECT pg_advisory_unlock($1)")
         .bind(MIGRATION_LOCK)
         .exec(&mut conn)

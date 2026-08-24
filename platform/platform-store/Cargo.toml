@@ -1,0 +1,47 @@
+[package]
+name = "platform-store"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The Toasty implementation of the `varve-store` traits (P.3):
+# `varve-store` defines, this crate implements. Kernel tables as
+# `pub(crate)` Toasty models — kernel objects are never touched at the
+# store level from platform code, structurally. Depends on
+# `varve-store` + toasty only, nothing platform-side; `platform-core`'s
+# use-case services stay generic over the traits, callers wire this
+# impl in (P.4 *Publication*: the GraphQL mutation composes the
+# transaction).
+[dependencies]
+toasty = { version = "0.10.0", features = ["postgresql", "jiff", "migration"] }
+toasty-cli = { version = "0.10.0", optional = true }
+tokio = { version = "1", features = ["sync"] }
+anyhow = { version = "1", optional = true }
+thiserror.workspace = true
+varve-core = { path = "../../crates/varve-core" }
+varve-revision = { path = "../../crates/varve-revision" }
+varve-schema = { path = "../../crates/varve-schema" }
+varve-store = { path = "../../crates/varve-store" }
+varve-surface = { path = "../../crates/varve-surface" }
+# Byte codecs for the stored objects: schemas via `schema_bytes`,
+# surfaces via `canonical_from_bytes` + `varve_surface::canon`.
+varve-wire = { path = "../../crates/varve-wire" }
+
+[dev-dependencies]
+# Test bootstrap only: `connect_with` registers this crate's models
+# and applies its migration set next to the platform's (P.3,
+# *migrations and registration*). The library depends on nothing
+# platform-side.
+platform-core = { path = "../platform-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+[features]
+# The project-local migration CLI (the platform-core pattern): the CLI
+# must link this crate's model types to diff the schema.
+migrate-cli = ["dep:toasty-cli", "dep:anyhow", "tokio/rt-multi-thread", "tokio/macros"]
+
+[[bin]]
+name = "migrate"
+path = "src/bin/migrate.rs"
+required-features = ["migrate-cli"]

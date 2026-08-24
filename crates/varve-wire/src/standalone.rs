@@ -6,7 +6,7 @@
 //! it later publishes as are the same bytes — and `revision_id` of
 //! the decoded value is the id publication will assign.
 
-use varve_core::canonical::canonical_bytes;
+use varve_core::canonical::{CanonicalValue, canonical_bytes};
 use varve_schema::{Schema, schema_canonical, schema_from_canonical};
 
 use crate::read::{JsonLine, ReadError};
@@ -22,19 +22,31 @@ pub fn schema_bytes(schema: &Schema) -> Vec<u8> {
 /// Decodes bytes produced by [`schema_bytes`]. Strict like the stream
 /// reader: any malformation is a [`ReadError`] (reported as line 1).
 pub fn schema_from_bytes(bytes: &[u8]) -> Result<Schema, ReadError> {
+    let value = canonical_from_bytes(bytes)?;
+    schema_from_canonical(&value).map_err(|e| ReadError::Malformed {
+        line: 1,
+        reason: e.to_string(),
+    })
+}
+
+/// Decodes one standalone canonical value from its JCS bytes — the
+/// parse half every opaque line body shares (§5). For bodies whose
+/// codec another crate owns (surfaces, block defaults —
+/// `varve_surface::canon`), a store pairs this with that codec's
+/// `*_from`; this crate stays ignorant of the body's shape.
+pub fn canonical_from_bytes(bytes: &[u8]) -> Result<CanonicalValue, ReadError> {
     let text = std::str::from_utf8(bytes).map_err(|_| ReadError::Malformed {
         line: 1,
         reason: "not UTF-8".into(),
     })?;
-    let malformed = |reason: String| ReadError::Malformed { line: 1, reason };
-    let value = match serde_json::from_str::<JsonLine>(text) {
-        Ok(JsonLine(v)) => v,
-        Err(e) if e.classify() == serde_json::error::Category::Data => {
-            return Err(malformed(e.to_string()));
-        }
-        Err(_) => return Err(ReadError::Json { line: 1 }),
-    };
-    schema_from_canonical(&value).map_err(|e| malformed(e.to_string()))
+    match serde_json::from_str::<JsonLine>(text) {
+        Ok(JsonLine(v)) => Ok(v),
+        Err(e) if e.classify() == serde_json::error::Category::Data => Err(ReadError::Malformed {
+            line: 1,
+            reason: e.to_string(),
+        }),
+        Err(_) => Err(ReadError::Json { line: 1 }),
+    }
 }
 
 #[cfg(test)]
