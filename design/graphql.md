@@ -30,7 +30,8 @@ in DN, or in the prototypes that preceded varve (G.2 cites one).
   (P.9 Q5).
 - **Mutations are use cases**, not kernel primitives: createProcedure,
   editRevision (draft), publishRevision (returns the impact report /
-  confirms), createCaseFile, updateCells (a batch of cell writes folded
+  confirms), closeProcedure, reopenProcedure (publishRevision from
+  `Closed` also reopens — platform P.4), createCaseFile, updateCells (a batch of cell writes folded
   into one kernel patch — legal in `DRAFT` and `SUBMITTED`, hence not
   named after a state), submitCaseFile, startReview, acceptCaseFile,
   refuseCaseFile, closeWithoutDecision, returnToApplicant,
@@ -98,6 +99,16 @@ argument on top of that memory.
    reason }`, …) with a parallel `*StateValue` enum for filtering.
    Facts live where they are meaningful; no nullable `submittedAt`.
    Both the union and the enum generate from one Rust enum.
+   **Amended 2026-08-24: state objects are prefixed with their
+   subject** — `CaseFileDraftState`, `CaseFileSubmittedState`, … —
+   because `Procedure` now carries the same pattern
+   (`ProcedureDraftState | ProcedurePublishedState |
+   ProcedureClosedState`, filtering enum `ProcedureStateValue`) and
+   bare `Draft` would collide. `ProcedurePublishedState.since` /
+   `ProcedureClosedState.since` are transition times — `reopen`
+   resets `since` with no publication happening, so the field is
+   not `publishedAt`; revision publication dates live on revisions
+   (platform P.4, *Procedure lifecycle*).
 6. **`counts`** sub-objects (`organization.counts { procedures teams
    members }`) answer counts off read models without fetching lists.
 7. **Mutations: one `input` each, verb-first names, the full object

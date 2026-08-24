@@ -249,6 +249,65 @@ are emitted by use-case services (state changes, resolver failures, …).
 Deliberately not kernel data — the log is cells, not chat (DESIGN
 §2.9).
 
+**Procedure lifecycle (settled 2026-08-24).** The catalog row's
+open/closed is a three-state machine — `Draft` (never published) →
+`Published { since }` ⇄ `Closed { since }` — hand-rolled in
+`platform-core` as a plain enum with fallible transition functions:
+three states and four transitions earn no state-machine crate, and
+the case-file checkpoint machine will be the same shape (a `match`
+on which checkpoint may follow which). Transitions: **publish**
+lands in `Published` from any state — it consumes the revision
+draft, appends the kernel publication event (DESIGN §2.1), and from
+`Closed` it *is* the reopen; **close** only from `Published` (a
+never-published procedure is deleted, not closed — G.2 rule 8);
+**reopen** from `Closed` re-opens on the last published revision,
+no kernel event. A publish-but-stay-closed variant (pre-staging a
+schema for a later reopen) is refused until the corpus asks for it.
+The row stores a `state` discriminant plus one `state_since`
+timestamp under the existing `#[version]` guard — only the current
+state's fact lives on the row; history is the event log's (below).
+`since` means *since when the procedure is open* — deliberately not
+named `published_at`, because `reopen` resets it with no publication
+happening; revision publication timestamps are kernel facts
+(`RevisionStore` publication events), and a catalog mirror of them
+is a later read model if a list view asks. The **revision draft is
+orthogonal to the state**: a draft may be in progress in all three
+states (the first revision, the next, the reopen's), so "has a
+draft" is neither an input nor an output of the machine. In the API
+the state is the G.2 rule 5 union — `ProcedureDraftState |
+ProcedurePublishedState | ProcedureClosedState` plus
+`ProcedureStateValue` for filtering, generated from the one Rust
+enum.
+
+**Event logs (settled 2026-08-24): two tables, not one.**
+`procedure_events` and `case_file_events`, separate because their
+lifetimes and truths differ. Retention diverges: case-file events
+are personal-data-adjacent and go with the case file under the
+DESIGN §2.10 erasure guarantees, while procedure events are the
+long-lived administrative audit trail — two tables make "erase the
+case file" a clean cascade instead of row-level carve-outs in one
+polymorphic table. Authority diverges: for procedures the platform
+log *is* the primary record of close/reopen (the kernel has no
+open/closed concept) and its `published` rows mirror kernel
+publication events; for case files the kernel record log is
+authoritative for lifecycle (checkpoints, DESIGN §2.9; the platform
+state column is a read model, P.9 Q3), so `case_file_events` holds
+only what the record log doesn't — team assignment, messages sent,
+reviewer administrivia; its specifics land with case files (P1).
+Shape, same for both: `id` UUID v7 (time-ordered, so also the
+sequence), subject id (indexed), nullable `actor_account_id`
+(system events), `kind` as a column (filtering), per-kind facts as
+platform-owned JSON, `created_at` — written in the same transaction
+as the state-column update by the use-case service, so column and
+log cannot disagree. Two constraints: **draft autosaves are not
+events** (the procedure alphabet is `created`, `published
+{ revision, base }`, `closed`, `reopened`, `draft_discarded` —
+per-edit logging is P.9 Q4's bloat, procedure-side), and
+**case-file event payloads never hold cell values** — references
+and metadata only, or the log becomes an erasure leak outliving
+§2.10. The unified per-organization audit view, if ever wanted, is
+two queries.
+
 **Procedure drafts (settled 2026-08-23).** The kernel has no notion of
 a schema *being edited*: a `Schema` is a plain value, a revision is
 that value once published and content-addressed (DESIGN §2.1), and
