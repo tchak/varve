@@ -505,7 +505,7 @@ fn the_client_mirrors_every_error_code() {
 /// The draft selection every draft mutation and the read share.
 const DRAFT: &str = "revisionDraft { base elements {
     __typename
-    ... on DraftColumn { id parentId label audience type { __typename
+    ... on DraftColumn { id parentId label required audience type { __typename
         ... on IntegerType { unit } ... on DecimalType { unit }
         ... on EnumType { multiple options { id label } }
         ... on AttachmentType { multiple accept maxBytes }
@@ -837,6 +837,8 @@ async fn sections_notes_and_audiences_journey() {
         .await;
     let nom = id_of(&p["revisionDraft"]["elements"][2]);
     assert_eq!(p["revisionDraft"]["elements"][2]["audience"], "ALL");
+    // Effectively public at creation: required by default (G.7).
+    assert_eq!(p["revisionDraft"]["elements"][2]["required"], true);
 
     // Narrow the whole section to reviewers…
     let p = api
@@ -871,6 +873,19 @@ async fn sections_notes_and_audiences_journey() {
         )
         .await;
     assert_eq!(p["revisionDraft"]["elements"][3]["audience"], "REVIEWER");
+    // Clamped reviewer-only at creation: optional by default (G.7).
+    assert_eq!(p["revisionDraft"]["elements"][3]["required"], false);
+
+    // The switchable half: always required, or not required.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "required": false }),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["elements"][2]["required"], false);
 
     // updateNote sets a title; an explicit null clears the section's
     // help (omitted leaves it — MaybeUndefined).
@@ -1064,6 +1079,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 placement: None,
                 label: "Surface".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
+                required: None,
                 audience: None,
             },
         }),
@@ -1104,6 +1120,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
                 }),
                 label: "Inside a column".into(),
                 ty: ColumnTypeInput::text(),
+                required: None,
                 audience: None,
             },
         }),
@@ -1123,6 +1140,7 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
         "union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType",
         "enum Audience",
         "audience: Audience!",
+        "required: Boolean!",
         "addColumn(input: AddColumnInput!): Procedure!",
         "addGroup(input: AddGroupInput!): Procedure!",
         "addSection(input: AddSectionInput!): Procedure!",

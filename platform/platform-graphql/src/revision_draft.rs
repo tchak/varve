@@ -51,6 +51,7 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
                 parent_id,
                 label: c.label.clone(),
                 ty: column_type(&c.ty, c.arity),
+                required: c.required,
                 audience: c.audience.into(),
             })),
             TreeElement::Group(g) => {
@@ -117,6 +118,9 @@ pub struct DraftColumn {
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnType,
+    /// §2.6 requiredness, its two constant cases (G.7 *Required on
+    /// columns*); conditional rules arrive with the rule editor.
+    pub required: bool,
     pub audience: Audience,
 }
 
@@ -539,6 +543,7 @@ pub fn new_column(
     label: String,
     ty: ScalarType,
     arity: varve_schema::Arity,
+    required: bool,
     audience: platform_core::Audience,
 ) -> TreeElement {
     TreeElement::Column(TreeColumn {
@@ -546,6 +551,7 @@ pub fn new_column(
         label,
         ty,
         arity,
+        required,
         audience,
     })
 }

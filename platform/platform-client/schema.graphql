@@ -20,6 +20,11 @@ input AddColumnInput {
 	label: String!
 	type: ColumnTypeInput!
 	"""
+	Omitted = required for an effectively public column, optional
+	for a reviewer-only one (G.7 *Required on columns*).
+	"""
+	required: Boolean
+	"""
 	Clamped to the parent's effective audience (P.4).
 	"""
 	audience: Audience! = ALL
@@ -268,6 +273,11 @@ type DraftColumn {
 	parentId: ID
 	label: String!
 	type: ColumnType!
+	"""
+	§2.6 requiredness, its two constant cases (G.7 *Required on
+	columns*); conditional rules arrive with the rule editor.
+	"""
+	required: Boolean!
 	audience: Audience!
 }
 
@@ -692,6 +702,10 @@ input UpdateColumnInput {
 	id: ID!
 	label: String
 	type: ColumnTypeInput
+	"""
+	Always required, or not required (G.7); omitted leaves it.
+	"""
+	required: Boolean
 	"""
 	Wider than the parent's effective audience is `INVALID_EDIT`
 	(P.4: the marker would lie).

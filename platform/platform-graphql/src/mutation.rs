@@ -63,6 +63,9 @@ pub struct AddColumnInput {
     pub label: String,
     #[graphql(name = "type")]
     pub ty: ColumnTypeInput,
+    /// Omitted = required for an effectively public column, optional
+    /// for a reviewer-only one (G.7 *Required on columns*).
+    pub required: Option<bool>,
     /// Clamped to the parent's effective audience (P.4).
     #[graphql(default_with = "Audience::All")]
     pub audience: Audience,
@@ -121,6 +124,8 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[graphql(name = "type")]
     pub ty: Option<ColumnTypeInput>,
+    /// Always required, or not required (G.7); omitted leaves it.
+    pub required: Option<bool>,
     /// Wider than the parent's effective audience is `INVALID_EDIT`
     /// (P.4: the marker would lie).
     pub audience: Option<Audience>,
@@ -377,10 +382,19 @@ impl Mutation {
         let label = input.label.trim().to_owned();
         edit_revision_draft(ctx, &input.procedure_id, move |tree| {
             let placement = input.placement.resolve(tree)?;
+            // Omitted, requiredness defaults by the column's
+            // *effective* audience (G.7): public required,
+            // reviewer-only optional.
+            let audience: platform_core::Audience = input.audience.into();
+            let effective =
+                platform_core::effective_audience(tree, &placement.parent)?.narrowest(audience);
+            let required = input
+                .required
+                .unwrap_or(effective == platform_core::Audience::All);
             platform_core::add_element(
                 tree,
                 &placement,
-                new_column(label, ty, arity, input.audience.into()),
+                new_column(label, ty, arity, required, audience),
             )
         })
         .await
@@ -472,6 +486,7 @@ impl Mutation {
             label: input.label.map(|l| l.trim().to_owned()),
             ty,
             arity,
+            required: input.required,
             audience: input.audience.map(Into::into),
         };
         edit_revision_draft(ctx, &input.procedure_id, move |tree| {

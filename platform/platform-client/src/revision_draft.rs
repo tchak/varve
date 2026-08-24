@@ -81,6 +81,7 @@ pub struct DraftColumn {
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnType,
+    pub required: bool,
     pub audience: Audience,
 }
 
@@ -393,6 +394,10 @@ pub struct AddColumnInput {
     pub label: String,
     #[cynic(rename = "type")]
     pub ty: ColumnTypeInput,
+    /// Omitted = required when effectively public, optional when
+    /// reviewer-only (G.7 *Required on columns*).
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
     /// Omitted = `All`, clamped to the parent's effective audience.
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub audience: Option<Audience>,
@@ -443,6 +448,8 @@ pub struct UpdateColumnInput {
     pub label: Option<String>,
     #[cynic(rename = "type", skip_serializing_if = "Option::is_none")]
     pub ty: Option<ColumnTypeInput>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub audience: Option<Audience>,
 }
@@ -690,6 +697,7 @@ mod tests {
                 placement: None,
                 label: "Nom".into(),
                 ty: ColumnTypeInput::integer(Some(Unit::SquareMetre)),
+                required: None,
                 audience: None,
             },
         });

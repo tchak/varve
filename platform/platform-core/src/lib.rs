@@ -77,6 +77,7 @@ pub use tree::{
 };
 pub use tree_edit::{
     ColumnPatch, EditError, ElementId, GroupPatch, NotePatch, Parent, Placement, SectionPatch,
-    add_element, list_capable, move_element, new_column_id, new_group_id, new_node_id,
-    new_option_id, remove_element, update_column, update_group, update_note, update_section,
+    add_element, effective_audience, list_capable, move_element, new_column_id, new_group_id,
+    new_node_id, new_option_id, remove_element, update_column, update_group, update_note,
+    update_section,
 };

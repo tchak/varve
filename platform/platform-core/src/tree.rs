@@ -73,6 +73,11 @@ pub struct TreeColumn {
     pub label: String,
     pub ty: ScalarType,
     pub arity: Arity,
+    /// §2.6 requiredness, its two constant cases (G.7 *Required on
+    /// columns*): `true` compiles to the vacuous always-required
+    /// rule at publication, `false` to no rule. Conditional
+    /// requiredness arrives with the rule editor.
+    pub required: bool,
     pub audience: Audience,
 }
 
@@ -194,6 +199,7 @@ fn element_to_json(element: &TreeElement) -> Value {
             "kind": "column",
             "id": c.id.as_str(),
             "label": c.label,
+            "required": c.required,
             "audience": audience_str(c.audience),
             "type": type_to_json(&c.ty, c.arity),
         }),
@@ -356,12 +362,20 @@ fn element_from_json(v: &Value) -> Result<TreeElement, TreeDecodeError> {
     Ok(match str_field(m, "kind")?.as_str() {
         "column" => {
             let (ty, arity) = type_from_json(field(m, "type")?)?;
+            let audience = audience_field(m)?;
             TreeElement::Column(TreeColumn {
                 id: ColumnId::new(str_field(m, "id")?),
                 label: str_field(m, "label")?,
                 ty,
                 arity,
-                audience: audience_field(m)?,
+                // Missing in drafts stored before the field existed:
+                // default as creation would (public required).
+                required: match m.get("required") {
+                    Some(Value::Bool(required)) => *required,
+                    None => audience == Audience::All,
+                    _ => return err("'required' must be a boolean"),
+                },
+                audience,
             })
         }
         "group" => TreeElement::Group(TreeGroup {
@@ -516,6 +530,7 @@ mod tests {
                             label: "Nom".into(),
                             ty: ScalarType::Text,
                             arity: Arity::One,
+                            required: true,
                             audience: Audience::All,
                         }),
                         TreeElement::Note(TreeNote {
@@ -540,6 +555,7 @@ mod tests {
                             fields: vec![],
                         }])),
                         arity: Arity::Many,
+                        required: true,
                         audience: Audience::Reviewer,
                     })],
                 }),
@@ -548,6 +564,7 @@ mod tests {
                     label: "Surface".into(),
                     ty: ScalarType::Decimal(Some(Unit::SquareMetre)),
                     arity: Arity::One,
+                    required: true,
                     audience: Audience::All,
                 }),
             ],
@@ -569,6 +586,7 @@ mod tests {
                     max_bytes: Some(10_000_000),
                 }),
                 arity: Arity::Many,
+                required: false,
                 audience: Audience::All,
             })],
         };

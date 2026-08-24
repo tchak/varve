@@ -100,6 +100,7 @@ pub struct ColumnPatch {
     pub label: Option<String>,
     pub ty: Option<ScalarType>,
     pub arity: Option<Arity>,
+    pub required: Option<bool>,
     pub audience: Option<Audience>,
 }
 
@@ -209,7 +210,7 @@ pub fn add_element(
         return Err(EditError::ArityNotOffered(c.id.clone()));
     }
     commit(tree, |t| {
-        let parent_audience = audience_of_parent(t, &placement.parent)?;
+        let parent_audience = effective_audience(t, &placement.parent)?;
         clamp_audience(&mut element, parent_audience);
         insert(t, placement, element)
     })
@@ -241,6 +242,9 @@ pub fn update_column(tree: &mut Tree, id: &ColumnId, patch: ColumnPatch) -> Resu
         }
         if column.arity == Arity::Many && !list_capable(&column.ty) {
             return Err(EditError::ArityNotOffered(column.id.clone()));
+        }
+        if let Some(required) = patch.required {
+            column.required = required;
         }
         if let Some(audience) = patch.audience {
             column.audience = audience;
@@ -394,8 +398,9 @@ fn check_unique_nodes(tree: &Tree) -> Result<(), EditError> {
 }
 
 /// The effective audience at `parent`: the narrowest along its path
-/// (the root is `All`).
-fn audience_of_parent(tree: &Tree, parent: &Parent) -> Result<Audience, EditError> {
+/// (the root is `All`). Public: the API layer defaults a new
+/// column's requiredness by it (G.7 *Required on columns*).
+pub fn effective_audience(tree: &Tree, parent: &Parent) -> Result<Audience, EditError> {
     let id = match parent {
         Parent::Root => return Ok(Audience::All),
         Parent::Group(id) => ElementId::Group(id.clone()),
@@ -549,6 +554,7 @@ mod tests {
             label: id.to_uppercase(),
             ty: ScalarType::Text,
             arity: Arity::One,
+            required: true,
             audience: Audience::All,
         })
     }
@@ -962,6 +968,7 @@ mod tests {
             label: "Z".into(),
             ty: ScalarType::Text,
             arity: Arity::Many,
+            required: true,
             audience: Audience::All,
         });
         assert_eq!(
@@ -973,6 +980,7 @@ mod tests {
             label: "Z".into(),
             ty: ScalarType::Attachment(Default::default()),
             arity: Arity::Many,
+            required: true,
             audience: Audience::All,
         });
         add_element(&mut t, &Placement::root(), many_files).unwrap();
