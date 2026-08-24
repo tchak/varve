@@ -204,6 +204,10 @@ pub(super) struct Addition {
     parent: String,
     #[serde(default)]
     before: String,
+    /// `REVIEWER` narrows from the start; anything else is `ALL`
+    /// (and the server clamps to the parent's effective audience).
+    #[serde(default)]
+    audience: String,
 }
 
 /// `…/schema/add`: [`add::submit`].
@@ -221,6 +225,7 @@ pub(super) mod add {
         let label_for_notice = new_label.clone();
         let parent = (!input.parent.is_empty()).then_some(input.parent.as_str());
         let before = (!input.before.is_empty()).then_some(input.before.as_str());
+        let audience = (input.audience == "REVIEWER").then_some(Audience::Reviewer);
         if new_label.is_empty() {
             let notice = Notice {
                 kind: NoticeKind::Alert,
@@ -250,7 +255,7 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         cardinality: None,
-                        audience: None,
+                        audience,
                     },
                 }),
             )
@@ -264,7 +269,7 @@ pub(super) mod add {
                         placement,
                         title: new_label,
                         help: None,
-                        audience: None,
+                        audience,
                     },
                 }),
             )
@@ -278,7 +283,7 @@ pub(super) mod add {
                         placement,
                         title: None,
                         body: new_label,
-                        audience: None,
+                        audience,
                     },
                 }),
             )
@@ -292,7 +297,7 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         ty: elements::kind_input(&input.kind),
-                        audience: None,
+                        audience,
                     },
                 }),
             )
@@ -569,6 +574,17 @@ async fn editor_page(
         .as_deref()
         .and_then(|id| elements.iter().find(|e| id_of(e) == id).cloned());
     let selected_id = selected_element.as_ref().map(|e| id_of(e).to_owned());
+    // Inside an effectively reviewer-only container the audience
+    // cannot change (wider is refused, narrower is moot — P.4
+    // inheritance), so the detail form drops its select and the add
+    // form its field.
+    let audience_locked = selected_element
+        .as_ref()
+        .and_then(parent_of)
+        .is_some_and(|parent| effectively_reviewer(&elements, &parent));
+    let container_reviewer = selected_id
+        .as_deref()
+        .is_some_and(|id| effectively_reviewer(&elements, id));
     let page_href = || {
         href!(
             page,
@@ -826,6 +842,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -949,46 +967,48 @@ async fn editor_page(
                                                     </option>
                                                 </select>
                                             </div>
-                                            <div class="flex flex-col gap-2">
-                                                label(
-                                                    attrs: attributes! { for="element-audience" },
-                                                    (audience_label.as_str())
-                                                )
-                                                <select
-                                                    id="element-audience"
-                                                    class=(SELECT)
-                                                    name="audience"
-                                                    @change=$(async |e: Event| {
-                                                        status.set(saving.get());
-                                                        let outcome = save_field(
-                                                                pid.get(),
-                                                                eid.get(),
-                                                                "audience".to_owned(),
-                                                                e.target.value,
-                                                            )
-                                                            .await;
-                                                        if outcome.is_ok() {
-                                                            status.set(outcome.unwrap());
-                                                            revision.increment();
-                                                        } else {
-                                                            status.set(outcome.unwrap_err());
-                                                        }
-                                                    })
-                                                >
-                                                    <option
-                                                        value="ALL"
-                                                        selected=(matches!(g.group.audience, Audience::All))
+                                            if !audience_locked {
+                                                <div class="flex flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-audience" },
+                                                        (audience_label.as_str())
+                                                    )
+                                                    <select
+                                                        id="element-audience"
+                                                        class=(SELECT)
+                                                        name="audience"
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "audience".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
                                                     >
-                                                        (audience_all.as_str())
-                                                    </option>
-                                                    <option
-                                                        value="REVIEWER"
-                                                        selected=(matches!(g.group.audience, Audience::Reviewer))
-                                                    >
-                                                        (audience_reviewer.as_str())
-                                                    </option>
-                                                </select>
-                                            </div>
+                                                        <option
+                                                            value="ALL"
+                                                            selected=(matches!(g.group.audience, Audience::All))
+                                                        >
+                                                            (audience_all.as_str())
+                                                        </option>
+                                                        <option
+                                                            value="REVIEWER"
+                                                            selected=(matches!(g.group.audience, Audience::Reviewer))
+                                                        >
+                                                            (audience_reviewer.as_str())
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            }
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -1017,6 +1037,7 @@ async fn editor_page(
                                     organization_id: organization_id,
                                     parent: Some(selected_string.clone()),
                                     section_parent: false,
+                                    audience_offered: !container_reviewer,
                                     heading_level_top: false
                                 )
                             </div>
@@ -1271,46 +1292,48 @@ async fn editor_page(
                                                     </option>
                                                 </select>
                                             </div>
-                                            <div class="flex flex-col gap-2">
-                                                label(
-                                                    attrs: attributes! { for="element-audience" },
-                                                    (audience_label.as_str())
-                                                )
-                                                <select
-                                                    id="element-audience"
-                                                    class=(SELECT)
-                                                    name="audience"
-                                                    @change=$(async |e: Event| {
-                                                        status.set(saving.get());
-                                                        let outcome = save_field(
-                                                                pid.get(),
-                                                                eid.get(),
-                                                                "audience".to_owned(),
-                                                                e.target.value,
-                                                            )
-                                                            .await;
-                                                        if outcome.is_ok() {
-                                                            status.set(outcome.unwrap());
-                                                            revision.increment();
-                                                        } else {
-                                                            status.set(outcome.unwrap_err());
-                                                        }
-                                                    })
-                                                >
-                                                    <option
-                                                        value="ALL"
-                                                        selected=(matches!(c.column.audience, Audience::All))
+                                            if !audience_locked {
+                                                <div class="flex flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-audience" },
+                                                        (audience_label.as_str())
+                                                    )
+                                                    <select
+                                                        id="element-audience"
+                                                        class=(SELECT)
+                                                        name="audience"
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "audience".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
                                                     >
-                                                        (audience_all.as_str())
-                                                    </option>
-                                                    <option
-                                                        value="REVIEWER"
-                                                        selected=(matches!(c.column.audience, Audience::Reviewer))
-                                                    >
-                                                        (audience_reviewer.as_str())
-                                                    </option>
-                                                </select>
-                                            </div>
+                                                        <option
+                                                            value="ALL"
+                                                            selected=(matches!(c.column.audience, Audience::All))
+                                                        >
+                                                            (audience_all.as_str())
+                                                        </option>
+                                                        <option
+                                                            value="REVIEWER"
+                                                            selected=(matches!(c.column.audience, Audience::Reviewer))
+                                                        >
+                                                            (audience_reviewer.as_str())
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            }
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -1543,46 +1566,48 @@ async fn editor_page(
                                                     })
                                                 >
                                             </div>
-                                            <div class="flex flex-col gap-2">
-                                                label(
-                                                    attrs: attributes! { for="element-audience" },
-                                                    (audience_label.as_str())
-                                                )
-                                                <select
-                                                    id="element-audience"
-                                                    class=(SELECT)
-                                                    name="audience"
-                                                    @change=$(async |e: Event| {
-                                                        status.set(saving.get());
-                                                        let outcome = save_field(
-                                                                pid.get(),
-                                                                eid.get(),
-                                                                "audience".to_owned(),
-                                                                e.target.value,
-                                                            )
-                                                            .await;
-                                                        if outcome.is_ok() {
-                                                            status.set(outcome.unwrap());
-                                                            revision.increment();
-                                                        } else {
-                                                            status.set(outcome.unwrap_err());
-                                                        }
-                                                    })
-                                                >
-                                                    <option
-                                                        value="ALL"
-                                                        selected=(matches!(s.section.audience, Audience::All))
+                                            if !audience_locked {
+                                                <div class="flex flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-audience" },
+                                                        (audience_label.as_str())
+                                                    )
+                                                    <select
+                                                        id="element-audience"
+                                                        class=(SELECT)
+                                                        name="audience"
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "audience".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
                                                     >
-                                                        (audience_all.as_str())
-                                                    </option>
-                                                    <option
-                                                        value="REVIEWER"
-                                                        selected=(matches!(s.section.audience, Audience::Reviewer))
-                                                    >
-                                                        (audience_reviewer.as_str())
-                                                    </option>
-                                                </select>
-                                            </div>
+                                                        <option
+                                                            value="ALL"
+                                                            selected=(matches!(s.section.audience, Audience::All))
+                                                        >
+                                                            (audience_all.as_str())
+                                                        </option>
+                                                        <option
+                                                            value="REVIEWER"
+                                                            selected=(matches!(s.section.audience, Audience::Reviewer))
+                                                        >
+                                                            (audience_reviewer.as_str())
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            }
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -1608,6 +1633,7 @@ async fn editor_page(
                                     organization_id: organization_id,
                                     parent: Some(selected_string.clone()),
                                     section_parent: true,
+                                    audience_offered: !container_reviewer,
                                     heading_level_top: false
                                 )
                             </div>
@@ -1691,46 +1717,48 @@ async fn editor_page(
                                                     (n.note.body.as_str())
                                                 </textarea>
                                             </div>
-                                            <div class="flex flex-col gap-2">
-                                                label(
-                                                    attrs: attributes! { for="element-audience" },
-                                                    (audience_label.as_str())
-                                                )
-                                                <select
-                                                    id="element-audience"
-                                                    class=(SELECT)
-                                                    name="audience"
-                                                    @change=$(async |e: Event| {
-                                                        status.set(saving.get());
-                                                        let outcome = save_field(
-                                                                pid.get(),
-                                                                eid.get(),
-                                                                "audience".to_owned(),
-                                                                e.target.value,
-                                                            )
-                                                            .await;
-                                                        if outcome.is_ok() {
-                                                            status.set(outcome.unwrap());
-                                                            revision.increment();
-                                                        } else {
-                                                            status.set(outcome.unwrap_err());
-                                                        }
-                                                    })
-                                                >
-                                                    <option
-                                                        value="ALL"
-                                                        selected=(matches!(n.note.audience, Audience::All))
+                                            if !audience_locked {
+                                                <div class="flex flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-audience" },
+                                                        (audience_label.as_str())
+                                                    )
+                                                    <select
+                                                        id="element-audience"
+                                                        class=(SELECT)
+                                                        name="audience"
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "audience".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
                                                     >
-                                                        (audience_all.as_str())
-                                                    </option>
-                                                    <option
-                                                        value="REVIEWER"
-                                                        selected=(matches!(n.note.audience, Audience::Reviewer))
-                                                    >
-                                                        (audience_reviewer.as_str())
-                                                    </option>
-                                                </select>
-                                            </div>
+                                                        <option
+                                                            value="ALL"
+                                                            selected=(matches!(n.note.audience, Audience::All))
+                                                        >
+                                                            (audience_all.as_str())
+                                                        </option>
+                                                        <option
+                                                            value="REVIEWER"
+                                                            selected=(matches!(n.note.audience, Audience::Reviewer))
+                                                        >
+                                                            (audience_reviewer.as_str())
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            }
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -1756,6 +1784,7 @@ async fn editor_page(
                             organization_id: organization_id,
                             parent: None,
                             section_parent: false,
+                            audience_offered: true,
                             heading_level_top: true
                         ),
                     }
@@ -1913,17 +1942,7 @@ impl Tree {
     /// Effectively reviewer-only (platform P.4): the element or any
     /// ancestor carries the `Reviewer` audience.
     fn reviewer_only(&self, id: &str) -> bool {
-        let mut current = Some(id.to_owned());
-        while let Some(current_id) = current {
-            let Some(element) = self.elements.iter().find(|e| id_of(e) == current_id) else {
-                return false;
-            };
-            if audience_of(element) == Audience::Reviewer {
-                return true;
-            }
-            current = parent_of(element);
-        }
-        false
+        effectively_reviewer(&self.elements, id)
     }
 }
 
@@ -2233,6 +2252,10 @@ async fn add_form(
     organization_id: uuid::Uuid,
     parent: Option<String>,
     section_parent: bool,
+    /// `false` inside a reviewer-only container: everything added
+    /// there is reviewer-only regardless (the server clamps), so the
+    /// field would mislead.
+    audience_offered: bool,
     heading_level_top: bool,
 ) -> Result {
     let heading = match (&parent, section_parent) {
@@ -2249,6 +2272,9 @@ async fn add_form(
     let label_label = t(cx, "form.label").await?;
     let type_label = t(cx, "schema.type").await?;
     let submit = t(cx, "schema.add.submit").await?;
+    let audience_label = t(cx, "schema.audience").await?;
+    let audience_all = t(cx, "schema.audience.all").await?;
+    let audience_reviewer = t(cx, "schema.audience.reviewer").await?;
     let mut kind_names = Vec::new();
     for kind in KINDS {
         kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
@@ -2260,6 +2286,7 @@ async fn add_form(
     let what_id = format!("{prefix}-what");
     let type_id = format!("{prefix}-type");
     let label_id = format!("{prefix}-label");
+    let audience_id = format!("{prefix}-audience");
     view! {
         // The type select shows for a column only; the signal is this
         // form's own (a handler reaches its own `view!`'s signals).
@@ -2325,6 +2352,22 @@ async fn add_form(
                             label: label_label,
                             attrs: attributes! { type="text" name="label" required="" autocomplete="off" }
                         )
+                        if audience_offered {
+                            <div class="flex flex-col gap-2">
+                                label(
+                                    attrs: attributes! { for=(audience_id.as_str()) },
+                                    (audience_label)
+                                )
+                                <select
+                                    id=(audience_id.as_str())
+                                    class=(SELECT)
+                                    name="audience"
+                                >
+                                    <option value="ALL">(audience_all)</option>
+                                    <option value="REVIEWER">(audience_reviewer)</option>
+                                </select>
+                            </div>
+                        }
                     </div>
                 )
                 card_footer(button(attrs: attributes! { type="submit" }, (submit)))
@@ -2405,6 +2448,22 @@ fn element_icon(element: &DraftElement) -> IconData {
 
 /// The element's own audience marker (its *effective* audience is
 /// [`Tree::reviewer_only`]'s business — inheritance, platform P.4).
+/// The element's *effective* audience is reviewer-only: its own
+/// marker, or any ancestor's (platform P.4 — inheritance).
+pub(super) fn effectively_reviewer(elements: &[DraftElement], id: &str) -> bool {
+    let mut current = Some(id.to_owned());
+    while let Some(current_id) = current {
+        let Some(element) = elements.iter().find(|e| id_of(e) == current_id) else {
+            return false;
+        };
+        if audience_of(element) == Audience::Reviewer {
+            return true;
+        }
+        current = parent_of(element);
+    }
+    false
+}
+
 pub(super) fn audience_of(element: &DraftElement) -> Audience {
     match element {
         DraftElement::Column(c) => c.audience,

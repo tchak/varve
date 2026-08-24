@@ -824,6 +824,66 @@ async fn sections_notes_and_audience_journey() {
     .await;
     let html = landed(&router, &cookie, &to).await;
     assert_eq!(element_ids(&html), std::slice::from_ref(&ville));
+
+    // The add form offers the audience at the root…
+    let html = page(&router, &cookie, &editor).await;
+    assert!(html.contains("id=\"add-audience\""), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[
+            ("what", "column"),
+            ("label", "Notes internes"),
+            ("audience", "REVIEWER"),
+        ],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        html.match_indices("data-audience=\"reviewer\"").count(),
+        1,
+        "{html}"
+    );
+
+    // …but not inside a reviewer-only container, where the audience
+    // cannot change: the container's own select stays (its parent is
+    // the root), its add form drops the field, and a child's detail
+    // form drops the select.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "group"), ("label", "Interne")],
+    )
+    .await;
+    let interne = selected_of(&to.to);
+    let to = act(
+        &router,
+        &cookie,
+        &update(&interne),
+        &[("audience", "REVIEWER")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("id=\"element-audience\""), "{html}");
+    assert!(
+        !html.contains(&format!("id=\"add-{interne}-audience\"")),
+        "{html}"
+    );
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[
+            ("what", "column"),
+            ("label", "Détail"),
+            ("parent", &interne),
+        ],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(!html.contains("id=\"element-audience\""), "{html}");
 }
 
 #[tokio::test]
