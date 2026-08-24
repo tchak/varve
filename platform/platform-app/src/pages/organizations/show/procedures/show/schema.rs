@@ -824,6 +824,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -2064,8 +2066,21 @@ async fn tree_row(
                     badge(variant: BadgeVariant::Secondary, (multiplicity.as_str()))
                 }
                 if reviewer_only {
+                    // The audience marker must not read as one more
+                    // type badge: an amber tint (dark values too — a
+                    // colour outside the theme tokens, recorded in
+                    // platform.md P.4 as the a11y contract asks) and
+                    // an eye-off glyph set it apart; the text stays
+                    // the carrier, never the colour alone.
                     badge(
                         variant: BadgeVariant::Outline,
+                        attrs: attributes! {
+                            class="border-transparent bg-amber-100 text-amber-900                                    dark:bg-amber-500/15 dark:text-amber-300"
+                        },
+                        icon(
+                            data: iconify_icon!("feather:eye-off"),
+                            attrs: attributes! { class="size-3" }
+                        )
                         (tree.labels.reviewer.as_str())
                     )
                 }

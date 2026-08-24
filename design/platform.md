@@ -411,9 +411,12 @@ save), and a one-shot notice after every action (`role=status` /
 **slot that is always there at one height** (`aria-live=polite`), so
 the panels never move when a notice comes or goes; notices name what
 they acted on ("Added the column “Nom”.") and use the platform's own
-`notice` component — a soft green or red tint, the one colour outside
+`notice` component — a soft green or red tint, a colour outside
 the theme tokens (Tailwind emerald/rose with dark values; recorded
-here as the a11y contract asks); a confirmation fades out a few
+here as the a11y contract asks — as is the second such colour, the
+amber tint + eye-off glyph on the structure rows' reviewer-audience
+badge, which must not read as one more type badge); a confirmation
+fades out a few
 seconds after render (pure CSS in `app.css`, `motion-safe:` only, the
 live-region announcement unaffected), a refusal stays. Counts in the
 header are CLDR-plural messages (CLAUDE.md, *UI strings*). **No
