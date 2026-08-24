@@ -42,6 +42,7 @@
 //! screen reader reach, and that the API's sibling-anchored placement
 //! (G.7) expresses directly.
 
+pub(super) mod edit;
 pub(super) mod element;
 pub(super) mod elements;
 pub(super) mod preview;
@@ -95,12 +96,12 @@ use crate::{
 
 use super::super::super::OrganizationId;
 use super::{ProcedureId, counts, procedure_draft};
+use edit::Fields;
 use element::{
     KINDS, UNITS, effectively_reviewer, element_icon, element_kind, id_of, kind_message_id,
     kind_message_id_of, kind_of, label_of, multiple_of, multiple_of_type, parent_of,
     text_format_of, unit_name, unit_of,
 };
-use elements::Fields;
 use elements::element::ElementId;
 
 /// The editor's query: the selected element, and the pending
@@ -308,7 +309,7 @@ pub(super) mod add {
                         procedure_id,
                         placement,
                         label: new_label,
-                        ty: elements::kind_input(&input.kind),
+                        ty: edit::kind_input(&input.kind),
                         required: None,
                         audience,
                     },
@@ -443,7 +444,7 @@ async fn save_field(
         return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
     let fields = Fields::from_pairs(vec![(field_name, value)]);
-    match elements::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
+    match edit::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
         Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
         Err(notice) => Ok(Err(notice.text)),
     }
@@ -473,7 +474,7 @@ async fn save_text_format(
         ("format".to_owned(), format),
         ("pattern".to_owned(), pattern),
     ]);
-    match elements::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
+    match edit::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
         Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
         Err(notice) => Ok(Err(notice.text)),
     }
@@ -497,7 +498,7 @@ async fn save_option(
     let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
         return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
-    match elements::rename_option(cx, &client, &procedure, &element_id, option_id, &value).await? {
+    match edit::rename_option(cx, &client, &procedure, &element_id, option_id, &value).await? {
         Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
         Err(notice) => Ok(Err(notice.text)),
     }
