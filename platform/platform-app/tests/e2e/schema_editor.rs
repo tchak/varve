@@ -5,7 +5,11 @@
 //! blurred is saved through the procedure, the status line reports
 //! it, and the structure panel — a shard — shows the new label with
 //! no navigation; changing the kind hides and shows the
-//! kind-dependent fields).
+//! kind-dependent fields), and **custom pattern** (the one edit that
+//! two controls make together: the format select and the pattern
+//! input each save *both* values, because a column's format is
+//! derived from the pair — sending them one at a time can never
+//! reach `REGEX`).
 
 use playwright_rs::protocol::{AriaRole, Browser, BrowserContext, GetByRoleOptions, Page};
 use playwright_rs::{expect, expect_page, locator};
@@ -25,6 +29,11 @@ async fn keyboard_moves_an_element_down() {
 #[tokio::test(flavor = "multi_thread")]
 async fn autosave_updates_the_structure_without_navigating() {
     run_scenario("schema-autosave", default_context, autosave_scenario).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn autosave_reaches_a_custom_pattern() {
+    run_scenario("schema-pattern", default_context, pattern_scenario).await;
 }
 
 /// Signs up, creates an organization and a procedure, opens the
@@ -236,6 +245,71 @@ async fn autosave_scenario(
         .await?;
     expect(page.locator(locator!("#element-unit")))
         .to_have_value("m2")
+        .await?;
+    Ok(())
+}
+
+/// A custom pattern, reached the way a person reaches it: pick the
+/// format, then type the pattern. Neither control can save alone —
+/// the format is derived from the pair, so picking `REGEX` with no
+/// pattern yet is refused (and says why), and the pattern that
+/// follows must carry the format with it or it is read against a
+/// column that never became `REGEX`.
+async fn pattern_scenario(
+    _browser: &Browser,
+    context: &BrowserContext,
+    app: &App,
+    engine: &'static str,
+) -> TestResult {
+    let page = context.new_page().await?;
+    let email = unique_email(&format!("e2e-schema-pattern-{engine}"));
+    browser_signup(&page, app, "Aurélie", &email).await?;
+    if !accepts_secure_cookie_on_loopback_http(engine) {
+        println!(
+            "[{engine}] Secure session cookie refused over http://127.0.0.1; \
+             the editor journey cannot run here"
+        );
+        return Ok(());
+    }
+    let _editor = editor_with_columns(&page, app, "pattern", &["Code postal"]).await?;
+    // The last add left the text column selected; it has no format,
+    // so the pattern field is hidden.
+    expect(page.locator(locator!("[data-facet='format']")))
+        .to_be_visible()
+        .await?;
+    expect(page.locator(locator!("[data-facet='pattern']")))
+        .to_be_hidden()
+        .await?;
+
+    // Picking the custom format reveals the pattern field and says
+    // what is still missing — there is no pattern to store yet.
+    page.locator(locator!("#element-format"))
+        .select_option("REGEX", None)
+        .await?;
+    expect(page.locator(locator!("[data-facet='pattern']")))
+        .to_be_visible()
+        .await?;
+    expect(page.locator(locator!("[data-save-status]")))
+        .to_have_text("A pattern is required for a custom format.")
+        .await?;
+
+    // The pattern carries the format with it, so this one edit stores
+    // both.
+    page.locator(locator!("#element-pattern"))
+        .fill("[0-9]{5}", None)
+        .await?;
+    page.keyboard().press("Tab", None).await?;
+    expect(page.locator(locator!("[data-save-status]")))
+        .to_have_text("Saved your changes.")
+        .await?;
+
+    // A reload shows what was stored: the choice and the pattern.
+    page.reload(None).await?;
+    expect(page.locator(locator!("#element-format")))
+        .to_have_value("REGEX")
+        .await?;
+    expect(page.locator(locator!("#element-pattern")))
+        .to_have_value("[0-9]{5}")
         .await?;
     Ok(())
 }

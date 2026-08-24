@@ -23,7 +23,11 @@
 //! `role="status"` line (saving / saved / the server's reason); a
 //! successful save bumps a revision signal that re-renders the
 //! structure panel, a `#[shard]` ([`structure`]), so the tree shows
-//! the new label without a reload. Type-dependent fieldsets hide
+//! the new label without a reload. A text column's format is the one
+//! edit two controls make together — the select and the pattern
+//! input both call [`save_text_format`] with *both* values, since the
+//! format is derived from the pair and neither half can be applied
+//! against a column the other half never changed. Type-dependent fieldsets hide
 //! when the chosen kind cannot use them. An enum's options are a
 //! card of their own under the column form: one row per option (its
 //! label autosaving, a red remove button), an explicit *Add option*
@@ -392,6 +396,28 @@ pub(super) mod discard {
     }
 }
 
+/// The procedure's draft by id, `None` when the id is not a uuid or
+/// the schema answers `null` — both are the editor's conflict.
+async fn draft_of(
+    cx: &Cx,
+    client: &platform_graphql::InProcess,
+    procedure_id: &str,
+) -> Result<Option<ProcedureRevisionDraft>> {
+    let _ = cx;
+    let Ok(id) = procedure_id.parse::<uuid::Uuid>() else {
+        return Ok(None);
+    };
+    Ok(platform_client::run(
+        client,
+        ProcedureRevisionDraftQuery::build(ProcedureRevisionDraftVariables {
+            id: cynic::Id::new(id.to_string()),
+        }),
+    )
+    .await
+    .ok()
+    .and_then(|query| query.procedure))
+}
+
 /// Autosave of one field of the selected element (the runtime path
 /// of [`elements::update`]): `Ok(Ok(text))` is the confirmation to
 /// show, `Ok(Err(text))` the reason the save was refused — outcome as
@@ -407,22 +433,40 @@ async fn save_field(
     value: String,
 ) -> Result<std::result::Result<String, String>> {
     let client = client(cx).await?;
-    let procedure_id: uuid::Uuid = match procedure_id.parse() {
-        Ok(id) => id,
-        Err(_) => return Ok(Err(t(cx, "schema.error.conflict").await?)),
-    };
-    let procedure = platform_client::run(
-        &client,
-        ProcedureRevisionDraftQuery::build(ProcedureRevisionDraftVariables {
-            id: cynic::Id::new(procedure_id.to_string()),
-        }),
-    )
-    .await;
-    let procedure: ProcedureRevisionDraft = match procedure {
-        Ok(ProcedureRevisionDraftQuery { procedure: Some(p) }) => p,
-        _ => return Ok(Err(t(cx, "schema.error.conflict").await?)),
+    let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
+        return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
     let fields = Fields::from_pairs(vec![(field_name, value)]);
+    match elements::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
+        Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
+        Err(notice) => Ok(Err(notice.text)),
+    }
+}
+
+/// Autosave of a text column's format constraint. The choice and
+/// the custom pattern are **one** edit, never two: a column's format
+/// is derived from both at once ([`elements::apply_update`] fills
+/// what a submission omits from the *stored* column), so sending
+/// them a field at a time cannot reach `REGEX` — picking it with no
+/// stored pattern is refused, and the pattern that follows is then
+/// read against a column whose format the refusal never changed.
+/// Same outcome shape as [`save_field`].
+#[procedure]
+async fn save_text_format(
+    cx: &Cx,
+    procedure_id: String,
+    element_id: String,
+    format: String,
+    pattern: String,
+) -> Result<std::result::Result<String, String>> {
+    let client = client(cx).await?;
+    let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
+        return Ok(Err(t(cx, "schema.error.conflict").await?));
+    };
+    let fields = Fields::from_pairs(vec![
+        ("format".to_owned(), format),
+        ("pattern".to_owned(), pattern),
+    ]);
     match elements::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
         Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
         Err(notice) => Ok(Err(notice.text)),
@@ -444,21 +488,8 @@ async fn save_option(
     let Some(option_id) = input_id.strip_prefix("option-") else {
         return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
-    let procedure = match procedure_id.parse::<uuid::Uuid>() {
-        Ok(id) => {
-            platform_client::run(
-                &client,
-                ProcedureRevisionDraftQuery::build(ProcedureRevisionDraftVariables {
-                    id: cynic::Id::new(id.to_string()),
-                }),
-            )
-            .await
-        }
-        Err(_) => return Ok(Err(t(cx, "schema.error.conflict").await?)),
-    };
-    let procedure: ProcedureRevisionDraft = match procedure {
-        Ok(ProcedureRevisionDraftQuery { procedure: Some(p) }) => p,
-        _ => return Ok(Err(t(cx, "schema.error.conflict").await?)),
+    let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
+        return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
     match elements::rename_option(cx, &client, &procedure, &element_id, option_id, &value).await? {
         Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
@@ -736,6 +767,10 @@ async fn editor_page(
         Detail::Column(c) => c.format.clone(),
         _ => String::new(),
     };
+    let initial_pattern = match &detail {
+        Detail::Column(c) => c.pattern.clone(),
+        _ => String::new(),
+    };
     let update_href = || {
         href!(
             elements::element::update::submit,
@@ -772,6 +807,7 @@ async fn editor_page(
         signal option_status = String::new();
         signal kind = initial_kind.clone();
         signal format = initial_format.clone();
+        signal pattern = initial_pattern.clone();
         signal pid = procedure_id_string.clone();
         signal eid = selected_string.clone();
         signal saving = saving_text.clone();
@@ -1344,11 +1380,11 @@ async fn editor_page(
                                                         @change=$(async |e: Event| {
                                                             format.set(e.target.value.to_owned());
                                                             status.set(saving.get());
-                                                            let outcome = save_field(
+                                                            let outcome = save_text_format(
                                                                     pid.get(),
                                                                     eid.get(),
-                                                                    "format".to_owned(),
                                                                     e.target.value,
+                                                                    pattern.get(),
                                                                 )
                                                                 .await;
                                                             if outcome.is_ok() {
@@ -1394,11 +1430,12 @@ async fn editor_page(
                                                         autocomplete="off"
                                                         aria-describedby="element-pattern-help"
                                                         @change=$(async |e: Event| {
+                                                            pattern.set(e.target.value.to_owned());
                                                             status.set(saving.get());
-                                                            let outcome = save_field(
+                                                            let outcome = save_text_format(
                                                                     pid.get(),
                                                                     eid.get(),
-                                                                    "pattern".to_owned(),
+                                                                    format.get(),
                                                                     e.target.value,
                                                                 )
                                                                 .await;
