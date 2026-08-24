@@ -903,6 +903,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -1094,10 +1096,12 @@ async fn editor_page(
                                 add_form(
                                     procedure_id: procedure_id,
                                     organization_id: organization_id,
-                                    parent: Some(selected_string.clone()),
-                                    section_parent: false,
-                                    audience_offered: !container_reviewer,
-                                    heading_level_top: false
+                                    facts: AddFacts {
+                                        parent: Some(selected_string.clone()),
+                                        section_parent: false,
+                                        audience_offered: !container_reviewer,
+                                        heading_level_top: false,
+                                    }
                                 )
                             </div>
                         }
@@ -1828,10 +1832,12 @@ async fn editor_page(
                                 add_form(
                                     procedure_id: procedure_id,
                                     organization_id: organization_id,
-                                    parent: Some(selected_string.clone()),
-                                    section_parent: true,
-                                    audience_offered: !container_reviewer,
-                                    heading_level_top: false
+                                    facts: AddFacts {
+                                        parent: Some(selected_string.clone()),
+                                        section_parent: true,
+                                        audience_offered: !container_reviewer,
+                                        heading_level_top: false,
+                                    }
                                 )
                             </div>
                         }
@@ -1979,10 +1985,12 @@ async fn editor_page(
                         Detail::Nothing => add_form(
                             procedure_id: procedure_id,
                             organization_id: organization_id,
-                            parent: None,
-                            section_parent: false,
-                            audience_offered: true,
-                            heading_level_top: true
+                            facts: AddFacts {
+                                parent: None,
+                                section_parent: false,
+                                audience_offered: true,
+                                heading_level_top: true,
+                            }
                         ),
                     }
                 </section>
@@ -2292,8 +2300,8 @@ async fn tree_row(
                     facts: RowFacts {
                         id: id.clone(),
                         actions_name: actions_name.clone(),
-                        first: first,
-                        last: last,
+                        first,
+                        last,
                         current_parent: current_parent.clone(),
                     }
                 )
@@ -2490,12 +2498,9 @@ async fn element_summary(cx: &Cx, element: &Element) -> Result<String> {
     })
 }
 
-/// The add form: what (column / group), the label, into `parent`.
-#[component]
-async fn add_form(
-    cx: &Cx,
-    procedure_id: uuid::Uuid,
-    organization_id: uuid::Uuid,
+/// Where the add form sits and what it offers, bundled for
+/// [`add_form`].
+struct AddFacts {
     parent: Option<String>,
     section_parent: bool,
     /// `false` inside a reviewer-only container: everything added
@@ -2503,7 +2508,22 @@ async fn add_form(
     /// field would mislead.
     audience_offered: bool,
     heading_level_top: bool,
+}
+
+/// The add form: what (column / group), the label, into `parent`.
+#[component]
+async fn add_form(
+    cx: &Cx,
+    procedure_id: uuid::Uuid,
+    organization_id: uuid::Uuid,
+    facts: AddFacts,
 ) -> Result {
+    let AddFacts {
+        parent,
+        section_parent,
+        audience_offered,
+        heading_level_top,
+    } = facts;
     let heading = match (&parent, section_parent) {
         (Some(_), true) => t(cx, "schema.add.inside-section").await?,
         (Some(_), false) => t(cx, "schema.add.inside").await?,
