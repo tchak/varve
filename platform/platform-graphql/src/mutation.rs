@@ -378,7 +378,7 @@ impl Mutation {
         input: AddColumnInput,
     ) -> async_graphql::Result<Procedure> {
         validate_non_empty("label", &input.label)?;
-        let (ty, arity) = input.ty.into_column_type()?;
+        let (ty, arity, format) = input.ty.into_column_type()?;
         let label = input.label.trim().to_owned();
         edit_revision_draft(ctx, &input.procedure_id, move |tree| {
             let placement = input.placement.resolve(tree)?;
@@ -394,7 +394,7 @@ impl Mutation {
             platform_core::add_element(
                 tree,
                 &placement,
-                new_column(label, ty, arity, required, audience),
+                new_column(label, ty, arity, format, required, audience),
             )
         })
         .await
@@ -474,19 +474,22 @@ impl Mutation {
         if let Some(label) = &input.label {
             validate_non_empty("label", label)?;
         }
-        let (ty, arity) = match input
+        let (ty, arity, format) = match input
             .ty
             .map(ColumnTypeInput::into_column_type)
             .transpose()?
         {
-            Some((ty, arity)) => (Some(ty), Some(arity)),
-            None => (None, None),
+            // The type input carries the whole format intent: sending
+            // a type without a format clears the constraint.
+            Some((ty, arity, format)) => (Some(ty), Some(arity), Some(format)),
+            None => (None, None, None),
         };
         let patch = ColumnPatch {
             label: input.label.map(|l| l.trim().to_owned()),
             ty,
             arity,
             required: input.required,
+            format,
             audience: input.audience.map(Into::into),
         };
         edit_revision_draft(ctx, &input.procedure_id, move |tree| {

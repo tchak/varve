@@ -16,6 +16,7 @@ use platform_core::{
 };
 use varve_core::{ColumnId, GroupId, OptionId};
 use varve_schema::{AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType};
+use varve_surface::Format;
 
 use crate::error::invalid_input;
 
@@ -50,7 +51,7 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
                 id: ID::from(c.id.as_str()),
                 parent_id,
                 label: c.label.clone(),
-                ty: column_type(&c.ty, c.arity),
+                ty: column_type(&c.ty, c.arity, c.format.as_ref()),
                 required: c.required,
                 audience: c.audience.into(),
             })),
@@ -230,6 +231,68 @@ pub enum ColumnType {
 #[derive(SimpleObject)]
 pub struct TextType {
     pub kind: ColumnTypeKind,
+    /// The §2.6 format constraint; `null` = unconstrained.
+    pub format: Option<TextFormat>,
+}
+
+/// A text column's format constraint (DESIGN §2.6): admissibility
+/// over text, checked per surface — never a type.
+#[derive(Union)]
+pub enum TextFormat {
+    Email(EmailFormat),
+    Phone(PhoneFormat),
+    Iban(IbanFormat),
+    Regex(RegexFormat),
+}
+
+/// The format constructors, carried by every member as `kind`.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TextFormatKind {
+    Email,
+    Phone,
+    Iban,
+    Regex,
+}
+
+#[derive(SimpleObject)]
+pub struct EmailFormat {
+    pub kind: TextFormatKind,
+}
+
+#[derive(SimpleObject)]
+pub struct PhoneFormat {
+    pub kind: TextFormatKind,
+}
+
+#[derive(SimpleObject)]
+pub struct IbanFormat {
+    pub kind: TextFormatKind,
+}
+
+/// An author-supplied pattern, run full-match on the linear-time
+/// engine (no backtracking — DESIGN §2.6).
+#[derive(SimpleObject)]
+pub struct RegexFormat {
+    pub kind: TextFormatKind,
+    pub pattern: String,
+}
+
+fn text_format(format: &Format) -> TextFormat {
+    match format {
+        Format::Email => TextFormat::Email(EmailFormat {
+            kind: TextFormatKind::Email,
+        }),
+        Format::Phone => TextFormat::Phone(PhoneFormat {
+            kind: TextFormatKind::Phone,
+        }),
+        Format::Iban => TextFormat::Iban(IbanFormat {
+            kind: TextFormatKind::Iban,
+        }),
+        Format::Regex(pattern) => TextFormat::Regex(RegexFormat {
+            kind: TextFormatKind::Regex,
+            pattern: pattern.clone(),
+        }),
+    }
 }
 
 #[derive(SimpleObject)]
@@ -299,12 +362,17 @@ pub struct GeometryType {
 
 /// The GraphQL type of a kernel column: its `ScalarType` plus, for the
 /// members that carry it, the arity as `multiple`.
-pub fn column_type(ty: &ScalarType, arity: varve_schema::Arity) -> ColumnType {
+pub fn column_type(
+    ty: &ScalarType,
+    arity: varve_schema::Arity,
+    format: Option<&Format>,
+) -> ColumnType {
     let multiple = arity == varve_schema::Arity::Many;
     {
         match ty {
             ScalarType::Text => ColumnType::Text(TextType {
                 kind: ColumnTypeKind::Text,
+                format: format.map(text_format),
             }),
             ScalarType::Boolean => ColumnType::Boolean(BooleanType {
                 kind: ColumnTypeKind::Boolean,
@@ -358,7 +426,7 @@ pub fn column_type(ty: &ScalarType, arity: varve_schema::Arity) -> ColumnType {
 /// `false` is `INVALID_INPUT`); the others carry their own input.
 #[derive(OneofObject, Debug, Clone)]
 pub enum ColumnTypeInput {
-    Text(bool),
+    Text(TextTypeInput),
     Boolean(bool),
     Integer(NumberTypeInput),
     Decimal(NumberTypeInput),
@@ -367,6 +435,47 @@ pub enum ColumnTypeInput {
     Enum(EnumTypeInput),
     Attachment(AttachmentTypeInput),
     Geometry(GeometryTypeInput),
+}
+
+/// `TEXT`: the optional §2.6 format constraint.
+#[derive(InputObject, Debug, Clone, Default)]
+pub struct TextTypeInput {
+    pub format: Option<TextFormatInput>,
+}
+
+/// A format on input (`@oneOf`): the built-ins are `Boolean` markers
+/// (`false` is `INVALID_INPUT`), the custom pattern its own input.
+#[derive(OneofObject, Debug, Clone)]
+pub enum TextFormatInput {
+    Email(bool),
+    Phone(bool),
+    Iban(bool),
+    Regex(RegexFormatInput),
+}
+
+/// `REGEX`: the pattern, verified on the linear-time engine at edit
+/// time.
+#[derive(InputObject, Debug, Clone)]
+pub struct RegexFormatInput {
+    pub pattern: String,
+}
+
+impl TextFormatInput {
+    fn into_format(self) -> async_graphql::Result<Format> {
+        let marker = |name: &str, set: bool, format: Format| {
+            if set {
+                Ok(format)
+            } else {
+                Err(invalid_input(format!("{name} must be true")))
+            }
+        };
+        Ok(match self {
+            TextFormatInput::Email(set) => marker("email", set, Format::Email)?,
+            TextFormatInput::Phone(set) => marker("phone", set, Format::Phone)?,
+            TextFormatInput::Iban(set) => marker("iban", set, Format::Iban)?,
+            TextFormatInput::Regex(regex) => Format::Regex(regex.pattern),
+        })
+    }
 }
 
 /// `INTEGER` / `DECIMAL`: an optional unit (DESIGN §2.14).
@@ -413,8 +522,12 @@ pub struct GeometryTypeInput {
 }
 
 impl ColumnTypeInput {
-    /// The kernel type and arity this input names.
-    pub fn into_column_type(self) -> async_graphql::Result<(ScalarType, varve_schema::Arity)> {
+    /// The kernel type, arity and format constraint this input names
+    /// (the format rides the `TEXT` constructor on the wire but sits
+    /// beside the type in the tree — §2.6).
+    pub fn into_column_type(
+        self,
+    ) -> async_graphql::Result<(ScalarType, varve_schema::Arity, Option<Format>)> {
         let multiple = match &self {
             ColumnTypeInput::Enum(e) => e.multiple,
             ColumnTypeInput::Attachment(a) => a.multiple,
@@ -426,7 +539,15 @@ impl ColumnTypeInput {
         } else {
             varve_schema::Arity::One
         };
-        Ok((self.into_scalar_type()?, arity))
+        let format = match &self {
+            ColumnTypeInput::Text(text) => text
+                .format
+                .clone()
+                .map(TextFormatInput::into_format)
+                .transpose()?,
+            _ => None,
+        };
+        Ok((self.into_scalar_type()?, arity, format))
     }
 
     fn into_scalar_type(self) -> async_graphql::Result<ScalarType> {
@@ -438,7 +559,7 @@ impl ColumnTypeInput {
             }
         };
         Ok(match self {
-            ColumnTypeInput::Text(set) => marker("text", set, ScalarType::Text)?,
+            ColumnTypeInput::Text(_) => ScalarType::Text,
             ColumnTypeInput::Boolean(set) => marker("boolean", set, ScalarType::Boolean)?,
             ColumnTypeInput::Date(set) => marker("date", set, ScalarType::Date)?,
             ColumnTypeInput::Datetime(set) => marker("datetime", set, ScalarType::Datetime)?,
@@ -543,6 +664,7 @@ pub fn new_column(
     label: String,
     ty: ScalarType,
     arity: varve_schema::Arity,
+    format: Option<Format>,
     required: bool,
     audience: platform_core::Audience,
 ) -> TreeElement {
@@ -551,6 +673,7 @@ pub fn new_column(
         label,
         ty,
         arity,
+        format,
         required,
         audience,
     })

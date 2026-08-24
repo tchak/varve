@@ -19,6 +19,7 @@ platform-core = { version = "0.1.0", path = "../platform-core" }
 # flattening of the kernel types (G.6, revision-draft slice).
 varve-core = { path = "../../crates/varve-core" }
 varve-schema = { path = "../../crates/varve-schema" }
+varve-surface = { path = "../../crates/varve-surface" }
 # Only for the `toasty::Db` handle resolvers receive; the driver and
 # model features are `platform-core`'s business.
 serde_json = "1"

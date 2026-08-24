@@ -167,7 +167,7 @@ Constructors without facts are `Boolean` markers (`{ text: true }`;
 `false` is `INVALID_INPUT`); the others carry their own input.
 """
 input ColumnTypeInput @oneOf {
-	text: Boolean
+	text: TextTypeInput
 	boolean: Boolean
 	integer: NumberTypeInput
 	decimal: NumberTypeInput
@@ -336,6 +336,10 @@ type DraftSection {
 	audience: Audience!
 }
 
+type EmailFormat {
+	kind: TextFormatKind!
+}
+
 """
 One option; identity is the `id` (DESIGN §2.11).
 """
@@ -390,6 +394,10 @@ type GeometryType {
 """
 input GeometryTypeInput {
 	multiple: Boolean! = false
+}
+
+type IbanFormat {
+	kind: TextFormatKind!
 }
 
 type IntegerType {
@@ -544,6 +552,10 @@ type OrganizationRef {
 	name: String!
 }
 
+type PhoneFormat {
+	kind: TextFormatKind!
+}
+
 """
 Where to put an element: `parentId` names a group or a section
 (`null` = root), `beforeId` a sibling to insert in front of
@@ -611,6 +623,23 @@ type Query {
 }
 
 """
+An author-supplied pattern, run full-match on the linear-time
+engine (no backtracking — DESIGN §2.6).
+"""
+type RegexFormat {
+	kind: TextFormatKind!
+	pattern: String!
+}
+
+"""
+`REGEX`: the pattern, verified on the linear-time engine at edit
+time.
+"""
+input RegexFormatInput {
+	pattern: String!
+}
+
+"""
 `removeElement` input.
 """
 input RemoveElementInput {
@@ -665,8 +694,46 @@ type TeamRef {
 	organization: OrganizationRef!
 }
 
+"""
+A text column's format constraint (DESIGN §2.6): admissibility
+over text, checked per surface — never a type.
+"""
+union TextFormat = EmailFormat | PhoneFormat | IbanFormat | RegexFormat
+
+"""
+A format on input (`@oneOf`): the built-ins are `Boolean` markers
+(`false` is `INVALID_INPUT`), the custom pattern its own input.
+"""
+input TextFormatInput @oneOf {
+	email: Boolean
+	phone: Boolean
+	iban: Boolean
+	regex: RegexFormatInput
+}
+
+"""
+The format constructors, carried by every member as `kind`.
+"""
+enum TextFormatKind {
+	EMAIL
+	PHONE
+	IBAN
+	REGEX
+}
+
 type TextType {
 	kind: ColumnTypeKind!
+	"""
+	The §2.6 format constraint; `null` = unconstrained.
+	"""
+	format: TextFormat
+}
+
+"""
+`TEXT`: the optional §2.6 format constraint.
+"""
+input TextTypeInput {
+	format: TextFormatInput
 }
 
 """

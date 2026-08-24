@@ -29,6 +29,7 @@
 
 use varve_core::{ColumnId, GroupId, NodeId, OptionId};
 use varve_schema::{Arity, Cardinality, DepthPolicy, ScalarType, SchemaError, validate};
+use varve_surface::Format;
 
 use crate::tree::{Audience, Tree, TreeElement};
 
@@ -101,6 +102,10 @@ pub struct ColumnPatch {
     pub ty: Option<ScalarType>,
     pub arity: Option<Arity>,
     pub required: Option<bool>,
+    /// `Some(None)` clears the constraint; `None` leaves it — except
+    /// through a type change away from text, which resets it (the
+    /// arity precedent).
+    pub format: Option<Option<Format>>,
     pub audience: Option<Audience>,
 }
 
@@ -157,6 +162,15 @@ pub enum EditError {
     /// ([`list_capable`]).
     #[error("column '{0}' cannot hold many values: only choices, attachments and geometries can")]
     ArityNotOffered(ColumnId),
+    /// A format constraint on a non-text column (§2.6: format is
+    /// admissibility over text).
+    #[error("column '{0}': format constraints apply to text columns only")]
+    FormatNotOffered(ColumnId),
+    /// A custom pattern the linear-time engine refuses (§2.6: no
+    /// backtracking is a security property) — refused now, not a
+    /// stored mistake surfacing at publication.
+    #[error("column '{0}': invalid format pattern: {1}")]
+    InvalidPattern(ColumnId, String),
     /// An element cannot be explicitly wider than its parent's
     /// effective audience (P.4: it would be pruned with the parent's
     /// subtree anyway — the marker would lie).
@@ -203,11 +217,11 @@ pub fn add_element(
     placement: &Placement,
     mut element: TreeElement,
 ) -> Result<(), EditError> {
-    if let TreeElement::Column(c) = &element
-        && c.arity == Arity::Many
-        && !list_capable(&c.ty)
-    {
-        return Err(EditError::ArityNotOffered(c.id.clone()));
+    if let TreeElement::Column(c) = &element {
+        if c.arity == Arity::Many && !list_capable(&c.ty) {
+            return Err(EditError::ArityNotOffered(c.id.clone()));
+        }
+        check_format(c)?;
     }
     commit(tree, |t| {
         let parent_audience = effective_audience(t, &placement.parent)?;
@@ -246,9 +260,18 @@ pub fn update_column(tree: &mut Tree, id: &ColumnId, patch: ColumnPatch) -> Resu
         if let Some(required) = patch.required {
             column.required = required;
         }
+        match patch.format {
+            Some(format) => column.format = format,
+            // A type change away from text takes the constraint with
+            // it, like the arity: the kind is what the editor asked
+            // for, the format cannot outlive it.
+            None if !matches!(column.ty, ScalarType::Text) => column.format = None,
+            None => {}
+        }
         if let Some(audience) = patch.audience {
             column.audience = audience;
         }
+        check_format(column)?;
         Ok(())
     })
 }
@@ -395,6 +418,21 @@ fn check_unique_nodes(tree: &Tree) -> Result<(), EditError> {
         Ok(())
     }
     walk(&tree.elements, &mut std::collections::BTreeSet::new())
+}
+
+/// §2.6's two format backstops: text-only, and patterns the
+/// linear-time engine accepts ([`Format::verify`]).
+fn check_format(column: &crate::tree::TreeColumn) -> Result<(), EditError> {
+    let Some(format) = &column.format else {
+        return Ok(());
+    };
+    if !matches!(column.ty, ScalarType::Text) {
+        return Err(EditError::FormatNotOffered(column.id.clone()));
+    }
+    if let Err(reason) = format.verify() {
+        return Err(EditError::InvalidPattern(column.id.clone(), reason));
+    }
+    Ok(())
 }
 
 /// The effective audience at `parent`: the narrowest along its path
@@ -554,6 +592,7 @@ mod tests {
             label: id.to_uppercase(),
             ty: ScalarType::Text,
             arity: Arity::One,
+            format: None,
             required: true,
             audience: Audience::All,
         })
@@ -968,6 +1007,7 @@ mod tests {
             label: "Z".into(),
             ty: ScalarType::Text,
             arity: Arity::Many,
+            format: None,
             required: true,
             audience: Audience::All,
         });
@@ -980,6 +1020,7 @@ mod tests {
             label: "Z".into(),
             ty: ScalarType::Attachment(Default::default()),
             arity: Arity::Many,
+            format: None,
             required: true,
             audience: Audience::All,
         });
@@ -1010,6 +1051,82 @@ mod tests {
             TreeElement::Column(c) => assert_eq!(c.arity, Arity::One),
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn format_is_offered_on_text_only_and_patterns_verify() {
+        let mut t = fixture();
+        update_column(
+            &mut t,
+            &ColumnId::new("a"),
+            ColumnPatch {
+                format: Some(Some(Format::Email)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // A bad pattern is refused now, the draft untouched.
+        let before = t.clone();
+        assert!(matches!(
+            update_column(
+                &mut t,
+                &ColumnId::new("a"),
+                ColumnPatch {
+                    format: Some(Some(Format::Regex("(?=x)".into()))),
+                    ..Default::default()
+                }
+            ),
+            Err(EditError::InvalidPattern(c, _)) if c == ColumnId::new("a")
+        ));
+        assert_eq!(t, before);
+        // Format on a non-text column is refused…
+        assert_eq!(
+            update_column(
+                &mut t,
+                &ColumnId::new("a"),
+                ColumnPatch {
+                    ty: Some(ScalarType::Integer(None)),
+                    format: Some(Some(Format::Phone)),
+                    ..Default::default()
+                }
+            ),
+            Err(EditError::FormatNotOffered(ColumnId::new("a")))
+        );
+        // …and a type change away from text resets it silently, the
+        // arity precedent.
+        update_column(
+            &mut t,
+            &ColumnId::new("a"),
+            ColumnPatch {
+                ty: Some(ScalarType::Integer(None)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        match &t.elements[0] {
+            TreeElement::Column(c) => assert_eq!(c.format, None),
+            _ => panic!(),
+        }
+        // Adding checks the same backstops.
+        let mut fresh = TreeColumn {
+            id: ColumnId::new("z"),
+            label: "Z".into(),
+            ty: ScalarType::Boolean,
+            arity: Arity::One,
+            required: true,
+            format: Some(Format::Iban),
+            audience: Audience::All,
+        };
+        assert_eq!(
+            add_element(
+                &mut t,
+                &Placement::root(),
+                TreeElement::Column(fresh.clone())
+            ),
+            Err(EditError::FormatNotOffered(ColumnId::new("z")))
+        );
+        fresh.ty = ScalarType::Text;
+        add_element(&mut t, &Placement::root(), TreeElement::Column(fresh)).unwrap();
     }
 
     #[test]

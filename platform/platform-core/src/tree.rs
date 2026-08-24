@@ -18,6 +18,7 @@ use varve_schema::{
     Arity, AttachmentConstraints, Cardinality, Column, Element, Group, NomenclatureRef, OptionRow,
     ScalarType, Schema, Unit,
 };
+use varve_surface::Format;
 
 /// Who sees an element (platform P.4, amended 2026-08-24): `Reviewer`
 /// is DN's *annotation privée*. The effective audience of an element
@@ -78,6 +79,10 @@ pub struct TreeColumn {
     /// rule at publication, `false` to no rule. Conditional
     /// requiredness arrives with the rule editor.
     pub required: bool,
+    /// §2.6 format constraint — admissibility over text, beside the
+    /// type, never in it (G.7 *Format on text columns*). `Some` on a
+    /// text column only ([`crate::tree_edit`]'s backstop).
+    pub format: Option<Format>,
     pub audience: Audience,
 }
 
@@ -200,6 +205,13 @@ fn element_to_json(element: &TreeElement) -> Value {
             "id": c.id.as_str(),
             "label": c.label,
             "required": c.required,
+            "format": match &c.format {
+                None => Value::Null,
+                Some(Format::Email) => json!("email"),
+                Some(Format::Phone) => json!("phone"),
+                Some(Format::Iban) => json!("iban"),
+                Some(Format::Regex(pattern)) => json!({ "regex": pattern }),
+            },
             "audience": audience_str(c.audience),
             "type": type_to_json(&c.ty, c.arity),
         }),
@@ -375,6 +387,18 @@ fn element_from_json(v: &Value) -> Result<TreeElement, TreeDecodeError> {
                     None => audience == Audience::All,
                     _ => return err("'required' must be a boolean"),
                 },
+                // Missing in drafts stored before the field existed.
+                format: match m.get("format") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(name)) => Some(match name.as_str() {
+                        "email" => Format::Email,
+                        "phone" => Format::Phone,
+                        "iban" => Format::Iban,
+                        other => return err(format!("unknown format '{other}'")),
+                    }),
+                    Some(Value::Object(f)) => Some(Format::Regex(str_field(f, "regex")?)),
+                    _ => return err("'format' must be a name, an object or null"),
+                },
                 audience,
             })
         }
@@ -530,6 +554,7 @@ mod tests {
                             label: "Nom".into(),
                             ty: ScalarType::Text,
                             arity: Arity::One,
+                            format: Some(Format::Email),
                             required: true,
                             audience: Audience::All,
                         }),
@@ -555,6 +580,7 @@ mod tests {
                             fields: vec![],
                         }])),
                         arity: Arity::Many,
+                        format: None,
                         required: true,
                         audience: Audience::Reviewer,
                     })],
@@ -564,6 +590,7 @@ mod tests {
                     label: "Surface".into(),
                     ty: ScalarType::Decimal(Some(Unit::SquareMetre)),
                     arity: Arity::One,
+                    format: None,
                     required: true,
                     audience: Audience::All,
                 }),
@@ -586,6 +613,7 @@ mod tests {
                     max_bytes: Some(10_000_000),
                 }),
                 arity: Arity::Many,
+                format: None,
                 required: false,
                 audience: Audience::All,
             })],
@@ -595,6 +623,29 @@ mod tests {
             Tree::from_bytes(&Tree::default().to_bytes()).unwrap(),
             Tree::default()
         );
+        // A custom pattern rides too.
+        let tree = Tree {
+            elements: vec![TreeElement::Column(TreeColumn {
+                id: ColumnId::new("code"),
+                label: "Code".into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+                required: true,
+                format: Some(Format::Regex("[0-9]{5}".into())),
+                audience: Audience::All,
+            })],
+        };
+        assert_eq!(Tree::from_bytes(&tree.to_bytes()).unwrap(), tree);
+        // Drafts stored before `required`/`format` existed decode with
+        // the creation defaults.
+        let legacy = br#"{"elements":[{"kind":"column","id":"c1","label":"Nom","audience":"all","type":{"kind":"text"}}]}"#;
+        match &Tree::from_bytes(legacy).unwrap().elements[0] {
+            TreeElement::Column(c) => {
+                assert!(c.required);
+                assert_eq!(c.format, None);
+            }
+            _ => panic!(),
+        }
         assert!(Tree::from_bytes(b"nonsense").is_err());
         assert!(Tree::from_bytes(br#"{"elements":[{"kind":"desk"}]}"#).is_err());
     }

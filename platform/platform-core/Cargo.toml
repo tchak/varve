@@ -31,6 +31,9 @@ serde_json = "1"
 # the kernel `Schema`, validated by the kernel on every edit.
 varve-core = { path = "../../crates/varve-core" }
 varve-schema = { path = "../../crates/varve-schema" }
+# `tree`: format constraints are surface admissibility over text
+# (DESIGN §2.6) — the authored tree stores the kernel's `Format`.
+varve-surface = { path = "../../crates/varve-surface" }
 
 [dev-dependencies]
 varve-schema = { path = "../../crates/varve-schema" }

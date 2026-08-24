@@ -181,6 +181,53 @@ pub enum ColumnType {
 #[cynic(graphql_type = "TextType")]
 pub struct TextType {
     pub kind: ColumnTypeKind,
+    pub format: Option<TextFormat>,
+}
+
+/// A text column's §2.6 format constraint.
+#[derive(cynic::InlineFragments, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "TextFormat")]
+pub enum TextFormat {
+    Email(EmailFormat),
+    Phone(PhoneFormat),
+    Iban(IbanFormat),
+    Regex(RegexFormat),
+    #[cynic(fallback)]
+    Unknown,
+}
+
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[cynic(graphql_type = "TextFormatKind")]
+pub enum TextFormatKind {
+    Email,
+    Phone,
+    Iban,
+    Regex,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "EmailFormat")]
+pub struct EmailFormat {
+    pub kind: TextFormatKind,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "PhoneFormat")]
+pub struct PhoneFormat {
+    pub kind: TextFormatKind,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "IbanFormat")]
+pub struct IbanFormat {
+    pub kind: TextFormatKind,
+}
+
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "RegexFormat")]
+pub struct RegexFormat {
+    pub kind: TextFormatKind,
+    pub pattern: String,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
@@ -251,7 +298,7 @@ pub struct GeometryType {
 #[derive(cynic::InputObject, Debug, Clone, Default)]
 pub struct ColumnTypeInput {
     #[cynic(skip_serializing_if = "Option::is_none")]
-    pub text: Option<bool>,
+    pub text: Option<TextTypeInput>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub boolean: Option<bool>,
     #[cynic(skip_serializing_if = "Option::is_none")]
@@ -273,8 +320,11 @@ pub struct ColumnTypeInput {
 
 impl ColumnTypeInput {
     pub fn text() -> Self {
+        Self::text_with_format(None)
+    }
+    pub fn text_with_format(format: Option<TextFormatInput>) -> Self {
         Self {
-            text: Some(true),
+            text: Some(TextTypeInput { format }),
             ..Default::default()
         }
     }
@@ -335,6 +385,32 @@ impl ColumnTypeInput {
             ..Default::default()
         }
     }
+}
+
+/// `TEXT` on input: the optional format constraint.
+#[derive(cynic::InputObject, Debug, Clone, Default)]
+pub struct TextTypeInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub format: Option<TextFormatInput>,
+}
+
+/// A format on input (`@oneOf`): set exactly one member; built-ins
+/// are `Some(true)`.
+#[derive(cynic::InputObject, Debug, Clone, Default)]
+pub struct TextFormatInput {
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub email: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub phone: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub iban: Option<bool>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
+    pub regex: Option<RegexFormatInput>,
+}
+
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct RegexFormatInput {
+    pub pattern: String,
 }
 
 #[derive(cynic::InputObject, Debug, Clone, Default)]
@@ -715,6 +791,23 @@ mod tests {
         );
         assert!(input.get("placement").is_none());
         assert!(input.get("audience").is_none());
+
+        // TEXT is an object now (its constructor grew the format).
+        let add = AddColumn::build(AddColumnVariables {
+            input: AddColumnInput {
+                procedure_id: cynic::Id::new("abc"),
+                placement: None,
+                label: "Nom".into(),
+                ty: ColumnTypeInput::text(),
+                required: None,
+                audience: None,
+            },
+        });
+        let document = serde_json::to_value(&add).unwrap();
+        assert_eq!(
+            document["variables"]["input"]["type"],
+            serde_json::json!({ "text": {} })
+        );
 
         let add = AddNote::build(AddNoteVariables {
             input: AddNoteInput {

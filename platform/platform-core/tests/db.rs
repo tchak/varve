@@ -928,6 +928,7 @@ async fn procedure_draft_round_trips_through_edits() {
                 label: "Nom".into(),
                 ty: ScalarType::Text,
                 arity: Arity::One,
+                format: None,
                 required: true,
                 audience: Audience::All,
             }),

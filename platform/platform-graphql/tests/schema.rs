@@ -506,6 +506,7 @@ fn the_client_mirrors_every_error_code() {
 const DRAFT: &str = "revisionDraft { base elements {
     __typename
     ... on DraftColumn { id parentId label required audience type { __typename
+        ... on TextType { format { __typename ... on RegexFormat { pattern } } }
         ... on IntegerType { unit } ... on DecimalType { unit }
         ... on EnumType { multiple options { id label } }
         ... on AttachmentType { multiple accept maxBytes }
@@ -597,7 +598,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": " Nom ", "type": { "text": true } }),
+            json!({ "procedureId": pid, "label": " Nom ", "type": { "text": {} } }),
         )
         .await;
     assert!(p["revisionDraft"]["base"].is_null());
@@ -623,7 +624,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Rue", "type": { "text": true },
+            json!({ "procedureId": pid, "label": "Rue", "type": { "text": {} },
                     "placement": { "parentId": adresses } }),
         )
         .await;
@@ -633,7 +634,7 @@ async fn revision_draft_editing_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Ville", "type": { "text": true },
+            json!({ "procedureId": pid, "label": "Ville", "type": { "text": {} },
                     "placement": { "parentId": adresses, "beforeId": rue } }),
         )
         .await;
@@ -689,6 +690,57 @@ async fn revision_draft_editing_journey() {
         )
         .await;
     assert_eq!(p["revisionDraft"]["elements"][2]["type"]["multiple"], false);
+    // A text format rides the TEXT constructor (§2.6): a built-in,
+    // then a custom pattern; a backtracking pattern is refused with
+    // the draft unchanged; a type sent without a format clears it.
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom,
+                    "type": { "text": { "format": { "email": true } } } }),
+        )
+        .await;
+    let ty = &p["revisionDraft"]["elements"][2]["type"];
+    assert_eq!(ty["__typename"], "TextType");
+    assert_eq!(ty["format"]["__typename"], "EmailFormat");
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom,
+                    "type": { "text": { "format": { "regex": { "pattern": "[0-9]{5}" } } } } }),
+        )
+        .await;
+    assert_eq!(
+        p["revisionDraft"]["elements"][2]["type"]["format"]["pattern"],
+        "[0-9]{5}"
+    );
+    let code = api
+        .edit_error(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom,
+                    "type": { "text": { "format": { "regex": { "pattern": "(?=x)" } } } } }),
+        )
+        .await;
+    assert_eq!(code, "INVALID_EDIT");
+    let p = api
+        .edit(
+            &alice,
+            "updateColumn",
+            "UpdateColumnInput",
+            json!({ "procedureId": pid, "id": nom, "type": { "text": {} } }),
+        )
+        .await;
+    assert!(
+        p["revisionDraft"]["elements"][2]["type"]["format"].is_null(),
+        "{p}"
+    );
+
     // Back to a decimal: a type without the fact.
     let p = api
         .edit(
@@ -831,7 +883,7 @@ async fn sections_notes_and_audiences_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Nom", "type": { "text": true },
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} },
                     "placement": { "parentId": sid } }),
         )
         .await;
@@ -868,7 +920,7 @@ async fn sections_notes_and_audiences_journey() {
             &alice,
             "addColumn",
             "AddColumnInput",
-            json!({ "procedureId": pid, "label": "Interne", "type": { "text": true },
+            json!({ "procedureId": pid, "label": "Interne", "type": { "text": {} },
                     "placement": { "parentId": sid } }),
         )
         .await;
@@ -951,7 +1003,7 @@ async fn revision_draft_errors_are_structured() {
         .await;
     let procedure = api.create_procedure(&alice, &id_of(&org), "Permis").await;
     let pid = id_of(&procedure);
-    let text = json!({ "text": true });
+    let text = json!({ "text": {} });
 
     // FORBIDDEN: a non-member, a missing procedure — the same answer.
     for who in [&bob, &alice] {
@@ -1141,6 +1193,9 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
         "enum Audience",
         "audience: Audience!",
         "required: Boolean!",
+        "union TextFormat = EmailFormat | PhoneFormat | IbanFormat | RegexFormat",
+        "format: TextFormat",
+        "pattern: String!",
         "addColumn(input: AddColumnInput!): Procedure!",
         "addGroup(input: AddGroupInput!): Procedure!",
         "addSection(input: AddSectionInput!): Procedure!",

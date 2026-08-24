@@ -4397,6 +4397,7 @@ dependencies = [
  "uuid",
  "varve-core",
  "varve-schema",
+ "varve-surface",
 ]
 
 [[package]]
@@ -4415,6 +4416,7 @@ dependencies = [
  "uuid",
  "varve-core",
  "varve-schema",
+ "varve-surface",
 ]
 
 [[package]]
