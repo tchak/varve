@@ -7,7 +7,8 @@
 //! edits as alerts (blank label, a `many` group inside a `many`
 //! group), removing, discarding behind its confirmation, sections
 //! and notes with inherited audiences (the reviewer badge, the
-//! refused widening), and French.
+//! refused widening), the preview tab (the draft rendered as a
+//! read-only form, its gate, French), and French.
 //! Every response passes the static accessibility baseline through
 //! `body_text`.
 
@@ -1068,4 +1069,161 @@ async fn deeply_nested_containers_render() {
     let html = page(&router, &cookie, &editor).await;
     assert!(html.contains("Private group"), "{html}");
     assert!(html.contains("Niveau 5"), "{html}");
+}
+
+#[tokio::test]
+async fn the_preview_tab() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "preview-owner").await;
+    let stranger = member(&router, "preview-stranger").await;
+    let organization = create_organization(&router, &cookie, "Preview").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Aperçu").await;
+    let preview = format!("{editor}/preview");
+
+    // The gate matches the editor's: sign-in for the anonymous, one
+    // 404 for strangers.
+    let response = router.handle(get(&preview, &[])).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/signin");
+    let response = router.handle(get(&preview, &[("cookie", &stranger)])).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // The tabs link the two pages; with no draft the preview says so.
+    let html = page(&router, &cookie, &editor).await;
+    assert!(html.contains(">Preview<"), "{html}");
+    assert!(html.contains("/schema/preview\""), "{html}");
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("aria-current=\"page\""), "{html}");
+    assert!(html.contains(">Editor<"), "{html}");
+    assert!(html.contains("data-preview-empty"), "{html}");
+
+    // A draft: a section holding a text column (public, so required
+    // by default) and a note; a reviewer-only date column; a `many`
+    // group holding a choice column with one option; a geometry
+    // column.
+    let add = format!("{editor}/add");
+    let update = |id: &str| format!("{editor}/elements/{id}/update");
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "section"), ("label", "Identité")],
+    )
+    .await;
+    let section = selected_of(&to.to);
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "column"), ("label", "Nom"), ("parent", &section)],
+    )
+    .await;
+    let nom = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &add,
+        &[
+            ("what", "note"),
+            ("label", "Vérifier la pièce."),
+            ("parent", &section),
+        ],
+    )
+    .await;
+    act(
+        &router,
+        &cookie,
+        &add,
+        &[
+            ("what", "column"),
+            ("label", "Avis"),
+            ("kind", "DATE"),
+            ("audience", "REVIEWER"),
+        ],
+    )
+    .await;
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "group"), ("label", "Enfants")],
+    )
+    .await;
+    let group = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &update(&group),
+        &[("cardinality", "MANY")],
+    )
+    .await;
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[
+            ("what", "column"),
+            ("label", "Ville"),
+            ("kind", "ENUM"),
+            ("parent", &group),
+        ],
+    )
+    .await;
+    let ville = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{ville}/options/add"),
+        &[("label", "Paris")],
+    )
+    .await;
+    act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "column"), ("label", "Zone"), ("kind", "GEOMETRY")],
+    )
+    .await;
+
+    let html = page(&router, &cookie, &preview).await;
+    // The section is a heading; its column a labelled text control
+    // carrying the required default.
+    assert!(html.contains("<h3"), "{html}");
+    assert!(html.contains("Identité"), "{html}");
+    assert!(html.contains(&format!("for=\"preview-{nom}\"")), "{html}");
+    let at = html
+        .find(&format!("id=\"preview-{nom}\""))
+        .expect("the text control");
+    let tag_start = html[..at].rfind("<input").expect("an input tag");
+    let tag = &html[tag_start..tag_start + html[tag_start..].find('>').unwrap()];
+    assert!(tag.contains("type=\"text\""), "{tag}");
+    assert!(tag.contains("required"), "{tag}");
+    // The note's body renders; the reviewer-only column wears the
+    // badge and its native date input.
+    assert!(html.contains("Vérifier la pièce."), "{html}");
+    assert!(html.contains("Reviewers only"), "{html}");
+    assert!(html.contains("type=\"date\""), "{html}");
+    // The group is a fieldset with the `many` badge; its choice is a
+    // select with the blank option and the authored one.
+    assert!(html.contains("<fieldset"), "{html}");
+    assert!(html.contains("Enfants"), "{html}");
+    assert!(html.contains(">Many<"), "{html}");
+    assert!(html.contains("<option value=\"\">"), "{html}");
+    assert!(html.contains(">Paris<"), "{html}");
+    // Geometry has no control: the caption is plain text and the gap
+    // is stated.
+    assert!(html.contains("Zone"), "{html}");
+    assert!(html.contains("data-preview-geometry"), "{html}");
+    assert!(html.contains("not shown in the preview"), "{html}");
+
+    // French: the tabs and the empty state localize.
+    let french = french_member(&router, "preview-french").await;
+    let organization = create_organization(&router, &french, "Aperçu FR").await;
+    let editor_fr = create_procedure(&router, &french, &organization, "Titre").await;
+    let html = page(&router, &french, &format!("{editor_fr}/preview")).await;
+    assert!(html.contains(">Aperçu<"), "{html}");
+    assert!(html.contains(">Édition<"), "{html}");
+    assert!(html.contains("Rien à prévisualiser"), "{html}");
 }

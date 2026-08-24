@@ -360,6 +360,19 @@ async fn axe_scenario(
         "/organizations/{id}/procedures/{pid}/schema (choice options)",
     )
     .await?;
+    // The preview tab: the same draft rendered as a read-only form
+    // (the selected column is a choice by now, so a select shows).
+    page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("Preview").exact(true)),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("select[id^='preview-']")))
+        .to_be_visible()
+        .await?;
+    check_axe(&page, "/organizations/{id}/procedures/{pid}/schema/preview").await?;
+    page.goto(&editor_url, None).await?;
     // A refused autosave: a blank label, blurred, is reported on the
     // status line (no Save button exists with the script running).
     page.locator(locator!("#element-label"))

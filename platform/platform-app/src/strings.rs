@@ -129,6 +129,16 @@ pub const EN: &[(&str, &str)] = &[
     ("procedure.draft.edit", "Edit the schema"),
     ("schema.title", "Schema of {$procedure}"),
     ("schema.back", "Back to the procedure"),
+    ("schema.tab.editor", "Editor"),
+    ("schema.tab.preview", "Preview"),
+    (
+        "schema.preview.empty",
+        "Nothing to preview yet. Add elements in the editor.",
+    ),
+    (
+        "schema.preview.geometry",
+        "Map input — not shown in the preview.",
+    ),
     (
         "schema.state.none",
         "No draft yet: adding an element starts one.",
@@ -468,6 +478,16 @@ pub const FR: &[(&str, &str)] = &[
     ("procedure.draft.edit", "Modifier le schéma"),
     ("schema.title", "Schéma de {$procedure}"),
     ("schema.back", "Retour à la procédure"),
+    ("schema.tab.editor", "Édition"),
+    ("schema.tab.preview", "Aperçu"),
+    (
+        "schema.preview.empty",
+        "Rien à prévisualiser pour le moment. Ajoutez des éléments dans l'éditeur.",
+    ),
+    (
+        "schema.preview.geometry",
+        "Saisie sur carte — non affichée dans l'aperçu.",
+    ),
     (
         "schema.state.none",
         "Pas encore de brouillon\u{a0}: ajouter un élément en ouvre un.",

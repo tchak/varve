@@ -39,6 +39,7 @@
 //! (G.7) expresses directly.
 
 pub(super) mod elements;
+pub(super) mod preview;
 
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::revision_draft::{
@@ -80,6 +81,7 @@ use crate::{
         label::label,
         notice::{NoticeTone, notice as notice_box},
         page_title::page_title,
+        tabs::{tabs, tabs_list, tabs_trigger},
     },
     flash,
     i18n::{t, t_args},
@@ -575,6 +577,8 @@ async fn editor_page(
     let discard_keep = t(cx, "schema.discard.keep").await?;
     let structure_heading = t(cx, "schema.structure.title").await?;
     let add_element_label = t(cx, "schema.add.title").await?;
+    let tab_editor = t(cx, "schema.tab.editor").await?;
+    let tab_preview = t(cx, "schema.tab.preview").await?;
     let selected_element = selected
         .as_deref()
         .and_then(|id| elements.iter().find(|e| id_of(e) == id).cloned());
@@ -599,6 +603,11 @@ async fn editor_page(
     };
     let discard_href = href!(
         discard::submit,
+        OrganizationId(organization_id),
+        ProcedureId(procedure_id)
+    );
+    let preview_href = href!(
+        preview::page,
         OrganizationId(organization_id),
         ProcedureId(procedure_id)
     );
@@ -798,6 +807,19 @@ async fn editor_page(
                     }
                 </div>
             </div>
+            tabs(
+                tabs_list(
+                    tabs_trigger(
+                        active: true,
+                        attrs: attributes! { href=(page_href()) },
+                        (tab_editor)
+                    )
+                    tabs_trigger(
+                        attrs: attributes! { href=(preview_href) },
+                        (tab_preview)
+                    )
+                )
+            )
             if confirm_discard {
                 alert(
                     variant: AlertVariant::Destructive,
@@ -849,6 +871,8 @@ async fn editor_page(
                             data-schema-notice="" // A confirmation fades once read (app.css);
                             // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
