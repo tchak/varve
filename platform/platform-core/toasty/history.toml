@@ -44,3 +44,13 @@ snapshot_name = "0007_snapshot.toml"
 id = 4571584882127768834
 name = "0008_procedure_lifecycle.sql"
 snapshot_name = "0008_snapshot.toml"
+
+[[migrations]]
+id = 4152754197508789647
+name = "0009_publication_read_model.sql"
+snapshot_name = "0009_snapshot.toml"
+
+[[migrations]]
+id = 8300375909420329264
+name = "0010_published_tree.sql"
+snapshot_name = "0010_snapshot.toml"

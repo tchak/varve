@@ -19,9 +19,11 @@ getrandom = "0.3"
 sha2 = "0.10"
 jiff = "0.2"
 thiserror.workspace = true
+# `publish`: the shared-executor mutex (P.3 transaction shape); the
+# migrate-cli feature adds the runtime.
+tokio = { version = "1", features = ["sync"] }
 toasty = { version = "0.10.0", features = ["postgresql", "jiff", "migration"] }
 toasty-cli = { version = "0.10.0", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 # `procedure`: draft element ids are minted here (v4 — no ordering to preserve).
 uuid = { version = "1", features = ["v4"] }
 # `tree`: the authored tree is stored as platform-owned JSON (P.4) —
@@ -31,6 +33,14 @@ serde_json = "1"
 # the kernel `Schema`, validated by the kernel on every edit.
 varve-core = { path = "../../crates/varve-core" }
 varve-schema = { path = "../../crates/varve-schema" }
+# `surfaces`: compiled rules are varve-logic exprs (the vacuous
+# always-required rule).
+varve-logic = { path = "../../crates/varve-logic" }
+# `publish`: the use case composes the varve-service operation with
+# its platform side effects (P.3) — generic over the store traits.
+varve-service = { path = "../../crates/varve-service" }
+varve-store = { path = "../../crates/varve-store" }
+varve-impact = { path = "../../crates/varve-impact" }
 # `tree`: format constraints are surface admissibility over text
 # (DESIGN §2.6) — the authored tree stores the kernel's `Format`.
 varve-surface = { path = "../../crates/varve-surface" }
@@ -43,7 +53,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 # The project-local migration CLI (toasty has no standalone binary: the
 # CLI must link the model types to diff the schema). Not part of the
 # library API; platform-server may later host its own bin on top.
-migrate-cli = ["dep:toasty-cli", "dep:anyhow", "tokio"]
+migrate-cli = ["dep:toasty-cli", "dep:anyhow", "tokio/rt-multi-thread", "tokio/macros"]
 
 [[bin]]
 name = "migrate"

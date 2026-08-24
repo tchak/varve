@@ -65,6 +65,12 @@ pub struct Procedure {
     /// publication happening.
     pub state_since: Option<jiff::Timestamp>,
 
+    /// The lineage head — a read model maintained only by
+    /// publication ([`crate::publish`], the P.9 Q3 pattern): a new
+    /// draft forks from it, and publication refuses a draft whose
+    /// base no longer equals it. `None` until the first publication.
+    pub latest_revision: Option<String>,
+
     /// Set on insert.
     #[auto]
     pub created_at: jiff::Timestamp,
@@ -77,6 +83,12 @@ pub struct Procedure {
     /// is in progress. Deferred: loaded only by
     /// [`find_procedure_with_revision_draft`].
     pub revision_draft: Deferred<Option<RevisionDraft>>,
+
+    /// The authored tree of [`Self::latest_revision`], kept because
+    /// the next draft forks from its base's *tree* (P.4: audiences
+    /// and presentation nodes exist nowhere kernel-side), set only by
+    /// publication. Deferred with the draft.
+    pub published_tree: Deferred<Option<TreeBytes>>,
 
     /// The audit trail ([`crate::procedure_event`]), oldest first by
     /// id.
@@ -161,6 +173,7 @@ pub async fn create_procedure(
         procedure.id,
         Some(actor_account_id),
         ProcedureEventKind::Created,
+        None,
     )
     .await?;
     tx.commit().await?;
@@ -182,6 +195,7 @@ pub async fn find_procedure_with_revision_draft(
 ) -> toasty::Result<Option<Procedure>> {
     Procedure::filter_by_id(id)
         .include(Procedure::fields().revision_draft())
+        .include(Procedure::fields().published_tree())
         .first()
         .exec(db)
         .await
@@ -217,7 +231,16 @@ pub async fn edit_revision_draft(
 ) -> Result<Tree, RevisionDraftError> {
     let (mut tree, base) = match procedure.revision_draft.get() {
         Some(draft) => (draft.tree.decode()?, draft.base.clone()),
-        None => (Tree::default(), None),
+        // A fresh draft forks from the published head (P.4
+        // *Publication*): the head's authored tree, and the head as
+        // `base` — the stale-fork check's anchor.
+        None => {
+            let tree = match procedure.published_tree.get() {
+                Some(bytes) => bytes.decode()?,
+                None => Tree::default(),
+            };
+            (tree, procedure.latest_revision.clone())
+        }
     };
     edit(&mut tree)?;
     procedure
@@ -254,6 +277,7 @@ pub async fn discard_revision_draft(
         procedure.id,
         Some(actor_account_id),
         ProcedureEventKind::DraftDiscarded,
+        None,
     )
     .await?;
     tx.commit().await?;
@@ -338,7 +362,7 @@ async fn apply_transition(
         .state_since(since)
         .exec(&mut tx)
         .await?;
-    append_procedure_event(&mut tx, procedure.id, Some(actor_account_id), kind).await?;
+    append_procedure_event(&mut tx, procedure.id, Some(actor_account_id), kind, None).await?;
     tx.commit().await?;
     Ok(())
 }

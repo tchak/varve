@@ -29,8 +29,9 @@ use platform_core::{
     sweep_expired_api_tokens, update_profile, verify_credentials,
 };
 use platform_core::{
-    LifecycleError, ProcedureEventKind, ProcedureStateValue, TransitionError, close_procedure,
-    current_state, list_procedure_events, reopen_procedure,
+    LifecycleError, ProcedureEventKind, ProcedureStateValue, PublishProcedureError,
+    PublishProcedureOutcome, TransitionError, close_procedure, current_state,
+    list_procedure_events, publish_procedure, reopen_procedure,
 };
 use varve_schema::{Arity, ScalarType};
 
@@ -1188,4 +1189,298 @@ async fn discarding_a_draft_logs_only_when_one_existed() {
             ProcedureEventKind::DraftDiscarded,
         ]
     );
+}
+
+/// Runs the publish use case the way production does — platform
+/// writes on a real transaction — but with `MemoryStore` as the
+/// kernel store (the §13.2 oracle; `platform-store`'s own tests own
+/// the Postgres store contract).
+async fn publish(
+    db: &mut toasty::Db,
+    store: &varve_store::MemoryStore,
+    procedure_id: uuid::Uuid,
+    actor: uuid::Uuid,
+    confirm: bool,
+) -> Result<(PublishProcedureOutcome, platform_core::Procedure), PublishProcedureError> {
+    let mut procedure = find_procedure_with_revision_draft(db, procedure_id)
+        .await?
+        .expect("procedure exists");
+    let mut tx = db.transaction().await?;
+    let shared: platform_core::SharedExecutor =
+        tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
+    let outcome = publish_procedure(&shared, store, &mut procedure, actor, confirm).await?;
+    drop(shared);
+    tx.commit().await?;
+    Ok((outcome, procedure))
+}
+
+fn draft_column(label: &str, ty: varve_schema::ScalarType) -> TreeElement {
+    TreeElement::Column(TreeColumn {
+        id: new_column_id(),
+        label: label.into(),
+        ty,
+        arity: Arity::One,
+        format: None,
+        required: true,
+        audience: Audience::All,
+    })
+}
+
+#[tokio::test]
+async fn publish_walks_the_whole_lifecycle() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let store = varve_store::MemoryStore::default();
+    let (admin, procedure) = lifecycle_fixture(&mut db, "publish").await;
+
+    // Nothing to publish yet.
+    let err = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect_err("no draft");
+    assert!(matches!(err, PublishProcedureError::NoDraft), "{err}");
+
+    // Author a draft and publish it: first publication is free.
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            draft_column("Nom", ScalarType::Text),
+        )
+    })
+    .await
+    .expect("draft");
+    let (outcome, published) = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("publish");
+    let PublishProcedureOutcome::Published { revision, report } = outcome else {
+        panic!("first publication must not gate");
+    };
+    assert_eq!(report.worst(), varve_impact::ChangeClass::Safe);
+    assert_eq!(published.state, ProcedureStateValue::Published);
+    assert_eq!(
+        published.latest_revision.as_deref(),
+        Some(revision.as_str())
+    );
+    assert_eq!(published.revision_draft.get(), &None);
+
+    // The kernel store holds the pair, compiled against the revision.
+    use varve_store::SurfaceStore;
+    let surfaces = store.surfaces(&revision).await.expect("surfaces");
+    assert_eq!(
+        surfaces.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        ["applicant", "reviewer"]
+    );
+
+    // The event carries its facts.
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    let published_event = events
+        .iter()
+        .find(|e| e.kind == ProcedureEventKind::Published)
+        .expect("published event");
+    let facts = published_event
+        .facts
+        .as_ref()
+        .expect("facts")
+        .decode()
+        .expect("decode");
+    assert_eq!(facts.revision, revision.as_str());
+    assert_eq!(facts.base, None);
+
+    // The next draft forks from the head.
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            draft_column("Ville", ScalarType::Text),
+        )
+    })
+    .await
+    .expect("second draft");
+    let draft_base = loaded
+        .revision_draft
+        .get()
+        .as_ref()
+        .expect("draft")
+        .base
+        .clone();
+    assert_eq!(draft_base.as_deref(), Some(revision.as_str()));
+
+    // Adding a column is free: publishes without confirmation, facts
+    // carry the base, and `since` is untouched (the procedure never
+    // closed).
+    let opened_since = published.state_since;
+    let (outcome, republished) = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("second publish");
+    let PublishProcedureOutcome::Published { revision: r2, .. } = outcome else {
+        panic!("a free change publishes");
+    };
+    assert_ne!(r2, revision);
+    assert_eq!(republished.state_since, opened_since);
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    let last_facts = events
+        .iter()
+        .rev()
+        .find(|e| e.kind == ProcedureEventKind::Published)
+        .unwrap()
+        .facts
+        .as_ref()
+        .unwrap()
+        .decode()
+        .unwrap();
+    assert_eq!(last_facts.base.as_deref(), Some(revision.as_str()));
+
+    // Close, draft a change while closed, publish: the reopen.
+    let mut row = find_procedure(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    close_procedure(&mut db, &mut row, admin.id)
+        .await
+        .expect("close");
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            draft_column("Pays", ScalarType::Text),
+        )
+    })
+    .await
+    .expect("closed draft");
+    let (outcome, reopened) = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("publish from closed");
+    assert!(matches!(outcome, PublishProcedureOutcome::Published { .. }));
+    assert_eq!(reopened.state, ProcedureStateValue::Published);
+}
+
+#[tokio::test]
+async fn a_breaking_publication_gates_and_writes_nothing() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let store = varve_store::MemoryStore::default();
+    let (admin, procedure) = lifecycle_fixture(&mut db, "publish-gate").await;
+
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let column_id = new_column_id();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            TreeElement::Column(TreeColumn {
+                id: column_id.clone(),
+                label: "Champ".into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+                format: None,
+                required: false,
+                audience: Audience::All,
+            }),
+        )
+    })
+    .await
+    .expect("draft");
+    publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("v1");
+
+    // Retype the column to something with no cast: breaking.
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        update_column(
+            tree,
+            &column_id,
+            ColumnPatch {
+                ty: Some(ScalarType::Geometry),
+                ..ColumnPatch::default()
+            },
+        )
+        .map(|_| ())
+    })
+    .await
+    .expect("retype");
+
+    let (outcome, unchanged) = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("gate");
+    let PublishProcedureOutcome::RequiresConfirmation { report } = outcome else {
+        panic!("a breaking change must gate");
+    };
+    assert_eq!(report.worst(), varve_impact::ChangeClass::Breaking);
+    // Nothing moved: the draft is intact and no event was logged.
+    assert!(unchanged.revision_draft.get().is_some());
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.kind == ProcedureEventKind::Published)
+            .count(),
+        1
+    );
+
+    // Confirmed: published.
+    let (outcome, _) = publish(&mut db, &store, procedure.id, admin.id, true)
+        .await
+        .expect("confirmed");
+    assert!(matches!(outcome, PublishProcedureOutcome::Published { .. }));
+}
+
+#[tokio::test]
+async fn an_empty_choice_is_refused_at_publication() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let store = varve_store::MemoryStore::default();
+    let (admin, procedure) = lifecycle_fixture(&mut db, "publish-enum").await;
+
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let column_id = new_column_id();
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            TreeElement::Column(TreeColumn {
+                id: column_id.clone(),
+                label: "Choix".into(),
+                ty: ScalarType::Enum(varve_schema::NomenclatureRef::Inline(vec![])),
+                arity: Arity::One,
+                format: None,
+                required: false,
+                audience: Audience::All,
+            }),
+        )
+    })
+    .await
+    .expect("draft");
+
+    let err = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect_err("refused");
+    match err {
+        PublishProcedureError::EmptyEnum(id) => assert_eq!(id, column_id),
+        other => panic!("unexpected: {other}"),
+    }
 }

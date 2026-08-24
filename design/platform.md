@@ -448,7 +448,11 @@ forks from it (its `base`), and publication refuses a draft whose
 resolving the base-echo half of P.9 Q15 server-side (the draft row
 carries `base`; the client echoes nothing). The `published` event
 carries its facts (`revision`, `base`) as the event log's first
-facts payload. **Transaction composition** follows the settled Q10
+facts payload. Publication also keeps **the head's authored tree on
+the row** (`published_tree`, set only here): the next draft forks
+from its base's *tree* (G.8), and audiences and presentation nodes
+exist nowhere kernel-side — the compiled pair is derived from the
+tree, never the source a fork rebuilds from. **Transaction composition** follows the settled Q10
 shape made concrete: the use case in `platform-core` receives one
 shared executor (`tokio::sync::Mutex<&mut dyn Executor>` over the
 open transaction) plus the store scoped over that same executor;

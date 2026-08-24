@@ -4396,7 +4396,11 @@ dependencies = [
  "tokio",
  "uuid",
  "varve-core",
+ "varve-impact",
+ "varve-logic",
  "varve-schema",
+ "varve-service",
+ "varve-store",
  "varve-surface",
 ]
 

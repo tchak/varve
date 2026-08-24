@@ -38,7 +38,9 @@ pub mod principal;
 pub mod procedure;
 pub mod procedure_event;
 pub mod procedure_state;
+pub mod publish;
 pub mod session;
+pub mod surfaces;
 pub mod team;
 pub mod tree;
 pub mod tree_edit;
@@ -66,12 +68,18 @@ pub use procedure::{
     find_procedure_with_revision_draft, list_account_procedures, list_organization_procedures,
     reopen_procedure, revision_draft_tree,
 };
-pub use procedure_event::{ProcedureEvent, ProcedureEventKind, list_procedure_events};
+pub use procedure_event::{
+    FactsBytes, ProcedureEvent, ProcedureEventKind, PublishedFacts, list_procedure_events,
+};
 pub use procedure_state::{CorruptState, ProcedureState, ProcedureStateValue, TransitionError};
+pub use publish::{
+    PublishProcedureError, PublishProcedureOutcome, SharedExecutor, publish_procedure,
+};
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
     delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,
 };
+pub use surfaces::{APPLICANT_SURFACE, REVIEWER_SURFACE, SurfacePair, compile_surfaces};
 pub use team::{
     Team, TeamMembership, add_team_member, create_team, find_team, is_team_member,
     list_account_teams, list_organization_teams, list_team_members, remove_team_member,
