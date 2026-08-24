@@ -10,7 +10,8 @@
 //! Rows are append-only, written by the use-case services in
 //! [`crate::procedure`] inside the same transaction as the row
 //! change they record, so column and log cannot disagree. Draft
-//! autosaves are deliberately not events (P.4); per-kind facts ride
+//! autosaves and discards are deliberately not events (P.4 — the
+//! draft is a working buffer, not the record); per-kind facts ride
 //! as platform-owned JSON bytes — today only `published` carries any
 //! ([`PublishedFacts`]).
 
@@ -111,8 +112,6 @@ pub enum ProcedureEventKind {
     Closed,
     /// The procedure reopened on its last published revision.
     Reopened,
-    /// The revision draft in progress was discarded.
-    DraftDiscarded,
 }
 
 /// Appends one entry. `pub(crate)`: only the use-case services

@@ -773,7 +773,7 @@ impl Mutation {
         let (principal, mut db) = session(ctx)?;
         let (mut procedure, organization) =
             administered_procedure(&mut db, principal.account_id, &input.procedure_id).await?;
-        platform_core::discard_revision_draft(&mut db, &mut procedure, principal.account_id)
+        platform_core::discard_revision_draft(&mut db, &mut procedure)
             .await
             .map_err(|e| draft_error(RevisionDraftError::Db(e)))?;
         Ok(Procedure {

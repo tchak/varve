@@ -254,34 +254,15 @@ pub async fn edit_revision_draft(
     Ok(tree)
 }
 
-/// Drops the procedure's draft, logging the `draft_discarded` event
-/// in the same transaction; with no draft in progress it does
-/// nothing (and logs nothing). Same loading and concurrency contract
-/// as [`edit_revision_draft`].
+/// Drops the procedure's draft, if any. Not an event (P.4: the
+/// draft is a working buffer — discarding it is authoring workflow,
+/// the same altitude as the autosaves the log deliberately omits).
+/// Same loading and concurrency contract as [`edit_revision_draft`].
 pub async fn discard_revision_draft(
     db: &mut toasty::Db,
     procedure: &mut Procedure,
-    actor_account_id: uuid::Uuid,
 ) -> toasty::Result<()> {
-    if procedure.revision_draft.get().is_none() {
-        return Ok(());
-    }
-    let mut tx = db.transaction().await?;
-    procedure
-        .update()
-        .revision_draft(None)
-        .exec(&mut tx)
-        .await?;
-    append_procedure_event(
-        &mut tx,
-        procedure.id,
-        Some(actor_account_id),
-        ProcedureEventKind::DraftDiscarded,
-        None,
-    )
-    .await?;
-    tx.commit().await?;
-    Ok(())
+    procedure.update().revision_draft(None).exec(db).await
 }
 
 /// Errors of the persisted lifecycle transitions.

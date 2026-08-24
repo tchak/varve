@@ -645,7 +645,7 @@ type Procedure {
 	state: ProcedureState!
 	"""
 	The audit trail (G.9), oldest first: lifecycle transitions
-	and draft discards, never autosaves — bounded by design.
+	only, never authoring workflow — bounded by design.
 	"""
 	events: [ProcedureEvent!]!
 	"""
@@ -706,7 +706,6 @@ enum ProcedureEventKind {
 	PUBLISHED
 	CLOSED
 	REOPENED
-	DRAFT_DISCARDED
 }
 
 """

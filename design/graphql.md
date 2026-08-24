@@ -454,7 +454,8 @@ logs*, shipped before publication itself (the kernel edge).
    lands in `Published` from any state (P.4).
 3. **`Procedure.events: [ProcedureEvent!]!`** — the audit trail,
    oldest first, an array not a connection: the log holds lifecycle
-   transitions and draft discards, never autosaves (P.4), so it is
+   transitions only, never authoring workflow (P.4, amended
+   2026-08-24: `draft_discarded` dropped with the rest), so it is
    bounded by design (G.2 rule 4). A row is `{ id, kind:
    ProcedureEventKind!, actor: AccountRef, createdAt }`; `actor` is
    `null` for a system event or an account since deleted — the

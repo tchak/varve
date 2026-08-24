@@ -243,7 +243,6 @@ pub enum ProcedureEventKind {
     Published,
     Closed,
     Reopened,
-    DraftDiscarded,
 }
 
 /// The acting account, as the log names it.

@@ -52,7 +52,7 @@ impl Procedure {
     }
 
     /// The audit trail (G.9), oldest first: lifecycle transitions
-    /// and draft discards, never autosaves — bounded by design.
+    /// only, never authoring workflow — bounded by design.
     async fn events(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ProcedureEvent>> {
         let (_, mut db) = session(ctx)?;
         procedure_events(&mut db, self.procedure.id).await

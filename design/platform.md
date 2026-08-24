@@ -307,10 +307,12 @@ sequence), subject id (indexed), nullable `actor_account_id`
 (system events), `kind` as a column (filtering), per-kind facts as
 platform-owned JSON, `created_at` — written in the same transaction
 as the state-column update by the use-case service, so column and
-log cannot disagree. Two constraints: **draft autosaves are not
+log cannot disagree. Two constraints: **authoring workflow is not
 events** (the procedure alphabet is `created`, `published
-{ revision, base }`, `closed`, `reopened`, `draft_discarded` —
-per-edit logging is P.9 Q4's bloat, procedure-side), and
+{ revision, base }`, `closed`, `reopened` — amended 2026-08-24:
+`draft_discarded` dropped; discarding the working buffer is the
+same altitude as the per-edit autosaves, P.9 Q4's bloat,
+procedure-side — the trail records lifecycle facts), and
 **case-file event payloads never hold cell values** — references
 and metadata only, or the log becomes an erasure leak outliving
 §2.10. The unified per-organization audit view, if ever wanted, is

@@ -48,7 +48,6 @@ pub enum ProcedureEventKind {
     Published,
     Closed,
     Reopened,
-    DraftDiscarded,
 }
 
 /// A procedure's events, oldest first, actors resolved. One account

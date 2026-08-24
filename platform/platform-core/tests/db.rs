@@ -1008,7 +1008,7 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    discard_revision_draft(&mut db, &mut fresh, admin.id)
+    discard_revision_draft(&mut db, &mut fresh)
         .await
         .expect("discard");
     assert_eq!(revision_draft_tree(&fresh).unwrap(), None);
@@ -1144,50 +1144,36 @@ async fn close_and_reopen_transition_and_log() {
 }
 
 #[tokio::test]
-async fn discarding_a_draft_logs_only_when_one_existed() {
+async fn discarding_a_draft_is_not_an_event() {
     let Some(mut db) = test_db().await else {
         return;
     };
-    let (admin, procedure) = lifecycle_fixture(&mut db, "lifecycle-discard").await;
+    let (_, procedure) = lifecycle_fixture(&mut db, "lifecycle-discard").await;
 
-    // No draft in progress: a no-op, and no event.
     let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
         .await
         .unwrap()
         .unwrap();
-    discard_revision_draft(&mut db, &mut loaded, admin.id)
-        .await
-        .expect("discard nothing");
-
-    // Start a draft, then discard it: exactly one event.
     edit_revision_draft(&mut db, &mut loaded, |tree| {
         add_element(
             tree,
             &Placement::root(),
-            TreeElement::Column(TreeColumn {
-                id: new_column_id(),
-                label: "Nom".into(),
-                ty: ScalarType::Text,
-                arity: Arity::One,
-                format: None,
-                required: true,
-                audience: Audience::All,
-            }),
+            draft_column("Nom", ScalarType::Text),
         )
     })
     .await
     .expect("start a draft");
-    discard_revision_draft(&mut db, &mut loaded, admin.id)
+    discard_revision_draft(&mut db, &mut loaded)
         .await
         .expect("discard");
+    assert_eq!(revision_draft_tree(&loaded).unwrap(), None);
 
+    // The trail records lifecycle facts only: discarding the working
+    // buffer is authoring workflow, absent by design (P.4).
     let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
     assert_eq!(
         events.iter().map(|e| e.kind).collect::<Vec<_>>(),
-        vec![
-            ProcedureEventKind::Created,
-            ProcedureEventKind::DraftDiscarded,
-        ]
+        vec![ProcedureEventKind::Created]
     );
 }
 
