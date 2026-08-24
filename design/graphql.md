@@ -462,3 +462,44 @@ logs*, shipped before publication itself (the kernel edge).
    one (the alphabet is settled) with no writer until publication
    lands. Full-object only: the trail is the administrator's
    detail view, not list-row material.
+
+## G.10 `publishRevision` (settled 2026-08-24)
+
+The G.1 mutation made concrete, on platform P.4 *Publication*.
+
+1. **One mutation, two phases through one shape.**
+   `publishRevision(input: { procedureId, confirm: Boolean! =
+   false })` returns `PublishRevisionResult { report:
+   ImpactReport!, published: Boolean!, procedure: Procedure! }`. A
+   free report (`worst = SAFE`) publishes immediately; a lossy,
+   checked, or breaking one without `confirm: true` returns the
+   report with `published: false` and an untouched procedure — the
+   client re-sends with `confirm: true`, carrying the report to the
+   administrator (P.4: confirmation carries the report). First
+   publication classifies against the empty schema — every column
+   `ADDED`, free — so the walking-skeleton path never sees a
+   confirmation.
+2. **`ImpactReport` starts minimal and honest**: `{ worst:
+   ChangeClass!, columns: [ColumnImpactEntry!]! }` with
+   `ChangeClass = SAFE | LOSSY | CHECKED | BREAKING`,
+   `ColumnImpactEntry { columnId, class: ChangeClass!, change:
+   ColumnChangeKind!, removedOptions: [ID!]! }`, and
+   `ColumnChangeKind = ADDED | REMOVED | CAST | SCOPE_MOVED |
+   FORBIDDEN` — `IDENTICAL` entries are filtered out (the report
+   says what changed). The kernel report's unit and constraint
+   detail, blocks, broken rules, and record assessments join the
+   type as the platform grows them; the shape leaves room.
+3. **Errors.** A procedure with no draft, or a draft an enum of
+   which has no options (G.7: publication is where an empty choice
+   is refused; the kernel deliberately accepts it as a draft
+   state), is the new structured code **`INVALID_DRAFT`** — fix the
+   draft and retry. A draft whose `base` is no longer the lineage
+   head (another administrator published since it forked) is
+   `CONFLICT` — discard or rebase the draft. Kernel validation
+   failures at publish are `INTERNAL`: the editor validates every
+   edit, so a draft that stops validating is a wiring bug, not a
+   user error.
+4. **Publishing transitions the lifecycle** (P.4): `Published` from
+   any state, from `Closed` it is the reopen; the `published` event
+   carries `{ revision, base }` facts and the trail's `PUBLISHED`
+   kind gains its writer.

@@ -147,6 +147,14 @@ by new members.
   dyn Executor`; and no store handle ever lives in app context,
   because `Transaction<'a>` borrows the `Db`. The traits stay
   executor-free; the binding happens at construction, per use case.
+  **Amended 2026-08-24 (migrations and registration):** the kernel
+  tables are `platform-store`'s own migration set (its own
+  `toasty/` directory and project-local migrate CLI, the
+  `platform-core` pattern), and the crate exposes its `ModelSet`;
+  `platform-core::connect_with` merges extra models and applies
+  extra migration sets after its own — one database, one
+  `__toasty_migrations` table, each crate owning its files. Callers
+  that never touch kernel state keep plain `connect`.
 - `platform-i18n` — the MF2 catalogs (English + French) and their
   runtime over ICU4X (correction, found in the Q8 spike: parse with
   `ox_mf2_parser` — the originally named `mf2_parser` is GPL-3 and
@@ -404,6 +412,51 @@ narrows it without rewriting markers), and only *explicitly*
 authoring an element wider than its parent's effective audience is
 the refused contradiction. "Private" stays the prose word for the
 concept; `audience` is the field.
+
+**Publication (settled 2026-08-24).** The kernel edge arrives as
+`varve-service::publish_revision`, the §13.2 choreography around the
+pure kernel, generic over the `varve-store` traits: check the
+caller's fork point against the lineage head, validate the schema
+(`varve_schema::validate`) and both surfaces
+(`varve_surface::validate`, which re-checks the revision pairing),
+classify against the head with `varve-impact`, gate on the report —
+`worst() > Safe` without explicit confirmation returns the report
+and writes nothing — then append the publication event and put the
+surfaces. **The lineage is the procedure's UUID** (`LineageId` is
+storage scoping by design, §13.2). **First publication classifies
+against the empty schema**: every column `Added`, the report free —
+one code path, no special case. **The surface pair compiles from
+the authored tree** with fixed ids `applicant` and `reviewer`
+(stable across revisions — §2.6 node identity for the pair itself):
+reviewer = the full tree, applicant = effective-audience pruning;
+the write-policy differences, unspecified until now, are settled
+from DN semantics and DESIGN §2.7's "back-office yes, public form
+no": on the applicant surface every column present is writable with
+`override_derived: false`; on the reviewer surface only
+reviewer-only columns are writable (annotations privées are the
+instructeur's; the dossier's own fields are never edited by
+reviewers — corrections go through `returnToApplicant` and
+messaging) and they carry `override_derived: true`. `required:
+true` compiles to the vacuous always-required rule on every surface
+the column appears on. **The empty-enum refusal is publication
+policy here** (G.7: a choice with no options is a draft state; the
+kernel deliberately accepts it), refused before the service runs.
+**The catalog row gains `latest_revision`**, a read-model column
+maintained only by publication (the P.9 Q3 pattern): a new draft
+forks from it (its `base`), and publication refuses a draft whose
+`base` no longer equals the lineage head — the stale-fork answer,
+resolving the base-echo half of P.9 Q15 server-side (the draft row
+carries `base`; the client echoes nothing). The `published` event
+carries its facts (`revision`, `base`) as the event log's first
+facts payload. **Transaction composition** follows the settled Q10
+shape made concrete: the use case in `platform-core` receives one
+shared executor (`tokio::sync::Mutex<&mut dyn Executor>` over the
+open transaction) plus the store scoped over that same executor;
+the GraphQL mutation is the composition point that opens the
+transaction, scopes `platform-store`, calls the use case, and
+commits — amending P.3's "platform-server wires this impl in":
+in-process execution makes the mutation the wiring point;
+`platform-server` still owns choosing the database.
 
 **Conditions across the privacy boundary (settled with the above).**
 The authoring surfaces adopt DN's upstream-only rule, which DESIGN
@@ -873,7 +926,11 @@ everything shipped exists in DN and nothing shipped that doesn't.
     `moveElement`, … — one element operation per mutation, `CONFLICT`
     on a lost race); the arity-into-type rework landed the same day
     (G.7.2). Still open: whether a whole-tree `editRevision` is ever
-    worth adding beside them, and the `base` echo.
+    worth adding beside them. **The `base` echo is settled
+    (2026-08-24, P.4 *Publication*):** no client echo — the draft row
+    carries `base` (set from `latest_revision` when a draft starts),
+    and publication refuses a draft whose base is no longer the
+    lineage head (`CONFLICT`).
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
