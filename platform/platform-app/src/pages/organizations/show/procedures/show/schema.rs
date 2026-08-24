@@ -47,7 +47,7 @@ use platform_client::revision_draft::{
     AttachmentType, Audience, Cardinality, ColumnType, DiscardRevisionDraft,
     DiscardRevisionDraftInput, DiscardRevisionDraftVariables, DraftColumn, DraftElement,
     DraftGroup, DraftNote, DraftSection, PlacementInput, ProcedureRevisionDraft,
-    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
+    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, TextFormat, Unit,
 };
 use platform_client::{Code, Error};
 use serde::{Deserialize, Serialize};
@@ -503,6 +503,10 @@ enum Detail {
 struct ColumnDetail {
     column: DraftColumn,
     kind: String,
+    /// The format select's value: "", EMAIL, PHONE, IBAN or REGEX.
+    format: String,
+    /// The custom pattern, when the format is REGEX.
+    pattern: String,
     unit: Option<Unit>,
     /// `(id, label, accessible name of its remove button)`.
     options: Vec<(String, String, String)>,
@@ -619,6 +623,14 @@ async fn editor_page(
     let section_help_label = t(cx, "schema.section.help").await?;
     let note_body_label = t(cx, "schema.note.body").await?;
     let required_label = t(cx, "schema.required").await?;
+    let format_label = t(cx, "schema.format").await?;
+    let format_none = t(cx, "schema.format.none").await?;
+    let format_email = t(cx, "schema.format.email").await?;
+    let format_phone = t(cx, "schema.format.phone").await?;
+    let format_iban = t(cx, "schema.format.iban").await?;
+    let format_regex = t(cx, "schema.format.regex").await?;
+    let pattern_label = t(cx, "schema.format.pattern").await?;
+    let pattern_help = t(cx, "schema.format.pattern.help").await?;
     let options_label = t(cx, "schema.options").await?;
     let options_help = t(cx, "schema.options.help").await?;
     let option_label = t(cx, "schema.options.label").await?;
@@ -638,6 +650,8 @@ async fn editor_page(
         Some(DraftElement::Column(column)) => Detail::Column(ColumnDetail {
             column: column.clone(),
             kind: kind_of(&column.ty).to_owned(),
+            format: text_format_of(&column.ty).0.to_owned(),
+            pattern: text_format_of(&column.ty).1.to_owned(),
             unit: unit_of(&column.ty),
             options: match &column.ty {
                 ColumnType::Enum(e) => e
@@ -709,6 +723,10 @@ async fn editor_page(
         Detail::Column(c) => c.kind.clone(),
         _ => String::new(),
     };
+    let initial_format = match &detail {
+        Detail::Column(c) => c.format.clone(),
+        _ => String::new(),
+    };
     let update_href = || {
         href!(
             elements::element::update::submit,
@@ -744,6 +762,7 @@ async fn editor_page(
         signal status = String::new();
         signal option_status = String::new();
         signal kind = initial_kind.clone();
+        signal format = initial_format.clone();
         signal pid = procedure_id_string.clone();
         signal eid = selected_string.clone();
         signal saving = saving_text.clone();
@@ -830,6 +849,8 @@ async fn editor_page(
                             data-schema-notice="" // A confirmation fades once read (app.css);
                             // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
@@ -1297,6 +1318,97 @@ async fn editor_page(
                                                         (arity_many.as_str())
                                                     </option>
                                                 </select>
+                                            </div>
+                                            <div
+                                                class="flex flex-col gap-4"
+                                                :hidden=$(kind.get() != "TEXT")
+                                                data-facet="format"
+                                            >
+                                                <div class="flex flex-col gap-2">
+                                                    label(
+                                                        attrs: attributes! { for="element-format" },
+                                                        (format_label.as_str())
+                                                    )
+                                                    <select
+                                                        id="element-format"
+                                                        class=(SELECT)
+                                                        name="format"
+                                                        @change=$(async |e: Event| {
+                                                            format.set(e.target.value.to_owned());
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "format".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
+                                                    >
+                                                        <option value="" selected=(c.format.is_empty())>
+                                                            (format_none.as_str())
+                                                        </option>
+                                                        <option value="EMAIL" selected=(c.format == "EMAIL")>
+                                                            (format_email.as_str())
+                                                        </option>
+                                                        <option value="PHONE" selected=(c.format == "PHONE")>
+                                                            (format_phone.as_str())
+                                                        </option>
+                                                        <option value="IBAN" selected=(c.format == "IBAN")>
+                                                            (format_iban.as_str())
+                                                        </option>
+                                                        <option value="REGEX" selected=(c.format == "REGEX")>
+                                                            (format_regex.as_str())
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                                <div
+                                                    class="flex flex-col gap-2"
+                                                    :hidden=$(format.get() != "REGEX")
+                                                    data-facet="pattern"
+                                                >
+                                                    label(
+                                                        attrs: attributes! { for="element-pattern" },
+                                                        (pattern_label.as_str())
+                                                    )
+                                                    <input
+                                                        id="element-pattern"
+                                                        class=(INPUT)
+                                                        type="text"
+                                                        name="pattern"
+                                                        value=(c.pattern.as_str())
+                                                        autocomplete="off"
+                                                        aria-describedby="element-pattern-help"
+                                                        @change=$(async |e: Event| {
+                                                            status.set(saving.get());
+                                                            let outcome = save_field(
+                                                                    pid.get(),
+                                                                    eid.get(),
+                                                                    "pattern".to_owned(),
+                                                                    e.target.value,
+                                                                )
+                                                                .await;
+                                                            if outcome.is_ok() {
+                                                                status.set(outcome.unwrap());
+                                                                revision.increment();
+                                                            } else {
+                                                                status.set(outcome.unwrap_err());
+                                                            }
+                                                        })
+                                                    >
+                                                    <p
+                                                        id="element-pattern-help"
+                                                        class="text-sm text-muted-foreground"
+                                                    >
+                                                        (pattern_help.as_str())
+                                                    </p>
+                                                </div>
                                             </div>
                                             <div
                                                 class="flex items-center gap-2"
@@ -2475,6 +2587,21 @@ pub(super) fn label_of(element: &DraftElement) -> &str {
         DraftElement::Section(s) => &s.title,
         DraftElement::Note(n) => n.title.as_deref().unwrap_or(&n.body),
         DraftElement::Unknown => "",
+    }
+}
+
+/// A text column's format as the editor's form values: the select's
+/// choice and the custom pattern ("" where absent).
+pub(super) fn text_format_of(ty: &ColumnType) -> (&'static str, &str) {
+    match ty {
+        ColumnType::Text(text) => match &text.format {
+            Some(TextFormat::Email(_)) => ("EMAIL", ""),
+            Some(TextFormat::Phone(_)) => ("PHONE", ""),
+            Some(TextFormat::Iban(_)) => ("IBAN", ""),
+            Some(TextFormat::Regex(regex)) => ("REGEX", regex.pattern.as_str()),
+            Some(TextFormat::Unknown) | None => ("", ""),
+        },
+        _ => ("", ""),
     }
 }
 

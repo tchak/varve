@@ -907,6 +907,43 @@ async fn sections_notes_and_audience_journey() {
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("data-required=\"false\""), "{html}");
     assert!(html.contains("Saved your changes."), "{html}");
+
+    // A text format: a built-in, then a custom pattern; a
+    // backtracking pattern is refused (draft unchanged), a blank one
+    // asks for the pattern.
+    assert!(html.contains("data-facet=\"format\""), "{html}");
+    assert!(html.contains("id=\"element-format\""), "{html}");
+    let to = act(&router, &cookie, &update(&ville), &[("format", "EMAIL")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("value=\"EMAIL\" selected"), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&ville),
+        &[("format", "REGEX"), ("pattern", "[0-9]{5}")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("value=\"[0-9]{5}\""), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&ville),
+        &[("format", "REGEX"), ("pattern", "(?=x)")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("role=\"alert\""), "{html}");
+    assert!(html.contains("value=\"[0-9]{5}\""), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&ville),
+        &[("format", "REGEX"), ("pattern", "  ")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("A pattern is required"), "{html}");
 }
 
 #[tokio::test]

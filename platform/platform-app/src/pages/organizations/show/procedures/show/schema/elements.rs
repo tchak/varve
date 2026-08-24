@@ -13,10 +13,11 @@ use platform_client::Error;
 use platform_client::revision_draft::{
     AttachmentType, Audience, Cardinality, ColumnType, ColumnTypeInput, DraftColumn, DraftElement,
     EnumOptionInput, MoveElement, MoveElementInput, MoveElementVariables, PlacementInput,
-    ProcedureRevisionDraft, RemoveElement, RemoveElementInput, RemoveElementVariables,
-    UpdateColumn, UpdateColumnInput, UpdateColumnVariables, UpdateGroup, UpdateGroupInput,
-    UpdateGroupVariables, UpdateNote, UpdateNoteInput, UpdateNoteVariables, UpdateSection,
-    UpdateSectionInput, UpdateSectionVariables,
+    ProcedureRevisionDraft, RegexFormatInput, RemoveElement, RemoveElementInput,
+    RemoveElementVariables, TextFormatInput, UpdateColumn, UpdateColumnInput,
+    UpdateColumnVariables, UpdateGroup, UpdateGroupInput, UpdateGroupVariables, UpdateNote,
+    UpdateNoteInput, UpdateNoteVariables, UpdateSection, UpdateSectionInput,
+    UpdateSectionVariables,
 };
 use serde::Deserialize;
 use topcoat::{
@@ -30,7 +31,7 @@ use crate::{client, i18n::t};
 use super::super::procedure_draft;
 use super::{
     Notice, NoticeKind, back_to_editor, done, done_with, id_of, kind_of, label_of, multiple_of,
-    parent_of, refused, unit_from_name, unit_of,
+    parent_of, refused, text_format_of, unit_from_name, unit_of,
 };
 
 /// A submitted form as ordered pairs — repeated names (the enum
@@ -347,9 +348,17 @@ async fn column_type_input(
     column: &DraftColumn,
     fields: &Fields,
 ) -> Result<std::result::Result<Option<ColumnTypeInput>, Notice>> {
-    let touched = ["kind", "unit", "accept", "max_bytes", "arity"]
-        .iter()
-        .any(|name| fields.get(name).is_some());
+    let touched = [
+        "kind",
+        "unit",
+        "accept",
+        "max_bytes",
+        "arity",
+        "format",
+        "pattern",
+    ]
+    .iter()
+    .any(|name| fields.get(name).is_some());
     if !touched {
         return Ok(Ok(None));
     }
@@ -418,7 +427,48 @@ async fn column_type_input(
             };
             ColumnTypeInput::attachment(accept, max_bytes, multiple)
         }
-        _ => ColumnTypeInput::text(),
+        _ => {
+            // TEXT: the format select posts "", EMAIL, PHONE, IBAN or
+            // REGEX, the pattern input its text; absent fields keep
+            // the column's current constraint (§2.6 — the server
+            // verifies patterns on the linear-time engine).
+            let (current_format, current_pattern) = text_format_of(&column.ty);
+            let choice = fields.get("format").unwrap_or(current_format);
+            let pattern = fields
+                .get("pattern")
+                .map(str::trim)
+                .unwrap_or(current_pattern);
+            let format = match choice {
+                "EMAIL" => Some(TextFormatInput {
+                    email: Some(true),
+                    ..Default::default()
+                }),
+                "PHONE" => Some(TextFormatInput {
+                    phone: Some(true),
+                    ..Default::default()
+                }),
+                "IBAN" => Some(TextFormatInput {
+                    iban: Some(true),
+                    ..Default::default()
+                }),
+                "REGEX" => {
+                    if pattern.is_empty() {
+                        return Ok(Err(Notice {
+                            kind: NoticeKind::Alert,
+                            text: t(cx, "schema.error.pattern-required").await?,
+                        }));
+                    }
+                    Some(TextFormatInput {
+                        regex: Some(RegexFormatInput {
+                            pattern: pattern.to_owned(),
+                        }),
+                        ..Default::default()
+                    })
+                }
+                _ => None,
+            };
+            ColumnTypeInput::text_with_format(format)
+        }
     };
     Ok(Ok(Some(input)))
 }
