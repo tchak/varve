@@ -36,6 +36,8 @@ pub mod db;
 pub mod organization;
 pub mod principal;
 pub mod procedure;
+pub mod procedure_event;
+pub mod procedure_state;
 pub mod session;
 pub mod team;
 pub mod tree;
@@ -59,11 +61,13 @@ pub use organization::{
 };
 pub use principal::Principal;
 pub use procedure::{
-    Procedure, RevisionDraft, RevisionDraftError, TreeBytes, create_procedure,
-    discard_revision_draft, edit_revision_draft, find_procedure,
+    LifecycleError, Procedure, RevisionDraft, RevisionDraftError, TreeBytes, close_procedure,
+    create_procedure, current_state, discard_revision_draft, edit_revision_draft, find_procedure,
     find_procedure_with_revision_draft, list_account_procedures, list_organization_procedures,
-    revision_draft_tree,
+    reopen_procedure, revision_draft_tree,
 };
+pub use procedure_event::{ProcedureEvent, ProcedureEventKind, list_procedure_events};
+pub use procedure_state::{CorruptState, ProcedureState, ProcedureStateValue, TransitionError};
 pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
     delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,

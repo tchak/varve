@@ -28,6 +28,10 @@ use platform_core::{
     register, remove_organization_member, remove_team_member, revision_draft_tree, sweep_expired,
     sweep_expired_api_tokens, update_profile, verify_credentials,
 };
+use platform_core::{
+    LifecycleError, ProcedureEventKind, ProcedureStateValue, TransitionError, close_procedure,
+    current_state, list_procedure_events, reopen_procedure,
+};
 use varve_schema::{Arity, ScalarType};
 
 /// Connects to the test database, applying migrations; `None` (after
@@ -689,17 +693,20 @@ async fn organization_owns_procedures() {
     let other = create_organization(&mut db, &unique_slug("other"), "Other")
         .await
         .expect("create org");
+    let admin = register(&mut db, &unique_email("admin"), "s3cret", "Admin", None)
+        .await
+        .expect("register");
 
-    let first = create_procedure(&mut db, org.id, " Demande de bourse ", "")
+    let first = create_procedure(&mut db, org.id, admin.id, " Demande de bourse ", "")
         .await
         .expect("procedure");
     assert_eq!(first.title, "Demande de bourse");
     assert_eq!(first.description, "");
-    let second = create_procedure(&mut db, org.id, "Permis", " Desc ")
+    let second = create_procedure(&mut db, org.id, admin.id, "Permis", " Desc ")
         .await
         .expect("procedure");
     assert_eq!(second.description, "Desc");
-    create_procedure(&mut db, other.id, "Elsewhere", "")
+    create_procedure(&mut db, other.id, admin.id, "Elsewhere", "")
         .await
         .expect("procedure");
 
@@ -907,7 +914,10 @@ async fn procedure_draft_round_trips_through_edits() {
     let org = create_organization(&mut db, &unique_slug("draft"), "Org")
         .await
         .expect("create org");
-    let created = create_procedure(&mut db, org.id, "Bourse", "")
+    let admin = register(&mut db, &unique_email("draft"), "s3cret", "Admin", None)
+        .await
+        .expect("register");
+    let created = create_procedure(&mut db, org.id, admin.id, "Bourse", "")
         .await
         .expect("procedure");
 
@@ -997,7 +1007,7 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    discard_revision_draft(&mut db, &mut fresh)
+    discard_revision_draft(&mut db, &mut fresh, admin.id)
         .await
         .expect("discard");
     assert_eq!(revision_draft_tree(&fresh).unwrap(), None);
@@ -1006,4 +1016,176 @@ async fn procedure_draft_round_trips_through_edits() {
         .unwrap()
         .unwrap();
     assert_eq!(revision_draft_tree(&after).unwrap(), None);
+}
+
+/// Seeds an organization, an acting account and a procedure for the
+/// lifecycle tests.
+async fn lifecycle_fixture(
+    db: &mut toasty::Db,
+    tag: &str,
+) -> (platform_core::Account, platform_core::Procedure) {
+    let org = create_organization(db, &unique_slug(tag), "Org")
+        .await
+        .expect("create org");
+    let admin = register(db, &unique_email(tag), "s3cret", "Admin", None)
+        .await
+        .expect("register");
+    let procedure = create_procedure(db, org.id, admin.id, "Bourse", "")
+        .await
+        .expect("procedure");
+    (admin, procedure)
+}
+
+#[tokio::test]
+async fn a_new_procedure_is_a_draft_and_logs_created() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let (admin, procedure) = lifecycle_fixture(&mut db, "lifecycle-new").await;
+
+    assert_eq!(procedure.state, ProcedureStateValue::Draft);
+    assert_eq!(procedure.state_since, None);
+    assert_eq!(
+        current_state(&procedure).unwrap(),
+        platform_core::ProcedureState::Draft
+    );
+
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| (e.kind, e.actor_account_id))
+            .collect::<Vec<_>>(),
+        vec![(ProcedureEventKind::Created, Some(admin.id))]
+    );
+}
+
+#[tokio::test]
+async fn close_and_reopen_transition_and_log() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let (admin, mut procedure) = lifecycle_fixture(&mut db, "lifecycle-close").await;
+
+    // A draft cannot close: the machine refuses before anything is
+    // written.
+    let refused = close_procedure(&mut db, &mut procedure, admin.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            refused,
+            LifecycleError::Transition(TransitionError::NotPublished(ProcedureStateValue::Draft))
+        ),
+        "{refused}"
+    );
+
+    // Publication does not exist yet (it arrives with the kernel
+    // edge), so the test forces the row into `Published` directly to
+    // exercise the closed half of the machine.
+    let opened = jiff::Timestamp::now();
+    procedure
+        .update()
+        .state(ProcedureStateValue::Published)
+        .state_since(Some(opened))
+        .exec(&mut db)
+        .await
+        .expect("force published");
+
+    close_procedure(&mut db, &mut procedure, admin.id)
+        .await
+        .expect("close");
+    assert_eq!(procedure.state, ProcedureStateValue::Closed);
+    let closed_since = procedure.state_since.expect("closed since");
+    assert!(closed_since >= opened);
+
+    // Reopen resets `since` — the reason the column is not a
+    // publication date.
+    reopen_procedure(&mut db, &mut procedure, admin.id)
+        .await
+        .expect("reopen");
+    assert_eq!(procedure.state, ProcedureStateValue::Published);
+    assert!(procedure.state_since.expect("reopened since") >= closed_since);
+
+    let reopened = reopen_procedure(&mut db, &mut procedure, admin.id)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            reopened,
+            LifecycleError::Transition(TransitionError::NotClosed(ProcedureStateValue::Published))
+        ),
+        "{reopened}"
+    );
+
+    // The log carries the whole story, oldest first, with the actor
+    // on every row — and the refused transitions left no entries.
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .map(|e| (e.kind, e.actor_account_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (ProcedureEventKind::Created, Some(admin.id)),
+            (ProcedureEventKind::Closed, Some(admin.id)),
+            (ProcedureEventKind::Reopened, Some(admin.id)),
+        ]
+    );
+
+    // The columns a fresh read sees match the in-place row.
+    let fetched = find_procedure(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(fetched.state, procedure.state);
+    assert_eq!(fetched.state_since, procedure.state_since);
+}
+
+#[tokio::test]
+async fn discarding_a_draft_logs_only_when_one_existed() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    let (admin, procedure) = lifecycle_fixture(&mut db, "lifecycle-discard").await;
+
+    // No draft in progress: a no-op, and no event.
+    let mut loaded = find_procedure_with_revision_draft(&mut db, procedure.id)
+        .await
+        .unwrap()
+        .unwrap();
+    discard_revision_draft(&mut db, &mut loaded, admin.id)
+        .await
+        .expect("discard nothing");
+
+    // Start a draft, then discard it: exactly one event.
+    edit_revision_draft(&mut db, &mut loaded, |tree| {
+        add_element(
+            tree,
+            &Placement::root(),
+            TreeElement::Column(TreeColumn {
+                id: new_column_id(),
+                label: "Nom".into(),
+                ty: ScalarType::Text,
+                arity: Arity::One,
+                format: None,
+                required: true,
+                audience: Audience::All,
+            }),
+        )
+    })
+    .await
+    .expect("start a draft");
+    discard_revision_draft(&mut db, &mut loaded, admin.id)
+        .await
+        .expect("discard");
+
+    let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
+    assert_eq!(
+        events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        vec![
+            ProcedureEventKind::Created,
+            ProcedureEventKind::DraftDiscarded,
+        ]
+    );
 }
