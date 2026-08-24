@@ -991,3 +991,81 @@ async fn the_editor_speaks_french() {
     assert!(html.contains("Visibilité"), "{html}");
     assert!(html.contains("Instructeurs uniquement"), "{html}");
 }
+
+/// Regression: rendering deeply nested containers must not overflow
+/// the stack. `tree_list` and `tree_row` recurse into each other per
+/// nesting level with large render frames; both are boxed, and this
+/// journey proves six levels — sections nest without a kernel depth
+/// bound (the depth policy binds `many` groups only). The original
+/// report was a group moved into a reviewer-only section inside a
+/// section: SIGABRT on the move's landing page and on every load
+/// after.
+#[tokio::test]
+async fn deeply_nested_containers_render() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "schema-repro").await;
+    let organization = create_organization(&router, &cookie, "Mairie").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Repro").await;
+
+    // Five nested sections, the innermost reviewer-only.
+    let mut parent: Option<String> = None;
+    let mut innermost = String::new();
+    for level in 1..=5 {
+        let label = format!("Niveau {level}");
+        let mut fields = vec![("what", "section".to_owned()), ("label", label)];
+        if let Some(parent) = &parent {
+            fields.push(("parent", parent.clone()));
+        }
+        let fields: Vec<(&str, &str)> = fields.iter().map(|(n, v)| (*n, v.as_str())).collect();
+        let to = act(&router, &cookie, &format!("{editor}/add"), &fields).await;
+        innermost = selected_of(&to.to);
+        parent = Some(innermost.clone());
+    }
+    let update = |id: &str| format!("{editor}/elements/{id}/update");
+    act(
+        &router,
+        &cookie,
+        &update(&innermost),
+        &[("audience", "REVIEWER")],
+    )
+    .await;
+
+    // A group with a column at the root, moved into the innermost
+    // section — the reported crash, two levels deeper.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "group"), ("label", "Private group")],
+    )
+    .await;
+    let group = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[
+            ("what", "column"),
+            ("label", "some text"),
+            ("parent", &group),
+        ],
+    )
+    .await;
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{group}/relocate"),
+        &[("parent", &innermost)],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("data-element-kind=\"group\""), "{html}");
+    // The whole chain wears the inherited reviewer badge from the
+    // innermost section down.
+    assert!(html.contains("data-audience=\"reviewer\""), "{html}");
+    let html = page(&router, &cookie, &editor).await;
+    assert!(html.contains("Private group"), "{html}");
+    assert!(html.contains("Niveau 5"), "{html}");
+}
