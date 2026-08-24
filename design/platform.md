@@ -398,6 +398,16 @@ runs to container sections — a header swallows everything up to the
 next same-level header — deterministic, stated here so the importer
 and the editor agree.
 
+**Required on columns (settled 2026-08-24).** `TreeColumn` carries
+`required: bool` — the first surface property on the authored tree
+(graphql.md, *Required on columns*): the editor's switch for DESIGN
+§2.6's two constant cases; conditional requiredness waits for the
+rule editor. New columns default by **effective** audience — public
+required, reviewer-only optional — a deliberate inversion of DN's
+optional-by-default authoring, backed by the corpus (M0: required
+ratios run 65–88 % across the data-carrying types, so the common
+case should be the default one).
+
 **The schema editor (settled 2026-08-23).** `platform-app`'s
 `/organizations/{id}/procedures/{pid}/schema`, over the G.7 client
 operations — the app is integrator #1 (P.1). Shape: **master–detail

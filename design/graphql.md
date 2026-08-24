@@ -320,3 +320,16 @@ being only a schema, and the API says so:
   kinds. Surface *properties* (prompts, required/visibility rules,
   formats) are still not here — they attach per element in a later
   slice, as item 2 anticipates.
+
+**Required on columns (settled 2026-08-24).** The first surface
+property lands on the authored tree: `DraftColumn.required:
+Boolean!` — the editor's v1 of DESIGN §2.6's requiredness *rule*,
+covering its two constant cases ("always required" compiles to the
+vacuous `And([])`, "not required" to no rule) until the rule editor
+arrives. `addColumn` and `updateColumn` take `required: Boolean`
+(optional): omitted on add it defaults by the column's **effective**
+audience — public columns required, reviewer-only ones optional
+(each element's admissibility is owned by its audience, P.4) —
+omitted on update it is left alone. Only columns carry it: a
+group's "required" (at least one item) is DESIGN Q22's count
+bounds, not this.
