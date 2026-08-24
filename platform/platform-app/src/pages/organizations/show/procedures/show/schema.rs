@@ -42,6 +42,8 @@
 //! screen reader reach, and that the API's sibling-anchored placement
 //! (G.7) expresses directly.
 
+pub(super) mod add_form;
+pub(super) mod controls;
 pub(super) mod edit;
 pub(super) mod element;
 pub(super) mod elements;
@@ -65,7 +67,7 @@ use topcoat::{
     icon::{icon, iconify::iconify_icon},
     router::{content::Form, error::not_found, href, page, path_param, query_params},
     runtime::{Event, procedure},
-    view::{StaticClass, attributes, class, component, view},
+    view::{attributes, component, view},
 };
 
 use crate::{
@@ -75,7 +77,6 @@ use crate::{
         badge::{BadgeVariant, badge},
         button::{ButtonSize, ButtonVariant, button, button_variants},
         card::{card, card_content, card_footer, card_header},
-        field::field,
         label::label,
         notice::{NoticeTone, notice as notice_box},
         page_title::page_title,
@@ -88,6 +89,8 @@ use crate::{
 
 use super::super::super::OrganizationId;
 use super::{ProcedureId, counts, procedure_draft};
+use add_form::AddFacts;
+use controls::{INPUT, SELECT, SWITCH_THUMB, SWITCH_TRACK, TEXTAREA};
 use edit::Fields;
 use element::{
     KINDS, UNITS, effectively_reviewer, id_of, kind_message_id_of, kind_of, multiple_of, parent_of,
@@ -1076,7 +1079,7 @@ async fn editor_page(
                                 </form>
                             )
                             <div class="mt-6">
-                                add_form(
+                                add_form::form(
                                     procedure_id: procedure_id,
                                     organization_id: organization_id,
                                     facts: AddFacts {
@@ -1813,7 +1816,7 @@ async fn editor_page(
                                 </form>
                             )
                             <div class="mt-6">
-                                add_form(
+                                add_form::form(
                                     procedure_id: procedure_id,
                                     organization_id: organization_id,
                                     facts: AddFacts {
@@ -1966,7 +1969,7 @@ async fn editor_page(
                                 </form>
                             )
                         }
-                        Detail::Nothing => add_form(
+                        Detail::Nothing => add_form::form(
                             procedure_id: procedure_id,
                             organization_id: organization_id,
                             facts: AddFacts {
@@ -1980,192 +1983,5 @@ async fn editor_page(
                 </section>
             </div>
         </div>
-    }
-}
-
-/// The vendored input's look, for the controls that carry runtime
-/// handlers: a handler cannot travel through `attributes!` into a
-/// component (its captures would not outlive the call), so these are
-/// plain elements. Kept in step with `components::input::INPUT` and
-/// `components::select::SELECT`.
-const INPUT: StaticClass = class!(
-    "h-9 w-full min-w-0 rounded-lg border border-border bg-background px-3 \
-     text-sm shadow-xs transition-colors outline-none \
-     placeholder:text-muted-foreground \
-     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
-);
-
-const TEXTAREA: StaticClass = class!(
-    "min-h-20 w-full min-w-0 rounded-lg border border-border bg-background px-3 py-2 \
-     text-sm shadow-xs transition-colors outline-none \
-     placeholder:text-muted-foreground \
-     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
-);
-
-/// The vendored switch's look for the required toggle, which carries
-/// a runtime handler (a handler cannot travel through `attributes!`
-/// into a component). Kept in step with `components::switch`.
-const SWITCH_TRACK: StaticClass = class!(
-    "peer h-4.5 w-8 shrink-0 appearance-none rounded-full \
-     bg-foreground/20 shadow-xs transition-colors outline-none checked:bg-primary \
-     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none",
-);
-
-const SWITCH_THUMB: StaticClass = class!(
-    "pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 \
-     rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-3.5",
-);
-
-const SELECT: StaticClass = class!(
-    "h-9 w-full appearance-none items-center rounded-lg border border-border \
-     bg-background pr-8 pl-3 text-left text-sm shadow-xs transition-colors outline-none \
-     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none",
-);
-
-/// Where the add form sits and what it offers, bundled for
-/// [`add_form`].
-struct AddFacts {
-    parent: Option<String>,
-    section_parent: bool,
-    /// `false` inside a reviewer-only container: everything added
-    /// there is reviewer-only regardless (the server clamps), so the
-    /// field would mislead.
-    audience_offered: bool,
-    heading_level_top: bool,
-}
-
-/// The add form: what (column / group), the label, into `parent`.
-#[component]
-async fn add_form(
-    cx: &Cx,
-    procedure_id: uuid::Uuid,
-    organization_id: uuid::Uuid,
-    facts: AddFacts,
-) -> Result {
-    let AddFacts {
-        parent,
-        section_parent,
-        audience_offered,
-        heading_level_top,
-    } = facts;
-    let heading = match (&parent, section_parent) {
-        (Some(_), true) => t(cx, "schema.add.inside-section").await?,
-        (Some(_), false) => t(cx, "schema.add.inside").await?,
-        (None, _) => t(cx, "schema.add.title").await?,
-    };
-    let lead = t(cx, "schema.add.lead").await?;
-    let what_label = t(cx, "schema.add.what").await?;
-    let column_label = t(cx, "schema.kind.column").await?;
-    let group_label = t(cx, "schema.kind.group").await?;
-    let section_label = t(cx, "schema.kind.section").await?;
-    let note_label = t(cx, "schema.kind.note").await?;
-    let label_label = t(cx, "form.label").await?;
-    let type_label = t(cx, "schema.type").await?;
-    let submit = t(cx, "schema.add.submit").await?;
-    let audience_label = t(cx, "schema.audience").await?;
-    let audience_all = t(cx, "schema.audience.all").await?;
-    let audience_reviewer = t(cx, "schema.audience.reviewer").await?;
-    let mut kind_names = Vec::new();
-    for kind in KINDS {
-        kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
-    }
-    let prefix = match &parent {
-        Some(id) => format!("add-{id}"),
-        None => "add".to_owned(),
-    };
-    let what_id = format!("{prefix}-what");
-    let type_id = format!("{prefix}-type");
-    let label_id = format!("{prefix}-label");
-    let audience_id = format!("{prefix}-audience");
-    view! {
-        // The type select shows for a column only; the signal is this
-        // form's own (a handler reaches its own `view!`'s signals).
-        signal what = "column".to_owned();
-
-        card(
-            card_header(
-                if heading_level_top {
-                    <h2 id="schema-detail-heading" class="leading-none font-semibold">
-                        (heading)
-                    </h2>
-                } else {
-                    <h3 class="leading-none font-semibold">(heading)</h3>
-                }
-            )
-            <form
-                method="post"
-                action=(href!(add::submit, OrganizationId(organization_id), ProcedureId(procedure_id)))
-                class="contents"
-            >
-                if let Some(parent) = &parent {
-                    <input type="hidden" name="parent" value=(parent.as_str())>
-                }
-                card_content(
-                    <div class="flex flex-col gap-4">
-                        if parent.is_none() {
-                            <p class="text-sm text-muted-foreground">(lead)</p>
-                        }
-                        <div class="flex flex-col gap-2">
-                            label(
-                                attrs: attributes! { for=(what_id.as_str()) },
-                                (what_label)
-                            )
-                            <select
-                                id=(what_id.as_str())
-                                class=(SELECT)
-                                name="what"
-                                @change=$(|e: Event| what.set(e.target.value))
-                            >
-                                <option value="column">(column_label)</option>
-                                <option value="group">(group_label)</option>
-                                <option value="section">(section_label)</option>
-                                <option value="note">(note_label)</option>
-                            </select>
-                        </div>
-                        <div
-                            class="flex flex-col gap-2"
-                            :hidden=$(what.get() != "column")
-                            data-facet="add-type"
-                        >
-                            label(
-                                attrs: attributes! { for=(type_id.as_str()) },
-                                (type_label)
-                            )
-                            <select id=(type_id.as_str()) class=(SELECT) name="kind">
-                                for (kind_value, name) in &kind_names {
-                                    <option value=(*kind_value)>(name.as_str())</option>
-                                }
-                            </select>
-                        </div>
-                        field(
-                            id: label_id.as_str(),
-                            label: label_label,
-                            attrs: attributes! { type="text" name="label" required="" autocomplete="off" }
-                        )
-                        if audience_offered {
-                            <div class="flex flex-col gap-2">
-                                label(
-                                    attrs: attributes! { for=(audience_id.as_str()) },
-                                    (audience_label)
-                                )
-                                <select
-                                    id=(audience_id.as_str())
-                                    class=(SELECT)
-                                    name="audience"
-                                >
-                                    <option value="ALL">(audience_all)</option>
-                                    <option value="REVIEWER">(audience_reviewer)</option>
-                                </select>
-                            </div>
-                        }
-                    </div>
-                )
-                card_footer(button(attrs: attributes! { type="submit" }, (submit)))
-            </form>
-        )
     }
 }
