@@ -1,5 +1,6 @@
 //! `…/schema/elements/{eid}`: the POST routes on one element of the
-//! revision draft — [`element::update`] (the detail form),
+//! revision draft — any of the four kinds (column, group, section,
+//! note) — [`element::update`] (the detail form),
 //! [`element::relocate`] (move up / down / to), [`element::remove`]
 //! — and [`apply_update`], the one field application both the form
 //! and the autosave procedure go through.
@@ -10,10 +11,12 @@
 use cynic::MutationBuilder;
 use platform_client::Error;
 use platform_client::revision_draft::{
-    AttachmentType, Cardinality, ColumnType, ColumnTypeInput, EnumOptionInput, MoveElement,
-    MoveElementInput, MoveElementVariables, PlacementInput, ProcedureRevisionDraft, RemoveElement,
-    RemoveElementInput, RemoveElementVariables, SchemaColumn, SchemaElement, UpdateColumn,
-    UpdateColumnInput, UpdateColumnVariables, UpdateGroup, UpdateGroupInput, UpdateGroupVariables,
+    AttachmentType, Audience, Cardinality, ColumnType, ColumnTypeInput, DraftColumn, DraftElement,
+    EnumOptionInput, MoveElement, MoveElementInput, MoveElementVariables, PlacementInput,
+    ProcedureRevisionDraft, RemoveElement, RemoveElementInput, RemoveElementVariables,
+    UpdateColumn, UpdateColumnInput, UpdateColumnVariables, UpdateGroup, UpdateGroupInput,
+    UpdateGroupVariables, UpdateNote, UpdateNoteInput, UpdateNoteVariables, UpdateSection,
+    UpdateSectionInput, UpdateSectionVariables,
 };
 use serde::Deserialize;
 use topcoat::{
@@ -65,7 +68,7 @@ pub(super) fn kind_input(kind: &str) -> ColumnTypeInput {
 }
 
 /// A column's inline options as inputs that keep their ids.
-fn current_options(column: &SchemaColumn) -> Vec<EnumOptionInput> {
+fn current_options(column: &DraftColumn) -> Vec<EnumOptionInput> {
     match &column.ty {
         ColumnType::Enum(e) => e
             .options
@@ -103,6 +106,7 @@ pub(super) async fn set_options(
                     options,
                     multiple_of(&column.ty),
                 )),
+                audience: None,
             },
         }),
     )
@@ -119,13 +123,13 @@ pub(super) async fn enum_column<'a>(
     cx: &Cx,
     procedure: &'a ProcedureRevisionDraft,
     element_id: &str,
-) -> Result<std::result::Result<(&'a SchemaColumn, Vec<EnumOptionInput>), Notice>> {
+) -> Result<std::result::Result<(&'a DraftColumn, Vec<EnumOptionInput>), Notice>> {
     let column = procedure
         .revision_draft
         .as_ref()
         .and_then(|d| {
-            d.schema.elements.iter().find_map(|e| match e {
-                SchemaElement::Column(c) if c.id.inner() == element_id => Some(c),
+            d.elements.iter().find_map(|e| match e {
+                DraftElement::Column(c) if c.id.inner() == element_id => Some(c),
                 _ => None,
             })
         })
@@ -190,7 +194,7 @@ pub(super) async fn apply_update(
     let elements = procedure
         .revision_draft
         .as_ref()
-        .map(|d| d.schema.elements.as_slice())
+        .map(|d| d.elements.as_slice())
         .unwrap_or_default();
     let Some(element) = elements.iter().find(|e| id_of(e) == element_id) else {
         return Ok(Err(Notice {
@@ -210,8 +214,13 @@ pub(super) async fn apply_update(
     };
     let procedure_id = cynic::Id::new(procedure.id.inner());
     let id = cynic::Id::new(element_id);
+    // The audience select posts `ALL` / `REVIEWER` on every kind.
+    let audience = fields.get("audience").map(|value| match value {
+        "REVIEWER" => Audience::Reviewer,
+        _ => Audience::All,
+    });
     let result = match element {
-        SchemaElement::Group(_) => {
+        DraftElement::Group(_) => {
             let cardinality = match fields.get("cardinality") {
                 Some("MANY") => Some(Cardinality::Many),
                 Some(_) => Some(Cardinality::One),
@@ -225,13 +234,14 @@ pub(super) async fn apply_update(
                         id,
                         label,
                         cardinality,
+                        audience,
                     },
                 }),
             )
             .await
             .map(|_| ())
         }
-        SchemaElement::Column(column) => {
+        DraftElement::Column(column) => {
             let ty = match column_type_input(cx, column, fields).await? {
                 Ok(ty) => ty,
                 Err(notice) => return Ok(Err(notice)),
@@ -244,13 +254,71 @@ pub(super) async fn apply_update(
                         id,
                         label,
                         ty,
+                        audience,
                     },
                 }),
             )
             .await
             .map(|_| ())
         }
-        SchemaElement::Unknown => Ok(()),
+        DraftElement::Section(_) => {
+            let title = match fields.get("title") {
+                Some(title) if title.trim().is_empty() => {
+                    return Ok(Err(Notice {
+                        kind: NoticeKind::Alert,
+                        text: t(cx, "schema.error.title-required").await?,
+                    }));
+                }
+                Some(title) => Some(title.trim().to_owned()),
+                None => None,
+            };
+            // A blank help clears it (the server collapses blank to
+            // null); absent leaves it.
+            let help = fields.get("help").map(|help| help.trim().to_owned());
+            platform_client::run(
+                client,
+                UpdateSection::build(UpdateSectionVariables {
+                    input: UpdateSectionInput {
+                        procedure_id,
+                        id,
+                        title,
+                        help,
+                        audience,
+                    },
+                }),
+            )
+            .await
+            .map(|_| ())
+        }
+        DraftElement::Note(_) => {
+            let body = match fields.get("body") {
+                Some(body) if body.trim().is_empty() => {
+                    return Ok(Err(Notice {
+                        kind: NoticeKind::Alert,
+                        text: t(cx, "schema.error.body-required").await?,
+                    }));
+                }
+                Some(body) => Some(body.trim().to_owned()),
+                None => None,
+            };
+            // A blank title clears it; absent leaves it.
+            let title = fields.get("title").map(|title| title.trim().to_owned());
+            platform_client::run(
+                client,
+                UpdateNote::build(UpdateNoteVariables {
+                    input: UpdateNoteInput {
+                        procedure_id,
+                        id,
+                        title,
+                        body,
+                        audience,
+                    },
+                }),
+            )
+            .await
+            .map(|_| ())
+        }
+        DraftElement::Unknown => Ok(()),
     };
     match result {
         Ok(()) => Ok(Ok(())),
@@ -263,7 +331,7 @@ pub(super) async fn apply_update(
 /// otherwise. `None` when nothing type-related was sent.
 async fn column_type_input(
     cx: &Cx,
-    column: &SchemaColumn,
+    column: &DraftColumn,
     fields: &Fields,
 ) -> Result<std::result::Result<Option<ColumnTypeInput>, Notice>> {
     let touched = ["kind", "unit", "accept", "max_bytes", "arity"]
@@ -404,7 +472,7 @@ pub(super) mod element {
             let elements = procedure
                 .revision_draft
                 .as_ref()
-                .map(|d| d.schema.elements.as_slice())
+                .map(|d| d.elements.as_slice())
                 .unwrap_or_default();
             let moved_label = elements
                 .iter()
@@ -426,7 +494,7 @@ pub(super) mod element {
                         return back_to_editor(cx, None, Some(notice)).await;
                     };
                     let parent = parent_of(element);
-                    let siblings: Vec<&SchemaElement> =
+                    let siblings: Vec<&DraftElement> =
                         elements.iter().filter(|e| parent_of(e) == parent).collect();
                     let index = siblings
                         .iter()
@@ -505,12 +573,10 @@ pub(super) mod element {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
-            let removed = procedure.revision_draft.as_ref().and_then(|d| {
-                d.schema
-                    .elements
-                    .iter()
-                    .find(|e| id_of(e) == element_id.as_str())
-            });
+            let removed = procedure
+                .revision_draft
+                .as_ref()
+                .and_then(|d| d.elements.iter().find(|e| id_of(e) == element_id.as_str()));
             let parent = removed.and_then(parent_of);
             let removed_label = removed.map(|e| label_of(e).to_owned()).unwrap_or_default();
             let result: std::result::Result<_, Error> = platform_client::run(

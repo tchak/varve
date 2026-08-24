@@ -5,7 +5,9 @@
 //! updating label, type with unit, enum options (kept and minted
 //! ids, a blank row removed), arity and cardinality, the refused
 //! edits as alerts (blank label, a `many` group inside a `many`
-//! group), removing, discarding behind its confirmation, and French.
+//! group), removing, discarding behind its confirmation, sections
+//! and notes with inherited audiences (the reviewer badge, the
+//! refused widening), and French.
 //! Every response passes the static accessibility baseline through
 //! `body_text`.
 
@@ -662,6 +664,169 @@ async fn the_editing_journey() {
 }
 
 #[tokio::test]
+async fn sections_notes_and_audience_journey() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "schema-sections").await;
+    let organization = create_organization(&router, &cookie, "Mairie").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Aide").await;
+
+    // The add form offers all four kinds.
+    let html = page(&router, &cookie, &editor).await;
+    assert!(html.contains("value=\"section\""), "{html}");
+    assert!(html.contains("value=\"note\""), "{html}");
+
+    // Add a section: selected, badged as a section, its detail form
+    // with title, help and audience, and the add form now targets it.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "section"), ("label", " Identité ")],
+    )
+    .await;
+    let section = selected_of(&to.to);
+    let html = landed(&router, &cookie, &to).await;
+    assert!(
+        html.contains("Added the section \u{201c}Identité\u{201d}."),
+        "{html}"
+    );
+    assert!(html.contains("Section: Identité"), "{html}");
+    assert!(html.contains("data-element-kind=\"section\""), "{html}");
+    assert!(html.contains("id=\"element-title\""), "{html}");
+    assert!(html.contains("id=\"element-help\""), "{html}");
+    assert!(html.contains("id=\"element-audience\""), "{html}");
+    assert!(html.contains("Add inside this section"), "{html}");
+
+    // A column inside the section, then a note (its text is the add
+    // form's one field).
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Nom"), ("parent", &section)],
+    )
+    .await;
+    let nom = selected_of(&to.to);
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[
+            ("what", "note"),
+            ("label", "Vérifier la pièce."),
+            ("parent", &section),
+        ],
+    )
+    .await;
+    let note = selected_of(&to.to);
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Added the note."), "{html}");
+    assert!(html.contains("data-element-kind=\"note\""), "{html}");
+    assert_eq!(
+        element_ids(&html),
+        [section.clone(), nom.clone(), note.clone()]
+    );
+    assert!(html.contains("id=\"element-body\""), "{html}");
+    assert!(html.contains("Vérifier la pièce."), "{html}");
+
+    // A blank section title is refused with its own message.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "section"), ("label", "  ")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("A title is required."), "{html}");
+
+    // Narrow the section to reviewers: audience is inherited, so
+    // every row under it wears the badge.
+    let update = |id: &str| format!("{editor}/elements/{id}/update");
+    let to = act(
+        &router,
+        &cookie,
+        &update(&section),
+        &[("audience", "REVIEWER")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("value=\"REVIEWER\" selected"), "{html}");
+    assert_eq!(
+        html.match_indices("data-audience=\"reviewer\"").count(),
+        3,
+        "{html}"
+    );
+    assert!(html.contains("Reviewers only"), "{html}");
+
+    // Explicitly widening a child beyond its parent is the refused
+    // contradiction (P.4), shown as the editor's alert.
+    let to = act(&router, &cookie, &update(&nom), &[("audience", "ALL")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("role=\"alert\""), "{html}");
+    assert!(html.contains("The change was refused:"), "{html}");
+
+    // Section help is set and cleared; a retitle keeps the identity.
+    let to = act(
+        &router,
+        &cookie,
+        &update(&section),
+        &[("title", "État civil"), ("help", "Vos informations")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Section: État civil"), "{html}");
+    assert!(html.contains("value=\"Vos informations\""), "{html}");
+    assert_eq!(element_ids(&html)[0], section);
+    let to = act(&router, &cookie, &update(&section), &[("help", "")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(!html.contains("value=\"Vos informations\""), "{html}");
+
+    // A section is a "move to" destination; landing inside the
+    // reviewer-only section badges the element, moving out unbadges.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Ville")],
+    )
+    .await;
+    let ville = selected_of(&to.to);
+    let relocate = |id: &str| format!("{editor}/elements/{id}/relocate");
+    let to = act(&router, &cookie, &relocate(&ville), &[("parent", &section)]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        element_ids(&html),
+        [section.clone(), nom.clone(), note.clone(), ville.clone()]
+    );
+    assert_eq!(
+        html.match_indices("data-audience=\"reviewer\"").count(),
+        4,
+        "{html}"
+    );
+    let to = act(&router, &cookie, &relocate(&ville), &[("parent", "")]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(
+        html.match_indices("data-audience=\"reviewer\"").count(),
+        3,
+        "{html}"
+    );
+
+    // Removing the section takes its subtree.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{section}/remove"),
+        &[],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert_eq!(element_ids(&html), std::slice::from_ref(&ville));
+}
+
+#[tokio::test]
 async fn the_editor_speaks_french() {
     let Some((router, _db)) = test_app().await else {
         return;
@@ -688,4 +853,21 @@ async fn the_editor_speaks_french() {
     assert!(html.contains("Abandonner le brouillon"), "{html}");
     // CLDR plural rules, not `(s)`: French "one" covers 0 and 1.
     assert!(html.contains("1 colonne, 0 groupe \u{2014}"), "{html}");
+
+    // The tree side in French too: a section with its audience.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "section"), ("label", "Identité")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(
+        html.contains("La section «\u{a0}Identité\u{a0}» a été ajoutée."),
+        "{html}"
+    );
+    assert!(html.contains("Section\u{a0}: Identité"), "{html}");
+    assert!(html.contains("Visibilité"), "{html}");
+    assert!(html.contains("Instructeurs uniquement"), "{html}");
 }

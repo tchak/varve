@@ -43,10 +43,11 @@ pub(super) mod elements;
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, AddGroup, AddGroupInput, AddGroupVariables,
-    AttachmentType, Cardinality, ColumnType, DiscardRevisionDraft, DiscardRevisionDraftInput,
-    DiscardRevisionDraftVariables, PlacementInput, ProcedureRevisionDraft,
-    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, SchemaColumn, SchemaElement,
-    SchemaGroup, Unit,
+    AddNote, AddNoteInput, AddNoteVariables, AddSection, AddSectionInput, AddSectionVariables,
+    AttachmentType, Audience, Cardinality, ColumnType, DiscardRevisionDraft,
+    DiscardRevisionDraftInput, DiscardRevisionDraftVariables, DraftColumn, DraftElement,
+    DraftGroup, DraftNote, DraftSection, PlacementInput, ProcedureRevisionDraft,
+    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
 };
 use platform_client::{Code, Error};
 use serde::{Deserialize, Serialize};
@@ -223,7 +224,15 @@ pub(super) mod add {
         if new_label.is_empty() {
             let notice = Notice {
                 kind: NoticeKind::Alert,
-                text: t(cx, "schema.error.label-required").await?,
+                text: t(
+                    cx,
+                    match input.what.as_str() {
+                        "section" => "schema.error.title-required",
+                        "note" => "schema.error.body-required",
+                        _ => "schema.error.label-required",
+                    },
+                )
+                .await?,
             };
             return back_to_editor(cx, parent, Some(notice)).await;
         }
@@ -232,8 +241,8 @@ pub(super) mod add {
             before_id: before.map(cynic::Id::new),
         });
         let procedure_id = cynic::Id::new(procedure.id.inner());
-        let result = if input.what == "group" {
-            platform_client::run(
+        let result = match input.what.as_str() {
+            "group" => platform_client::run(
                 &client,
                 AddGroup::build(AddGroupVariables {
                     input: AddGroupInput {
@@ -241,13 +250,41 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         cardinality: None,
+                        audience: None,
                     },
                 }),
             )
             .await
-            .map(|r| r.add_group)
-        } else {
-            platform_client::run(
+            .map(|r| r.add_group),
+            "section" => platform_client::run(
+                &client,
+                AddSection::build(AddSectionVariables {
+                    input: AddSectionInput {
+                        procedure_id,
+                        placement,
+                        title: new_label,
+                        help: None,
+                        audience: None,
+                    },
+                }),
+            )
+            .await
+            .map(|r| r.add_section),
+            "note" => platform_client::run(
+                &client,
+                AddNote::build(AddNoteVariables {
+                    input: AddNoteInput {
+                        procedure_id,
+                        placement,
+                        title: None,
+                        body: new_label,
+                        audience: None,
+                    },
+                }),
+            )
+            .await
+            .map(|r| r.add_note),
+            _ => platform_client::run(
                 &client,
                 AddColumn::build(AddColumnVariables {
                     input: AddColumnInput {
@@ -255,30 +292,36 @@ pub(super) mod add {
                         placement,
                         label: new_label,
                         ty: elements::kind_input(&input.kind),
+                        audience: None,
                     },
                 }),
             )
             .await
-            .map(|r| r.add_column)
+            .map(|r| r.add_column),
         };
         match result {
             Ok(procedure) => {
                 let elements = procedure
                     .revision_draft
                     .as_ref()
-                    .map(|d| d.schema.elements.as_slice())
+                    .map(|d| d.elements.as_slice())
                     .unwrap_or_default();
                 let created = new_element_id(elements, parent, before);
-                let notice = done_with(
-                    cx,
-                    if input.what == "group" {
-                        "schema.notice.group-added"
-                    } else {
-                        "schema.notice.column-added"
-                    },
-                    &label_for_notice,
-                )
-                .await?;
+                let notice = match input.what.as_str() {
+                    "note" => done(cx, "schema.notice.note-added").await?,
+                    what => {
+                        done_with(
+                            cx,
+                            match what {
+                                "group" => "schema.notice.group-added",
+                                "section" => "schema.notice.section-added",
+                                _ => "schema.notice.column-added",
+                            },
+                            &label_for_notice,
+                        )
+                        .await?
+                    }
+                };
                 back_to_editor(cx, created.as_deref(), Some(notice)).await
             }
             Err(error) => {
@@ -292,11 +335,11 @@ pub(super) mod add {
 /// The element an add created (G.7): the one in front of `before` in
 /// its parent, or the parent's last child.
 fn new_element_id(
-    elements: &[SchemaElement],
+    elements: &[DraftElement],
     parent: Option<&str>,
     before: Option<&str>,
 ) -> Option<String> {
-    let siblings: Vec<&SchemaElement> = elements
+    let siblings: Vec<&DraftElement> = elements
         .iter()
         .filter(|e| parent_of(e).as_deref() == parent)
         .collect();
@@ -446,11 +489,13 @@ async fn structure(cx: &Cx, procedure_id: String, selected: String, revision: f6
 enum Detail {
     Column(ColumnDetail),
     Group(GroupDetail),
+    Section(SectionDetail),
+    Note(NoteDetail),
     Nothing,
 }
 
 struct ColumnDetail {
-    column: SchemaColumn,
+    column: DraftColumn,
     kind: String,
     unit: Option<Unit>,
     /// `(id, label, accessible name of its remove button)`.
@@ -460,7 +505,15 @@ struct ColumnDetail {
 }
 
 struct GroupDetail {
-    group: SchemaGroup,
+    group: DraftGroup,
+}
+
+struct SectionDetail {
+    section: DraftSection,
+}
+
+struct NoteDetail {
+    note: DraftNote,
 }
 
 /// The page: header with the draft state, the notice, the structure
@@ -488,7 +541,7 @@ async fn editor_page(
     let elements = procedure
         .revision_draft
         .as_ref()
-        .map(|d| d.schema.elements.clone())
+        .map(|d| d.elements.clone())
         .unwrap_or_default();
     let (columns, groups) = counts(&elements);
     let state = match &procedure.revision_draft {
@@ -542,6 +595,12 @@ async fn editor_page(
     let cardinality_label = t(cx, "schema.cardinality").await?;
     let cardinality_one = t(cx, "schema.cardinality.one").await?;
     let cardinality_many = t(cx, "schema.cardinality.many").await?;
+    let audience_label = t(cx, "schema.audience").await?;
+    let audience_all = t(cx, "schema.audience.all").await?;
+    let audience_reviewer = t(cx, "schema.audience.reviewer").await?;
+    let title_label = t(cx, "form.title").await?;
+    let section_help_label = t(cx, "schema.section.help").await?;
+    let note_body_label = t(cx, "schema.note.body").await?;
     let options_label = t(cx, "schema.options").await?;
     let options_help = t(cx, "schema.options.help").await?;
     let option_label = t(cx, "schema.options.label").await?;
@@ -558,7 +617,7 @@ async fn editor_page(
         kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
     }
     let mut detail = match &selected_element {
-        Some(SchemaElement::Column(column)) => Detail::Column(ColumnDetail {
+        Some(DraftElement::Column(column)) => Detail::Column(ColumnDetail {
             column: column.clone(),
             kind: kind_of(&column.ty).to_owned(),
             unit: unit_of(&column.ty),
@@ -581,9 +640,13 @@ async fn editor_page(
                 _ => None,
             },
         }),
-        Some(SchemaElement::Group(group)) => Detail::Group(GroupDetail {
+        Some(DraftElement::Group(group)) => Detail::Group(GroupDetail {
             group: group.clone(),
         }),
+        Some(DraftElement::Section(section)) => Detail::Section(SectionDetail {
+            section: section.clone(),
+        }),
+        Some(DraftElement::Note(note)) => Detail::Note(NoteDetail { note: note.clone() }),
         _ => Detail::Nothing,
     };
     if let Detail::Column(c) = &mut detail {
@@ -613,6 +676,15 @@ async fn editor_page(
             )
             .await?
         }
+        Detail::Section(s) => {
+            t_args(
+                cx,
+                "schema.detail.section",
+                &one_arg("label", s.section.title.clone()),
+            )
+            .await?
+        }
+        Detail::Note(_) => t(cx, "schema.detail.note").await?,
         Detail::Nothing => String::new(),
     };
     let initial_kind = match &detail {
@@ -746,6 +818,8 @@ async fn editor_page(
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }
@@ -869,6 +943,46 @@ async fn editor_page(
                                                     </option>
                                                 </select>
                                             </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-audience" },
+                                                    (audience_label.as_str())
+                                                )
+                                                <select
+                                                    id="element-audience"
+                                                    class=(SELECT)
+                                                    name="audience"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "audience".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                                    <option
+                                                        value="ALL"
+                                                        selected=(matches!(g.group.audience, Audience::All))
+                                                    >
+                                                        (audience_all.as_str())
+                                                    </option>
+                                                    <option
+                                                        value="REVIEWER"
+                                                        selected=(matches!(g.group.audience, Audience::Reviewer))
+                                                    >
+                                                        (audience_reviewer.as_str())
+                                                    </option>
+                                                </select>
+                                            </div>
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -896,6 +1010,7 @@ async fn editor_page(
                                     procedure_id: procedure_id,
                                     organization_id: organization_id,
                                     parent: Some(selected_string.clone()),
+                                    section_parent: false,
                                     heading_level_top: false
                                 )
                             </div>
@@ -1150,6 +1265,46 @@ async fn editor_page(
                                                     </option>
                                                 </select>
                                             </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-audience" },
+                                                    (audience_label.as_str())
+                                                )
+                                                <select
+                                                    id="element-audience"
+                                                    class=(SELECT)
+                                                    name="audience"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "audience".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                                    <option
+                                                        value="ALL"
+                                                        selected=(matches!(c.column.audience, Audience::All))
+                                                    >
+                                                        (audience_all.as_str())
+                                                    </option>
+                                                    <option
+                                                        value="REVIEWER"
+                                                        selected=(matches!(c.column.audience, Audience::Reviewer))
+                                                    >
+                                                        (audience_reviewer.as_str())
+                                                    </option>
+                                                </select>
+                                            </div>
                                             <p
                                                 role="status"
                                                 class="min-h-5 text-sm text-muted-foreground"
@@ -1303,10 +1458,298 @@ async fn editor_page(
                                 )
                             </div>
                         }
+                        Detail::Section(s) => {
+                            card(
+                                card_header(
+                                    <h2
+                                        id="schema-detail-heading"
+                                        class="leading-none font-semibold"
+                                    >
+                                        (detail_heading.as_str())
+                                    </h2>
+                                )
+                                <form
+                                    method="post"
+                                    action=(update_href())
+                                    class="contents"
+                                    data-element-form=(selected_string.as_str())
+                                >
+                                    card_content(
+                                        <div class="flex flex-col gap-4">
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-title" },
+                                                    (title_label.as_str())
+                                                )
+                                                <input
+                                                    id="element-title"
+                                                    class=(INPUT)
+                                                    type="text"
+                                                    name="title"
+                                                    value=(s.section.title.as_str())
+                                                    required=""
+                                                    autocomplete="off"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "title".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                            </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-help" },
+                                                    (section_help_label.as_str())
+                                                )
+                                                <input
+                                                    id="element-help"
+                                                    class=(INPUT)
+                                                    type="text"
+                                                    name="help"
+                                                    value=(s.section.help.as_deref().unwrap_or(""))
+                                                    autocomplete="off"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "help".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                            </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-audience" },
+                                                    (audience_label.as_str())
+                                                )
+                                                <select
+                                                    id="element-audience"
+                                                    class=(SELECT)
+                                                    name="audience"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "audience".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                                    <option
+                                                        value="ALL"
+                                                        selected=(matches!(s.section.audience, Audience::All))
+                                                    >
+                                                        (audience_all.as_str())
+                                                    </option>
+                                                    <option
+                                                        value="REVIEWER"
+                                                        selected=(matches!(s.section.audience, Audience::Reviewer))
+                                                    >
+                                                        (audience_reviewer.as_str())
+                                                    </option>
+                                                </select>
+                                            </div>
+                                            <p
+                                                role="status"
+                                                class="min-h-5 text-sm text-muted-foreground"
+                                                data-save-status=""
+                                            >
+                                                $(status.get())
+                                            </p>
+                                        </div>
+                                    )
+                                    <noscript>
+                                        card_footer(
+                                            button(
+                                                attrs: attributes! { type="submit" },
+                                                (save.as_str())
+                                            )
+                                        )
+                                    </noscript>
+                                </form>
+                            )
+                            <div class="mt-6">
+                                add_form(
+                                    procedure_id: procedure_id,
+                                    organization_id: organization_id,
+                                    parent: Some(selected_string.clone()),
+                                    section_parent: true,
+                                    heading_level_top: false
+                                )
+                            </div>
+                        }
+                        Detail::Note(n) => {
+                            card(
+                                card_header(
+                                    <h2
+                                        id="schema-detail-heading"
+                                        class="leading-none font-semibold"
+                                    >
+                                        (detail_heading.as_str())
+                                    </h2>
+                                )
+                                <form
+                                    method="post"
+                                    action=(update_href())
+                                    class="contents"
+                                    data-element-form=(selected_string.as_str())
+                                >
+                                    card_content(
+                                        <div class="flex flex-col gap-4">
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-title" },
+                                                    (title_label.as_str())
+                                                )
+                                                <input
+                                                    id="element-title"
+                                                    class=(INPUT)
+                                                    type="text"
+                                                    name="title"
+                                                    value=(n.note.title.as_deref().unwrap_or(""))
+                                                    autocomplete="off"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "title".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                            </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-body" },
+                                                    (note_body_label.as_str())
+                                                )
+                                                <textarea
+                                                    id="element-body"
+                                                    class=(TEXTAREA)
+                                                    name="body"
+                                                    rows="4"
+                                                    required=""
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "body".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                                    (n.note.body.as_str())
+                                                </textarea>
+                                            </div>
+                                            <div class="flex flex-col gap-2">
+                                                label(
+                                                    attrs: attributes! { for="element-audience" },
+                                                    (audience_label.as_str())
+                                                )
+                                                <select
+                                                    id="element-audience"
+                                                    class=(SELECT)
+                                                    name="audience"
+                                                    @change=$(async |e: Event| {
+                                                        status.set(saving.get());
+                                                        let outcome = save_field(
+                                                                pid.get(),
+                                                                eid.get(),
+                                                                "audience".to_owned(),
+                                                                e.target.value,
+                                                            )
+                                                            .await;
+                                                        if outcome.is_ok() {
+                                                            status.set(outcome.unwrap());
+                                                            revision.increment();
+                                                        } else {
+                                                            status.set(outcome.unwrap_err());
+                                                        }
+                                                    })
+                                                >
+                                                    <option
+                                                        value="ALL"
+                                                        selected=(matches!(n.note.audience, Audience::All))
+                                                    >
+                                                        (audience_all.as_str())
+                                                    </option>
+                                                    <option
+                                                        value="REVIEWER"
+                                                        selected=(matches!(n.note.audience, Audience::Reviewer))
+                                                    >
+                                                        (audience_reviewer.as_str())
+                                                    </option>
+                                                </select>
+                                            </div>
+                                            <p
+                                                role="status"
+                                                class="min-h-5 text-sm text-muted-foreground"
+                                                data-save-status=""
+                                            >
+                                                $(status.get())
+                                            </p>
+                                        </div>
+                                    )
+                                    <noscript>
+                                        card_footer(
+                                            button(
+                                                attrs: attributes! { type="submit" },
+                                                (save.as_str())
+                                            )
+                                        )
+                                    </noscript>
+                                </form>
+                            )
+                        }
                         Detail::Nothing => add_form(
                             procedure_id: procedure_id,
                             organization_id: organization_id,
                             parent: None,
+                            section_parent: false,
                             heading_level_top: true
                         ),
                     }
@@ -1323,6 +1766,14 @@ async fn editor_page(
 /// `components::select::SELECT`.
 const INPUT: StaticClass = class!(
     "h-9 w-full min-w-0 rounded-lg border border-border bg-background px-3 \
+     text-sm shadow-xs transition-colors outline-none \
+     placeholder:text-muted-foreground \
+     focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
+     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+);
+
+const TEXTAREA: StaticClass = class!(
+    "min-h-20 w-full min-w-0 rounded-lg border border-border bg-background px-3 py-2 \
      text-sm shadow-xs transition-colors outline-none \
      placeholder:text-muted-foreground \
      focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
@@ -1346,7 +1797,7 @@ async fn structure_panel(
     let elements = procedure
         .revision_draft
         .as_ref()
-        .map(|d| d.schema.elements.clone())
+        .map(|d| d.elements.clone())
         .unwrap_or_default();
     let empty = t(cx, "schema.structure.empty").await?;
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
@@ -1381,6 +1832,7 @@ struct TreeLabels {
     remove: String,
     one: String,
     many: String,
+    reviewer: String,
 }
 
 impl TreeLabels {
@@ -1397,12 +1849,13 @@ impl TreeLabels {
             remove: t(cx, "schema.actions.remove").await?,
             one: t(cx, "schema.arity.one").await?,
             many: t(cx, "schema.arity.many").await?,
+            reviewer: t(cx, "schema.audience.reviewer").await?,
         })
     }
 }
 
 struct Tree {
-    elements: Vec<SchemaElement>,
+    elements: Vec<DraftElement>,
     selected: Option<String>,
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
@@ -1410,16 +1863,16 @@ struct Tree {
 }
 
 impl Tree {
-    fn children(&self, parent: Option<&str>) -> Vec<&SchemaElement> {
+    fn children(&self, parent: Option<&str>) -> Vec<&DraftElement> {
         self.elements
             .iter()
             .filter(|e| parent_of(e).as_deref() == parent)
             .collect()
     }
 
-    /// Groups an element may move into: every group but itself and
-    /// its descendants.
-    fn destinations(&self, id: &str) -> Vec<&SchemaGroup> {
+    /// Containers an element may move into — every group and section
+    /// but itself and its descendants — as `(id, display text)`.
+    fn destinations(&self, id: &str) -> Vec<(String, String)> {
         let mut excluded = vec![id.to_owned()];
         loop {
             let before = excluded.len();
@@ -1438,10 +1891,33 @@ impl Tree {
         self.elements
             .iter()
             .filter_map(|e| match e {
-                SchemaElement::Group(g) if !excluded.contains(&g.id.inner().to_owned()) => Some(g),
+                DraftElement::Group(g) if !excluded.contains(&g.id.inner().to_owned()) => {
+                    Some((g.id.inner().to_owned(), g.label.clone()))
+                }
+                DraftElement::Section(section)
+                    if !excluded.contains(&section.id.inner().to_owned()) =>
+                {
+                    Some((section.id.inner().to_owned(), section.title.clone()))
+                }
                 _ => None,
             })
             .collect()
+    }
+
+    /// Effectively reviewer-only (platform P.4): the element or any
+    /// ancestor carries the `Reviewer` audience.
+    fn reviewer_only(&self, id: &str) -> bool {
+        let mut current = Some(id.to_owned());
+        while let Some(current_id) = current {
+            let Some(element) = self.elements.iter().find(|e| id_of(e) == current_id) else {
+                return false;
+            };
+            if audience_of(element) == Audience::Reviewer {
+                return true;
+            }
+            current = parent_of(element);
+        }
+        false
     }
 }
 
@@ -1476,7 +1952,7 @@ async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result 
 async fn tree_row(
     cx: &Cx,
     tree: &Tree,
-    element: SchemaElement,
+    element: DraftElement,
     first: bool,
     last: bool,
     depth: usize,
@@ -1487,8 +1963,8 @@ async fn tree_row(
     let summary = element_summary(cx, &element).await?;
     // The multiplicity badge: only types that can hold many values
     // say "one" or "many"; the rest say nothing.
-    let (multiplicity, is_group) = match &element {
-        SchemaElement::Column(c) => (
+    let (multiplicity, is_container) = match &element {
+        DraftElement::Column(c) => (
             match multiple_of_type(&c.ty) {
                 Some(true) => tree.labels.many.clone(),
                 Some(false) => tree.labels.one.clone(),
@@ -1496,14 +1972,15 @@ async fn tree_row(
             },
             false,
         ),
-        SchemaElement::Group(g) => (
+        DraftElement::Group(g) => (
             match g.cardinality {
                 Cardinality::One => tree.labels.one.clone(),
                 Cardinality::Many => tree.labels.many.clone(),
             },
             true,
         ),
-        SchemaElement::Unknown => (String::new(), false),
+        DraftElement::Section(_) => (String::new(), true),
+        _ => (String::new(), false),
     };
     let actions_name = t_args(cx, "schema.actions.for", &one_arg("label", text.clone())).await?;
     let select_query = [("selected", id.clone())];
@@ -1528,6 +2005,7 @@ async fn tree_row(
         ElementId(id.clone())
     );
     let destinations = tree.destinations(&id);
+    let reviewer_only = tree.reviewer_only(&id);
     let at_root = parent_of(&element).is_none();
     let current_parent = parent_of(&element);
     // "Move to" offers the top level (unless already there) and every
@@ -1536,7 +2014,7 @@ async fn tree_row(
     let move_to_enabled = !at_root
         || destinations
             .iter()
-            .any(|g| current_parent.as_deref() != Some(g.id.inner()));
+            .any(|(destination_id, _)| current_parent.as_deref() != Some(destination_id.as_str()));
     // "Move after": same-level siblings only, never itself.
     let siblings: Vec<(String, String)> = tree
         .children(current_parent.as_deref())
@@ -1547,7 +2025,8 @@ async fn tree_row(
     view! {
         <li
             data-element-id=(id.as_str())
-            data-element-kind=(if is_group { "group" } else { "column" })
+            data-element-kind=(element_kind(&element))
+            data-audience=(reviewer_only.then_some("reviewer"))
         >
             <div
                 class=(class!(
@@ -1565,6 +2044,12 @@ async fn tree_row(
                 badge(variant: BadgeVariant::Outline, (summary.as_str()))
                 if !multiplicity.is_empty() {
                     badge(variant: BadgeVariant::Secondary, (multiplicity.as_str()))
+                }
+                if reviewer_only {
+                    badge(
+                        variant: BadgeVariant::Outline,
+                        (tree.labels.reviewer.as_str())
+                    )
                 }
                 dropdown_menu(
                     dropdown_menu_trigger(
@@ -1654,18 +2139,18 @@ async fn tree_row(
                                             )
                                         </form>
                                     }
-                                    for group in &destinations {
+                                    for (destination_id, destination_label) in &destinations {
                                         if current_parent.as_deref()
-                                            != Some(group.id.inner()) {
+                                            != Some(destination_id.as_str()) {
                                             <form method="post" action=(relocate_href())>
                                                 <input
                                                     type="hidden"
                                                     name="parent"
-                                                    value=(group.id.inner())
+                                                    value=(destination_id.as_str())
                                                 >
                                                 dropdown_menu_item(
                                                     attrs: attributes! { type="submit" },
-                                                    (group.label.as_str())
+                                                    (destination_label.as_str())
                                                 )
                                             </form>
                                         }
@@ -1683,7 +2168,7 @@ async fn tree_row(
                     )
                 )
             </div>
-            if is_group {
+            if is_container {
                 tree_list(tree: tree, parent: Some(id.clone()), depth: depth + 1)
             }
         </li>
@@ -1691,17 +2176,19 @@ async fn tree_row(
 }
 
 /// A column's type in a word or two; a group's "group".
-async fn element_summary(cx: &Cx, element: &SchemaElement) -> Result<String> {
+async fn element_summary(cx: &Cx, element: &DraftElement) -> Result<String> {
     Ok(match element {
-        SchemaElement::Group(_) => t(cx, "schema.kind.group").await?,
-        SchemaElement::Column(c) => {
+        DraftElement::Group(_) => t(cx, "schema.kind.group").await?,
+        DraftElement::Column(c) => {
             let kind = t(cx, kind_message_id(&c.ty)).await?;
             match unit_of(&c.ty) {
                 Some(unit) => format!("{kind} ({})", unit_name(unit)),
                 None => kind,
             }
         }
-        SchemaElement::Unknown => String::new(),
+        DraftElement::Section(_) => t(cx, "schema.kind.section").await?,
+        DraftElement::Note(_) => t(cx, "schema.kind.note").await?,
+        _ => String::new(),
     })
 }
 
@@ -1712,16 +2199,20 @@ async fn add_form(
     procedure_id: uuid::Uuid,
     organization_id: uuid::Uuid,
     parent: Option<String>,
+    section_parent: bool,
     heading_level_top: bool,
 ) -> Result {
-    let heading = match &parent {
-        Some(_) => t(cx, "schema.add.inside").await?,
-        None => t(cx, "schema.add.title").await?,
+    let heading = match (&parent, section_parent) {
+        (Some(_), true) => t(cx, "schema.add.inside-section").await?,
+        (Some(_), false) => t(cx, "schema.add.inside").await?,
+        (None, _) => t(cx, "schema.add.title").await?,
     };
     let lead = t(cx, "schema.add.lead").await?;
     let what_label = t(cx, "schema.add.what").await?;
     let column_label = t(cx, "schema.kind.column").await?;
     let group_label = t(cx, "schema.kind.group").await?;
+    let section_label = t(cx, "schema.kind.section").await?;
+    let note_label = t(cx, "schema.kind.note").await?;
     let label_label = t(cx, "form.label").await?;
     let type_label = t(cx, "schema.type").await?;
     let submit = t(cx, "schema.add.submit").await?;
@@ -1777,6 +2268,8 @@ async fn add_form(
                             >
                                 <option value="column">(column_label)</option>
                                 <option value="group">(group_label)</option>
+                                <option value="section">(section_label)</option>
+                                <option value="note">(note_label)</option>
                             </select>
                         </div>
                         <div
@@ -1809,27 +2302,58 @@ async fn add_form(
 
 // ---------------------------------------------------------------- element helpers
 
-pub(super) fn id_of(element: &SchemaElement) -> &str {
+pub(super) fn id_of(element: &DraftElement) -> &str {
     match element {
-        SchemaElement::Column(c) => c.id.inner(),
-        SchemaElement::Group(g) => g.id.inner(),
-        SchemaElement::Unknown => "",
+        DraftElement::Column(c) => c.id.inner(),
+        DraftElement::Group(g) => g.id.inner(),
+        DraftElement::Section(s) => s.id.inner(),
+        DraftElement::Note(n) => n.id.inner(),
+        DraftElement::Unknown => "",
     }
 }
 
-pub(super) fn parent_of(element: &SchemaElement) -> Option<String> {
+pub(super) fn parent_of(element: &DraftElement) -> Option<String> {
     match element {
-        SchemaElement::Column(c) => c.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        SchemaElement::Group(g) => g.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        SchemaElement::Unknown => None,
+        DraftElement::Column(c) => c.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        DraftElement::Group(g) => g.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        DraftElement::Section(s) => s.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        DraftElement::Note(n) => n.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        DraftElement::Unknown => None,
     }
 }
 
-pub(super) fn label_of(element: &SchemaElement) -> &str {
+/// The row text: a column or group's label, a section's title, a
+/// note's title or its text.
+pub(super) fn label_of(element: &DraftElement) -> &str {
     match element {
-        SchemaElement::Column(c) => &c.label,
-        SchemaElement::Group(g) => &g.label,
-        SchemaElement::Unknown => "",
+        DraftElement::Column(c) => &c.label,
+        DraftElement::Group(g) => &g.label,
+        DraftElement::Section(s) => &s.title,
+        DraftElement::Note(n) => n.title.as_deref().unwrap_or(&n.body),
+        DraftElement::Unknown => "",
+    }
+}
+
+/// The row's `data-element-kind`.
+pub(super) fn element_kind(element: &DraftElement) -> &'static str {
+    match element {
+        DraftElement::Column(_) => "column",
+        DraftElement::Group(_) => "group",
+        DraftElement::Section(_) => "section",
+        DraftElement::Note(_) => "note",
+        DraftElement::Unknown => "",
+    }
+}
+
+/// The element's own audience marker (its *effective* audience is
+/// [`Tree::reviewer_only`]'s business — inheritance, platform P.4).
+pub(super) fn audience_of(element: &DraftElement) -> Audience {
+    match element {
+        DraftElement::Column(c) => c.audience,
+        DraftElement::Group(g) => g.audience,
+        DraftElement::Section(s) => s.audience,
+        DraftElement::Note(n) => n.audience,
+        DraftElement::Unknown => Audience::All,
     }
 }
 
