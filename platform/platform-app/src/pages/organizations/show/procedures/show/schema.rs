@@ -857,6 +857,13 @@ async fn editor_page(
                             NoticeKind::Status => NoticeTone::Success,
                             NoticeKind::Alert => NoticeTone::Error,
                         },
+                        // A confirmation fades once read (the `class`
+                        // below, animated in app.css); a refusal stays
+                        // until the next action. The comment sits outside
+                        // the `attributes!` block on purpose: `topcoat fmt`
+                        // 0.6.2 re-emits any comment written *inside* one
+                        // into the enclosing call's children, growing the
+                        // file by a copy on every run.
                         attrs: attributes! {
                             role=(match notice.kind {
                                 NoticeKind::Status => "status",
@@ -868,43 +875,8 @@ async fn editor_page(
                                 }
                                 NoticeKind::Alert => "",
                             })
-                            data-schema-notice="" // A confirmation fades once read (app.css);
-                            // a refusal stays until the next action.
+                            data-schema-notice=""
                         },
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
-                        // A confirmation fades once read (app.css);
-                        // a refusal stays until the next action.
                         (notice.text.as_str())
                     )
                 }

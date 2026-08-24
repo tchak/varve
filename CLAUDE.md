@@ -37,7 +37,11 @@ incl. property suites), `cargo clippy --workspace --all-targets`,
 `cargo fmt --all --check` (rustfmt defaults are the style authority),
 `topcoat fmt platform` (formats `view!` macro bodies, which rustfmt
 leaves alone — not yet enforced by CI, so run it and commit the result;
-the root `Topcoat.toml` is only an editor-integration marker),
+the root `Topcoat.toml` is only an editor-integration marker; **never
+write a comment inside an `attributes!` block passed to a component
+call** — `topcoat fmt` 0.6.2 re-emits it into the enclosing call's
+children, so the file grows by a copy on every run: put the comment
+above the `attrs:` argument or above the call),
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM
 crate in any Tier 0–4 closure, serde direct only in `-wire`/`-value`);
 CI also denies rustdoc warnings and replays the tracked fuzz seeds
