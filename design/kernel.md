@@ -2582,7 +2582,11 @@ make.
   invariants are only as strong as the sloppiest one. **Steps, not
   loops (settled 2026-08-19, §2.8):** every scheduled duty here is a
   callable step plus its policy types; the loop, tick, queue, and
-  attempt-history tables belong to the host (design/platform.md P.13).
+  attempt-history tables belong to the host (design/platform.md P.13). *Built (2026-08-24), publication first:* `publish_revision` —
+  fork-point check against the lineage head, schema and surface
+  validation, `varve-impact` classification (a first publication
+  classifies against the empty schema — one code path), the §3 gate,
+  append + surfaces. The append operation lands with case files.
 - `varve-files` — as planned (§2.15): blob trait + content-addressed
   manifest. *Refined in implementation:* one generic impl over
   `object_store` backends — local filesystem and in-memory for dev and

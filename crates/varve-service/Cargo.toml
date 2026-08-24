@@ -1,0 +1,22 @@
+[package]
+name = "varve-service"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# Tier 5 (§13.2): the choreography narrow waist — the transactional
+# sequences around the pure kernel, generic over the `varve-store`
+# traits (never an impl). The only API through which a host touches
+# kernel state; first operation: impact-gated publication (§3).
+[dependencies]
+varve-core = { path = "../varve-core" }
+varve-schema = { path = "../varve-schema" }
+varve-revision = { path = "../varve-revision" }
+varve-impact = { path = "../varve-impact" }
+varve-surface = { path = "../varve-surface" }
+varve-store = { path = "../varve-store" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

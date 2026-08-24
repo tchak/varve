@@ -648,8 +648,8 @@ top of the account-level token.
   comes first — the Topcoat app with sessions/auth (P.7) and i18n (Q8
   spike first, since UI strings land here) over `platform-core`'s
   account models — then the GraphQL schema executing in-process, and
-  only then the kernel edge: `varve-service` (DESIGN §13.2, not yet
-  built), the store-contract harness extracted from `varve-store`'s
+  only then the kernel edge: `varve-service` (DESIGN §13.2; built
+  2026-08-24, publication first), the store-contract harness extracted from `varve-store`'s
   tests, and `platform-store` over toasty (Q10 spike). Rationale: the
   young half of the stack (topcoat, toasty, the MF2 runtime) is the
   risk to retire first; the kernel side is already deterministic and
