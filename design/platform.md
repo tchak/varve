@@ -408,6 +408,18 @@ optional-by-default authoring, backed by the corpus (M0: required
 ratios run 65–88 % across the data-carrying types, so the common
 case should be the default one).
 
+**Format on text columns (settled 2026-08-24).** `TreeColumn`
+carries `format: Option<varve_surface::Format>` — the second
+surface property (graphql.md, *Format on text columns*), which
+gives `platform-core` its first `varve-surface` dependency.
+`tree_edit` keeps the kernel-edge backstops: text-only
+(`FormatNotOffered`), patterns verified on the linear-time engine
+at edit time (`InvalidPattern` — the no-ReDoS guarantee holds from
+the first keystroke, not from publication), and a type change away
+from text resets the format silently, the arity precedent. The
+editor offers email / phone / IBAN / custom pattern on text
+columns.
+
 **The schema editor (settled 2026-08-23).** `platform-app`'s
 `/organizations/{id}/procedures/{pid}/schema`, over the G.7 client
 operations — the app is integrator #1 (P.1). Shape: **master–detail

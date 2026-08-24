@@ -333,3 +333,21 @@ audience — public columns required, reviewer-only ones optional
 omitted on update it is left alone. Only columns carry it: a
 group's "required" (at least one item) is DESIGN Q22's count
 bounds, not this.
+
+**Format on text columns (settled 2026-08-24).** DESIGN §2.6's
+format constraints land as the second surface property, and the
+`@oneOf` idiom pays the dividend item 2 promised: the `TEXT`
+constructor stops being a bare marker and grows its facts —
+`{ text: {} }` on input (plain text),
+`{ text: { format: { email: true } } }`,
+`{ text: { format: { regex: { pattern: "…" } } } }` — while
+`TextType` carries `format: TextFormat` (`null` = unconstrained), a
+union `EmailFormat | PhoneFormat | IbanFormat | RegexFormat {
+pattern }`, each member with `kind: TextFormatKind`. Format is
+admissibility over text only (§2.6): the tree stores it beside the
+type, never in it; format on any other constructor is
+unrepresentable on input; a type change away from `TEXT` resets it
+(the arity precedent); and a custom pattern is verified at edit
+time on the kernel's linear-time engine
+(`varve_surface::Format::verify`) — a refused pattern is
+`INVALID_EDIT` now, not a stored mistake surfacing at publication.
