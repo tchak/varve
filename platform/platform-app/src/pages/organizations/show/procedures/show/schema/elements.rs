@@ -29,10 +29,10 @@ use topcoat::{
 use crate::{client, i18n::t};
 
 use super::super::procedure_draft;
-use super::{
-    Notice, NoticeKind, back_to_editor, done, done_with, id_of, kind_of, label_of, multiple_of,
-    parent_of, refused, text_format_of, unit_from_name, unit_of,
+use super::element::{
+    id_of, kind_of, label_of, multiple_of, parent_of, text_format_of, unit_from_name, unit_of,
 };
+use super::{Notice, NoticeKind, back_to_editor, done, done_with, refused};
 
 /// A submitted form as ordered pairs — repeated names (the enum
 /// option rows) keep their order, which a map would lose.

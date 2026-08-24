@@ -42,10 +42,8 @@ use crate::{
     pages::{args, one_arg, utc_date_arg},
 };
 
-use super::{
-    OrganizationId, ProcedureId, counts, effectively_reviewer, id_of, parent_of, procedure_draft,
-    unit_name, unit_of,
-};
+use super::element::{effectively_reviewer, id_of, parent_of, unit_name, unit_of};
+use super::{OrganizationId, ProcedureId, counts, procedure_draft};
 
 /// The preview page.
 #[page]
