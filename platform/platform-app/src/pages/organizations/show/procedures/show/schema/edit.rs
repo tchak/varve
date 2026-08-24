@@ -93,14 +93,15 @@ fn current_options(column: &Column) -> Vec<EnumOptionInput> {
 }
 
 /// Stores `options` as the enum column `element_id`'s backing (its
-/// label and arity untouched). `Err` is the notice to show.
+/// label and arity untouched). `Ok` is the draft as it now stands;
+/// `Err` is the notice to show.
 pub(in crate::pages) async fn set_options(
     cx: &Cx,
     client: &platform_graphql::InProcess,
     procedure: &ProcedureRevisionDraft,
     element_id: &str,
     options: Vec<EnumOptionInput>,
-) -> Result<std::result::Result<(), Notice>> {
+) -> Result<std::result::Result<ProcedureRevisionDraft, Notice>> {
     let (column, _) = match enum_column(cx, procedure, element_id).await? {
         Ok(found) => found,
         Err(notice) => return Ok(Err(notice)),
@@ -123,7 +124,7 @@ pub(in crate::pages) async fn set_options(
     )
     .await;
     match result {
-        Ok(_) => Ok(Ok(())),
+        Ok(updated) => Ok(Ok(updated.update_column)),
         Err(error) => Ok(Err(refused(cx, error).await?)),
     }
 }
@@ -154,8 +155,8 @@ pub(in crate::pages) async fn enum_column<'a>(
     }
 }
 
-/// One option's change from the autosave or the row's form: `Err` is
-/// the notice to show.
+/// One option's change from the autosave or the row's form: `Ok` is
+/// the draft as it now stands, `Err` the notice to show.
 pub(in crate::pages) async fn rename_option(
     cx: &Cx,
     client: &platform_graphql::InProcess,
@@ -163,7 +164,7 @@ pub(in crate::pages) async fn rename_option(
     element_id: &str,
     option_id: &str,
     label: &str,
-) -> Result<std::result::Result<(), Notice>> {
+) -> Result<std::result::Result<ProcedureRevisionDraft, Notice>> {
     let label = label.trim();
     if label.is_empty() {
         return Ok(Err(Notice {
@@ -201,7 +202,7 @@ pub(in crate::pages) async fn apply_update(
     procedure: &ProcedureRevisionDraft,
     element_id: &str,
     fields: &Fields,
-) -> Result<std::result::Result<(), Notice>> {
+) -> Result<std::result::Result<ProcedureRevisionDraft, Notice>> {
     let elements = procedure
         .revision_draft
         .as_ref()
@@ -250,7 +251,7 @@ pub(in crate::pages) async fn apply_update(
                 }),
             )
             .await
-            .map(|_| ())
+            .map(|updated| updated.update_group)
         }
         Element::Column(column) => {
             let ty = match column_type_input(cx, column, fields).await? {
@@ -271,7 +272,7 @@ pub(in crate::pages) async fn apply_update(
                 }),
             )
             .await
-            .map(|_| ())
+            .map(|updated| updated.update_column)
         }
         Element::Section(_) => {
             let title = match fields.get("title") {
@@ -300,7 +301,7 @@ pub(in crate::pages) async fn apply_update(
                 }),
             )
             .await
-            .map(|_| ())
+            .map(|updated| updated.update_section)
         }
         Element::Note(_) => {
             let body = match fields.get("body") {
@@ -328,12 +329,15 @@ pub(in crate::pages) async fn apply_update(
                 }),
             )
             .await
-            .map(|_| ())
+            .map(|updated| updated.update_note)
         }
-        Element::Unknown => Ok(()),
+        // Unreachable through the editor: `Element::Unknown` carries
+        // no id, so the lookup above cannot land on it. Nothing was
+        // sent, so nothing changed.
+        Element::Unknown => Ok(procedure.clone()),
     };
     match result {
-        Ok(()) => Ok(Ok(())),
+        Ok(updated) => Ok(Ok(updated)),
         Err(error) => Ok(Err(refused(cx, error).await?)),
     }
 }

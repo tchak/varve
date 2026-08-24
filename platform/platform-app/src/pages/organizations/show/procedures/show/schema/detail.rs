@@ -119,6 +119,8 @@ pub(in crate::pages) async fn panel(
     let Editing { at, element } = editing;
     let element_id = super::element::id_of(&element).to_owned();
     let saving_text = t(cx, "schema.status.saving").await?;
+    let saved_text_value = t(cx, "schema.status.saved").await?;
+    let initial_heading = heading_for(cx, &element).await?;
     let procedure_id_string = at.procedure_id.to_string();
     let (initial_kind, initial_format, initial_pattern) = match &element {
         Element::Column(column) => {
@@ -133,6 +135,7 @@ pub(in crate::pages) async fn panel(
     };
     view! {
         signal status = String::new();
+        signal heading = initial_heading.clone();
         signal option_status = String::new();
         signal kind = initial_kind.clone();
         signal format = initial_format.clone();
@@ -140,6 +143,7 @@ pub(in crate::pages) async fn panel(
         signal pid = procedure_id_string.clone();
         signal eid = element_id.clone();
         signal saving = saving_text.clone();
+        signal saved_text = saved_text_value.clone();
 
         match &element {
             Element::Column(column) => {
@@ -150,9 +154,11 @@ pub(in crate::pages) async fn panel(
                     save: Autosave {
                         pid,
                         eid,
-                        status,
                         saving,
                         revision,
+                        status,
+                        saved_text,
+                        heading,
                     },
                     facets: Facets {
                         kind,
@@ -173,9 +179,11 @@ pub(in crate::pages) async fn panel(
                     save: Autosave {
                         pid,
                         eid,
-                        status,
                         saving,
                         revision,
+                        status,
+                        saved_text,
+                        heading,
                     }
                 )
             }
@@ -190,9 +198,11 @@ pub(in crate::pages) async fn panel(
                     save: Autosave {
                         pid,
                         eid,
-                        status,
                         saving,
                         revision,
+                        status,
+                        saved_text,
+                        heading,
                     }
                 )
             }
@@ -204,9 +214,11 @@ pub(in crate::pages) async fn panel(
                     save: Autosave {
                         pid,
                         eid,
-                        status,
                         saving,
                         revision,
+                        status,
+                        saved_text,
+                        heading,
                     }
                 )
             }
@@ -217,26 +229,56 @@ pub(in crate::pages) async fn panel(
     }
 }
 
-/// The heading every kind's card carries; the `<section>` around the
-/// panel is labelled by it.
+/// The heading the selected element's card carries: which kind it is
+/// and what it is called (the `<section>` around the panel is
+/// labelled by it). Renaming the element changes it, so the autosave
+/// formats it again with [`heading_for`] and writes it back into the
+/// signal this reads.
 #[component]
-async fn detail_heading(text: String) -> Result {
+async fn detail_heading(heading: &Signal<String>) -> Result {
     view! {
         <h2 id="schema-detail-heading" class="leading-none font-semibold">
-            (text.as_str())
+            $(heading.get())
         </h2>
     }
+}
+
+/// An element's detail heading. Shared with [`super::autosave`],
+/// which formats it again after every save.
+pub(in crate::pages) async fn heading_for(cx: &Cx, element: &Element) -> Result<String> {
+    Ok(match element {
+        Element::Column(column) => {
+            t_args(
+                cx,
+                "schema.detail.column",
+                &one_arg("label", column.label.clone()),
+            )
+            .await?
+        }
+        Element::Group(group) => {
+            t_args(
+                cx,
+                "schema.detail.group",
+                &one_arg("label", group.label.clone()),
+            )
+            .await?
+        }
+        Element::Section(section) => {
+            t_args(
+                cx,
+                "schema.detail.section",
+                &one_arg("label", section.title.clone()),
+            )
+            .await?
+        }
+        Element::Note(_) => t(cx, "schema.detail.note").await?,
+        Element::Unknown => String::new(),
+    })
 }
 
 /// A group: its label, how many rows it holds, and its audience.
 #[component]
 async fn group_detail(cx: &Cx, at: At, group: Group, offers: Offers, save: Autosave<'_>) -> Result {
-    let heading = t_args(
-        cx,
-        "schema.detail.group",
-        &one_arg("label", group.label.clone()),
-    )
-    .await?;
     let action = update_action(at, group.id.inner());
     let cardinality = vec![
         Choice {
@@ -256,7 +298,7 @@ async fn group_detail(cx: &Cx, at: At, group: Group, offers: Offers, save: Autos
     let id = group.id.inner().to_owned();
     view! {
         card(
-            card_header(detail_heading(text: heading))
+            card_header(detail_heading(heading: save.heading))
             <form
                 method="post"
                 action=(action)
@@ -319,12 +361,6 @@ async fn section_detail(
     offers: Offers,
     save: Autosave<'_>,
 ) -> Result {
-    let heading = t_args(
-        cx,
-        "schema.detail.section",
-        &one_arg("label", section.title.clone()),
-    )
-    .await?;
     let action = update_action(at, section.id.inner());
     let title_label = t(cx, "form.title").await?;
     let help_label = t(cx, "schema.section.help").await?;
@@ -332,7 +368,7 @@ async fn section_detail(
     let id = section.id.inner().to_owned();
     view! {
         card(
-            card_header(detail_heading(text: heading))
+            card_header(detail_heading(heading: save.heading))
             <form
                 method="post"
                 action=(action)
@@ -396,7 +432,6 @@ async fn note_detail(
     offers_audience: bool,
     save: Autosave<'_>,
 ) -> Result {
-    let heading = t(cx, "schema.detail.note").await?;
     let action = update_action(at, note.id.inner());
     let title_label = t(cx, "form.title").await?;
     let body_label = t(cx, "schema.note.body").await?;
@@ -404,7 +439,7 @@ async fn note_detail(
     let id = note.id.inner().to_owned();
     view! {
         card(
-            card_header(detail_heading(text: heading))
+            card_header(detail_heading(heading: save.heading))
             <form
                 method="post"
                 action=(action)
@@ -459,12 +494,6 @@ async fn column_detail(
     save: Autosave<'_>,
     facets: Facets<'_>,
 ) -> Result {
-    let heading = t_args(
-        cx,
-        "schema.detail.column",
-        &one_arg("label", column.label.clone()),
-    )
-    .await?;
     let id = column.id.inner().to_owned();
     let action = update_action(at, &id);
     let label_label = t(cx, "form.label").await?;
@@ -511,7 +540,7 @@ async fn column_detail(
     let Facets { kind, .. } = facets;
     view! {
         card(
-            card_header(detail_heading(text: heading))
+            card_header(detail_heading(heading: save.heading))
             <form
                 method="post"
                 action=(action)
@@ -642,9 +671,11 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     let Facets { kind, .. } = facets;
     let kind_label = t(cx, "schema.type").await?;
@@ -670,7 +701,8 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
                         )
                         .await;
                     if outcome.is_ok() {
-                        status.set(outcome.unwrap());
+                        status.set(saved_text.get());
+                        heading.set(outcome.unwrap());
                         revision.increment();
                     } else {
                         status.set(outcome.unwrap_err());
@@ -697,9 +729,11 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     let Facets {
         kind,
@@ -745,7 +779,8 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
                             )
                             .await;
                         if outcome.is_ok() {
-                            status.set(outcome.unwrap());
+                            status.set(saved_text.get());
+                            heading.set(outcome.unwrap());
                             revision.increment();
                         } else {
                             status.set(outcome.unwrap_err());
@@ -787,13 +822,15 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
                             )
                             .await;
                         if outcome.is_ok() {
-                            status.set(outcome.unwrap());
+                            status.set(saved_text.get());
+                            heading.set(outcome.unwrap());
                             revision.increment();
                         } else {
                             status.set(outcome.unwrap_err());
                         }
                     })
                 >
+
                 <p id="element-pattern-help" class="text-sm text-muted-foreground">
                     (pattern_help.as_str())
                 </p>
@@ -819,6 +856,7 @@ async fn options_card(
         eid,
         saving,
         revision,
+        saved_text,
         ..
     } = save;
     let Facets { option_status, .. } = facets;
@@ -913,7 +951,7 @@ async fn options_card(
                                                     )
                                                     .await;
                                                 if outcome.is_ok() {
-                                                    option_status.set(outcome.unwrap());
+                                                    option_status.set(saved_text.get());
                                                     revision.increment();
                                                 } else {
                                                     option_status.set(outcome.unwrap_err());

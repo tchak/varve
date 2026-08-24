@@ -10,15 +10,26 @@
 //!
 //! The optional discard link is the editor's alone: the preview
 //! shows the draft, it does not act on it.
+//!
+//! The draft-state line is a `#[shard]` ([`state`]) rather than a
+//! string, because an autosave moves it — the draft was saved just
+//! now — and the message is MF2 (plural categories, a CLDR date), so
+//! only the server can format it. It watches the same `revision`
+//! counter the structure panel does; on the preview, where nothing
+//! saves, that counter never moves and the shard never re-fetches.
+//! Like every shard it is a public endpoint the page guard does not
+//! cover, so it authorizes itself.
 
 use topcoat::{
     Result,
     context::Cx,
-    router::href,
+    router::{error::RouterErrorExt, href},
+    runtime::{Signal, shard},
     view::{attributes, component, view},
 };
 
 use crate::{
+    client,
     components::{
         badge::{BadgeVariant, badge},
         button::{ButtonSize, ButtonVariant, button_variants},
@@ -33,6 +44,7 @@ use platform_client::revision_draft::ProcedureRevisionDraft;
 
 use super::super::super::super::OrganizationId;
 use super::super::{ProcedureId, counts};
+use super::autosave::draft_of;
 use super::{page, preview};
 
 /// Which tab is showing.
@@ -45,12 +57,17 @@ pub(in crate::pages) enum Tab {
 /// The header. `offer_discard` is the editor's discard link — absent
 /// on the preview, and absent on the editor while the confirmation
 /// is open (the confirmation replaces it).
-#[component]
+///
+/// Boxed: the editor page's `view!` is deep enough that an unboxed
+/// header frame overflows the stack in debug builds, the same reason
+/// `structure::tree_row` and `detail::panel` are boxed.
+#[component(boxed)]
 pub(in crate::pages) async fn header(
     cx: &Cx,
     procedure: ProcedureRevisionDraft,
     tab: Tab,
     offer_discard: bool,
+    revision: &Signal<f64>,
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
@@ -66,26 +83,7 @@ pub(in crate::pages) async fn header(
     let tab_editor = t(cx, "schema.tab.editor").await?;
     let tab_preview = t(cx, "schema.tab.preview").await?;
     let has_draft = procedure.revision_draft.is_some();
-    let elements = procedure
-        .revision_draft
-        .as_ref()
-        .map(|d| d.elements.as_slice())
-        .unwrap_or_default();
-    let (columns, groups) = counts(elements);
-    let state = if has_draft {
-        t_args(
-            cx,
-            "schema.state.draft",
-            &args([
-                ("columns", (columns as i64).into()),
-                ("groups", (groups as i64).into()),
-                ("date", utc_date_arg(procedure.updated_at)),
-            ]),
-        )
-        .await?
-    } else {
-        t(cx, "schema.state.none").await?
-    };
+    let procedure_id_string = procedure_id.to_string();
     let editor_href = href!(
         page,
         OrganizationId(organization_id),
@@ -108,6 +106,8 @@ pub(in crate::pages) async fn header(
     )
     .query(&[("discard", "confirm")]);
     view! {
+        signal pid = procedure_id_string.clone();
+
         <div class="flex flex-col gap-2">
             page_title((title))
             <p class="text-sm text-muted-foreground">
@@ -124,7 +124,7 @@ pub(in crate::pages) async fn header(
                 if has_draft {
                     badge(variant: BadgeVariant::Secondary, (draft_badge))
                 }
-                <span data-schema-state="">(state)</span>
+                state(procedure_id: $(pid.get()), revision: $(revision.get()))
                 if has_draft && offer_discard {
                     <a
                         href=(discard_href)
@@ -153,4 +153,38 @@ pub(in crate::pages) async fn header(
             )
         )
     }
+}
+
+/// The draft-state line as a shard: how much the draft holds and
+/// when it was last saved, or that there is no draft yet.
+/// Re-rendered when an autosave bumps `revision`, since the saved-on
+/// date it carries is *now* afterwards. Authorizes itself through
+/// the client; an unreadable procedure is the 404.
+#[shard]
+async fn state(cx: &Cx, procedure_id: String, revision: f64) -> Result {
+    let _ = revision;
+    let client = client(cx).await?;
+    let procedure = draft_of(cx, &client, &procedure_id)
+        .await?
+        .ok_or_not_found()?;
+    let line = state_line(cx, &procedure).await?;
+    view! { <span data-schema-state="">(line.as_str())</span> }
+}
+
+/// The draft-state line's text.
+async fn state_line(cx: &Cx, procedure: &ProcedureRevisionDraft) -> Result<String> {
+    let Some(draft) = procedure.revision_draft.as_ref() else {
+        return t(cx, "schema.state.none").await;
+    };
+    let (columns, groups) = counts(&draft.elements);
+    t_args(
+        cx,
+        "schema.state.draft",
+        &args([
+            ("columns", (columns as i64).into()),
+            ("groups", (groups as i64).into()),
+            ("date", utc_date_arg(procedure.updated_at)),
+        ]),
+    )
+    .await
 }

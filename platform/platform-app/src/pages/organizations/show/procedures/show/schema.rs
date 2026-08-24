@@ -468,7 +468,8 @@ async fn editor_page(
             header::header(
                 procedure: procedure.clone(),
                 tab: header::Tab::Editor,
-                offer_discard: !confirm_discard
+                offer_discard: !confirm_discard,
+                revision: revision
             )
             if confirm_discard {
                 alert(

@@ -764,10 +764,31 @@ async fn sections_notes_and_audience_journey() {
 
     // Explicitly widening a child beyond its parent is the refused
     // contradiction (P.4), shown as the editor's alert.
+    //
+    // This is the invariant the *editor* leans on: `nom` sits under a
+    // reviewer-only section, so its audience select is not rendered
+    // at all — and the refusal is what makes that a safe thing to do
+    // rather than a client-side check. The field arrives here the way
+    // a spoofed one would (a POST naming a control the form never
+    // drew), and the kernel is what says no. Pinned by the reason, so
+    // that a refusal arriving from anywhere else fails the test.
+    let nom_html = page(&router, &cookie, &format!("{editor}?selected={nom}")).await;
+    assert!(!nom_html.contains("id=\"element-audience\""), "{nom_html}");
     let to = act(&router, &cookie, &update(&nom), &[("audience", "ALL")]).await;
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("role=\"alert\""), "{html}");
     assert!(html.contains("The change was refused:"), "{html}");
+    assert!(
+        html.contains("cannot be wider than its parent's audience"),
+        "{html}"
+    );
+    // And nothing was half-applied: the column still reads
+    // reviewer-only, as do the section and the note beside it.
+    assert_eq!(
+        html.match_indices("data-audience=\"reviewer\"").count(),
+        3,
+        "{html}"
+    );
 
     // Section help is set and cleared; a retitle keeps the identity.
     let to = act(
@@ -872,6 +893,14 @@ async fn sections_notes_and_audience_journey() {
         !html.contains(&format!("id=\"add-{interne}-audience\"")),
         "{html}"
     );
+    // Adding into it: the add form draws no audience field here, and
+    // what a widened one posted anyway would do is the kernel's to
+    // decide — it *clamps* on add rather than refusing (P.4). The
+    // clamp is not observable from here (the element's own marker
+    // never reaches the page; every row under a reviewer-only
+    // container reads reviewer either way, by inheritance), so it is
+    // pinned where it can be seen:
+    // `platform_core::tree_edit::audience_clamps_on_add_and_refuses_widening`.
     let to = act(
         &router,
         &cookie,

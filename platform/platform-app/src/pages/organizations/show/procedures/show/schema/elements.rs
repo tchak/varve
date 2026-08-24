@@ -69,7 +69,7 @@ pub(super) mod element {
             let element_id = path_param::<ElementId>(cx).to_owned();
             let fields = Fields::from_pairs(pairs);
             let notice = match apply_update(cx, &client, &procedure, &element_id, &fields).await? {
-                Ok(()) => done(cx, "schema.notice.saved").await?,
+                Ok(_) => done(cx, "schema.notice.saved").await?,
                 Err(notice) => notice,
             };
             back_to_editor(cx, Some(&element_id), Some(notice)).await
@@ -271,7 +271,7 @@ pub(super) mod element {
                             options.push(EnumOptionInput { id: None, label });
                             match set_options(cx, &client, &procedure, &element_id, options).await?
                             {
-                                Ok(()) => {
+                                Ok(_) => {
                                     done_with(cx, "schema.notice.option-added", &added).await?
                                 }
                                 Err(notice) => notice,
@@ -303,7 +303,7 @@ pub(super) mod element {
                 )
                 .await?
                 {
-                    Ok(()) => done(cx, "schema.notice.saved").await?,
+                    Ok(_) => done(cx, "schema.notice.saved").await?,
                     Err(notice) => notice,
                 };
                 back_to_editor(cx, Some(&element_id), Some(notice)).await
@@ -338,7 +338,7 @@ pub(super) mod element {
                             })
                             .collect();
                         match set_options(cx, &client, &procedure, &element_id, kept).await? {
-                            Ok(()) => {
+                            Ok(_) => {
                                 done_with(cx, "schema.notice.option-removed", &removed).await?
                             }
                             Err(notice) => notice,

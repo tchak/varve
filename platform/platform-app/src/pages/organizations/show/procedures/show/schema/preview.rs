@@ -91,11 +91,17 @@ async fn preview_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
     let panel_heading = t(cx, "schema.tab.preview").await?;
     let empty = t(cx, "schema.preview.empty").await?;
     view! {
+        // Nothing here saves, so this never moves; the header reads
+        // the same counter on both tabs rather than branching, and
+        // its draft-state shard simply never re-fetches.
+        signal revision = 0.0;
+
         <div class="flex flex-col gap-6">
             header::header(
                 procedure: procedure.clone(),
                 tab: header::Tab::Preview,
-                offer_discard: false
+                offer_discard: false,
+                revision: revision
             )
             <h2 class="sr-only">(panel_heading)</h2>
             if is_empty {

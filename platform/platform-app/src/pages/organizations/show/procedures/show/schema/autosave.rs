@@ -43,7 +43,9 @@ use crate::{
 };
 
 use super::controls::{INPUT, SELECT, SWITCH_THUMB, SWITCH_TRACK, TEXTAREA};
+use super::detail;
 use super::edit::{self, Fields};
+use super::element::id_of;
 
 /// The procedure's draft by id, `None` when the id is not a uuid or
 /// the schema answers `null` — both are the editor's conflict.
@@ -67,6 +69,36 @@ pub(in crate::pages) async fn draft_of(
     .and_then(|query| query.procedure))
 }
 
+/// What an autosave answers with: on success the detail card's
+/// heading as it now reads (a rename changes it), on refusal the
+/// reason to show.
+///
+/// **One value, and it has to be this one.** A procedure's answer is
+/// hydrated by the browser runtime, which knows strings, numbers,
+/// bools, `Option`, `Result`, signals and procedures — and nothing
+/// else, so a tuple carrying several updates is not an option. The
+/// confirmation text does not need the round trip (it is the same
+/// string every time, and rides as a signal like "Saving…"), and the
+/// draft-state line follows `revision` through
+/// [`super::header::state`], a shard. That leaves the heading, which
+/// is neither constant nor elsewhere.
+///
+/// It costs nothing to compute: every update mutation already
+/// answers with the draft as it now stands.
+type Saved = std::result::Result<String, String>;
+
+/// The heading of `element_id` in the draft a mutation answered with.
+async fn saved(cx: &Cx, procedure: &ProcedureRevisionDraft, element_id: &str) -> Result<Saved> {
+    let element = procedure
+        .revision_draft
+        .as_ref()
+        .and_then(|draft| draft.elements.iter().find(|e| id_of(e) == element_id));
+    Ok(Ok(match element {
+        Some(element) => detail::heading_for(cx, element).await?,
+        None => String::new(),
+    }))
+}
+
 /// Autosave of one field of the selected element (the runtime path
 /// of [`elements::update`]): `Ok(Ok(text))` is the confirmation to
 /// show, `Ok(Err(text))` the reason the save was refused — outcome as
@@ -80,14 +112,14 @@ pub(in crate::pages) async fn save_field(
     element_id: String,
     field_name: String,
     value: String,
-) -> Result<std::result::Result<String, String>> {
+) -> Result<Saved> {
     let client = client(cx).await?;
     let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
         return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
     let fields = Fields::from_pairs(vec![(field_name, value)]);
     match edit::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
-        Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
+        Ok(updated) => saved(cx, &updated, &element_id).await,
         Err(notice) => Ok(Err(notice.text)),
     }
 }
@@ -107,7 +139,7 @@ pub(in crate::pages) async fn save_text_format(
     element_id: String,
     format: String,
     pattern: String,
-) -> Result<std::result::Result<String, String>> {
+) -> Result<Saved> {
     let client = client(cx).await?;
     let Some(procedure) = draft_of(cx, &client, &procedure_id).await? else {
         return Ok(Err(t(cx, "schema.error.conflict").await?));
@@ -117,7 +149,7 @@ pub(in crate::pages) async fn save_text_format(
         ("pattern".to_owned(), pattern),
     ]);
     match edit::apply_update(cx, &client, &procedure, &element_id, &fields).await? {
-        Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
+        Ok(updated) => saved(cx, &updated, &element_id).await,
         Err(notice) => Ok(Err(notice.text)),
     }
 }
@@ -132,7 +164,7 @@ pub(in crate::pages) async fn save_option(
     element_id: String,
     input_id: String,
     value: String,
-) -> Result<std::result::Result<String, String>> {
+) -> Result<Saved> {
     let client = client(cx).await?;
     let Some(option_id) = input_id.strip_prefix("option-") else {
         return Ok(Err(t(cx, "schema.error.conflict").await?));
@@ -141,29 +173,34 @@ pub(in crate::pages) async fn save_option(
         return Ok(Err(t(cx, "schema.error.conflict").await?));
     };
     match edit::rename_option(cx, &client, &procedure, &element_id, option_id, &value).await? {
-        Ok(()) => Ok(Ok(t(cx, "schema.status.saved").await?)),
+        Ok(updated) => saved(cx, &updated, &element_id).await,
         Err(notice) => Ok(Err(notice.text)),
     }
 }
 
 // ------------------------------------------------------------- the wiring
 
-/// The five signals every autosaving control needs, bundled so a
-/// field component takes one prop instead of five.
+/// Everything an autosaving control writes to, bundled so a field
+/// component takes one prop instead of seven.
 ///
 /// All references, so it is `Copy` and travels down a nesting of
 /// components unchanged. `pid` and `eid` identify what is being
-/// edited, `status` is the line the outcome is written to, `saving`
-/// holds the localized "Saving…" text (a message id cannot be
-/// formatted in the browser), and `revision` is the counter the
-/// structure shard watches.
+/// edited; `saving` and `saved_text` hold the localized "Saving…" and
+/// "Saved your changes." texts, because a message id cannot be
+/// formatted in the browser and neither string depends on the answer;
+/// `revision` is the counter the structure shard and the draft-state
+/// shard both watch. That leaves `status` (the line the outcome is
+/// written to) and `heading` (the detail card's title, which a rename
+/// changes and which the procedure therefore answers with).
 #[derive(Clone, Copy)]
 pub(in crate::pages) struct Autosave<'a> {
     pub(in crate::pages) pid: &'a Signal<String>,
     pub(in crate::pages) eid: &'a Signal<String>,
-    pub(in crate::pages) status: &'a Signal<String>,
     pub(in crate::pages) saving: &'a Signal<String>,
     pub(in crate::pages) revision: &'a Signal<f64>,
+    pub(in crate::pages) status: &'a Signal<String>,
+    pub(in crate::pages) saved_text: &'a Signal<String>,
+    pub(in crate::pages) heading: &'a Signal<String>,
 }
 
 /// The line every detail form reports its saves on.
@@ -225,9 +262,11 @@ pub(in crate::pages) async fn text_field(
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     let help_id = help.as_ref().map(|_| format!("{id}-help"));
     view! {
@@ -252,13 +291,15 @@ pub(in crate::pages) async fn text_field(
                         )
                         .await;
                     if outcome.is_ok() {
-                        status.set(outcome.unwrap());
+                        status.set(saved_text.get());
+                        heading.set(outcome.unwrap());
                         revision.increment();
                     } else {
                         status.set(outcome.unwrap_err());
                     }
                 })
             >
+
             if let Some(help) = &help {
                 <p id=(help_id.as_deref()) class="text-sm text-muted-foreground">
                     (help.as_str())
@@ -284,9 +325,11 @@ pub(in crate::pages) async fn textarea_field(
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     view! {
         <div class="flex flex-col gap-2">
@@ -307,7 +350,8 @@ pub(in crate::pages) async fn textarea_field(
                         )
                         .await;
                     if outcome.is_ok() {
-                        status.set(outcome.unwrap());
+                        status.set(saved_text.get());
+                        heading.set(outcome.unwrap());
                         revision.increment();
                     } else {
                         status.set(outcome.unwrap_err());
@@ -332,9 +376,11 @@ pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> 
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     view! {
         <div class="flex flex-col gap-2">
@@ -356,7 +402,8 @@ pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> 
                         )
                         .await;
                     if outcome.is_ok() {
-                        status.set(outcome.unwrap());
+                        status.set(saved_text.get());
+                        heading.set(outcome.unwrap());
                         revision.increment();
                     } else {
                         status.set(outcome.unwrap_err());
@@ -395,9 +442,11 @@ pub(in crate::pages) async fn select_field(
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     view! {
         <div class="flex flex-col gap-2">
@@ -416,7 +465,8 @@ pub(in crate::pages) async fn select_field(
                         )
                         .await;
                     if outcome.is_ok() {
-                        status.set(outcome.unwrap());
+                        status.set(saved_text.get());
+                        heading.set(outcome.unwrap());
                         revision.increment();
                     } else {
                         status.set(outcome.unwrap_err());
@@ -489,9 +539,11 @@ pub(in crate::pages) async fn switch_field(
     let Autosave {
         pid,
         eid,
-        status,
         saving,
         revision,
+        status,
+        saved_text,
+        heading,
     } = save;
     view! {
         <div
@@ -523,13 +575,15 @@ pub(in crate::pages) async fn switch_field(
                             )
                             .await;
                         if outcome.is_ok() {
-                            status.set(outcome.unwrap());
+                            status.set(saved_text.get());
+                            heading.set(outcome.unwrap());
                             revision.increment();
                         } else {
                             status.set(outcome.unwrap_err());
                         }
                     })
                 >
+
                 <span class=(SWITCH_THUMB)></span>
             </span>
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))

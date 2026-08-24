@@ -3,8 +3,9 @@
 //! menu reached and driven by keys alone, *Move down* reordering the
 //! structure) and **autosave** (the runtime path: a label changed and
 //! blurred is saved through the procedure, the status line reports
-//! it, and the structure panel — a shard — shows the new label with
-//! no navigation; changing the kind hides and shows the
+//! it, the structure panel — a shard — shows the new label with no
+//! navigation, and so do the detail card's own title and the
+//! draft-state line; changing the kind hides and shows the
 //! kind-dependent fields), and **custom pattern** (the one edit that
 //! two controls make together: the format select and the pattern
 //! input each save *both* values, because a column's format is
@@ -202,6 +203,9 @@ async fn autosave_scenario(
     // Change the label and blur: the procedure saves, the status line
     // says so, the structure's row (the shard) shows the new label —
     // and the URL has not changed.
+    expect(page.locator(locator!("#schema-detail-heading")))
+        .to_have_text("Column: Nom")
+        .await?;
     page.locator(locator!("#element-label"))
         .fill("Nom de famille", None)
         .await?;
@@ -211,6 +215,17 @@ async fn autosave_scenario(
         .await?;
     expect(page.locator(locator!("li[data-element-id] a[aria-current='true']")))
         .to_have_text("Nom de famille")
+        .await?;
+    // The card's own title names the element being edited, so a
+    // rename has to reach it too — it sits directly above the input
+    // that was just typed into.
+    expect(page.locator(locator!("#schema-detail-heading")))
+        .to_have_text("Column: Nom de famille")
+        .await?;
+    // And the draft-state line, a shard on the same counter, has
+    // re-rendered with what the draft now holds.
+    expect(page.locator(locator!("[data-schema-state]")))
+        .to_contain_text("1 column")
         .await?;
     expect_page(&page).to_have_url(url_before.as_str()).await?;
 
