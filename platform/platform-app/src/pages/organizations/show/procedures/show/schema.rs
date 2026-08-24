@@ -54,7 +54,7 @@ use serde::{Deserialize, Serialize};
 use topcoat::{
     Result,
     context::Cx,
-    icon::{icon, iconify::iconify_icon},
+    icon::{IconData, icon, iconify::iconify_icon},
     router::{
         content::Form,
         error::{RouterErrorExt, not_found},
@@ -812,6 +812,8 @@ async fn editor_page(
                             data-schema-notice="" // A confirmation fades once read (app.css);
                             // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
@@ -2006,6 +2008,10 @@ async fn tree_row(
     );
     let destinations = tree.destinations(&id);
     let reviewer_only = tree.reviewer_only(&id);
+    // A section reads as a heading bar, a note as an aside; groups
+    // and columns keep the plain data-carrying row.
+    let is_section = matches!(element, DraftElement::Section(_));
+    let is_note = matches!(element, DraftElement::Note(_));
     let at_root = parent_of(&element).is_none();
     let current_parent = parent_of(&element);
     // "Move to" offers the top level (unless already there) and every
@@ -2032,11 +2038,21 @@ async fn tree_row(
                 class=(class!(
                     "flex items-center gap-2 rounded-lg border px-3 py-2",
                     "border-ring ring-2 ring-ring/40" if is_selected else "border-border",
+                    "bg-muted/50" if is_section,
+                    "border-dashed" if is_note,
                 ))
             >
+                icon(
+                    data: element_icon(&element),
+                    attrs: attributes! { class="size-4 shrink-0 text-muted-foreground" }
+                )
                 <a
                     href=(select_href)
-                    class="min-w-0 flex-1 truncate text-sm font-medium underline-offset-4 hover:underline"
+                    class=(class!(
+                        "min-w-0 flex-1 truncate text-sm underline-offset-4 hover:underline",
+                        "font-semibold" if is_section else "font-medium",
+                        "italic text-muted-foreground" if is_note,
+                    ))
                     aria-current=(is_selected.then_some("true"))
                 >
                     (text.as_str())
@@ -2342,6 +2358,31 @@ pub(super) fn element_kind(element: &DraftElement) -> &'static str {
         DraftElement::Section(_) => "section",
         DraftElement::Note(_) => "note",
         DraftElement::Unknown => "",
+    }
+}
+
+/// The row's leading icon: a column's by its type, the other kinds
+/// by what they are. Purely decorative — the kind badge carries the
+/// words — so no `label`: the icon component hides unlabelled icons
+/// from assistive tech. Ids resolve against the staged feather set
+/// at compile time (`build.rs`); a mistyped id fails the build.
+fn element_icon(element: &DraftElement) -> IconData {
+    match element {
+        DraftElement::Column(c) => match kind_of(&c.ty) {
+            "BOOLEAN" => iconify_icon!("feather:check-square"),
+            "INTEGER" => iconify_icon!("feather:hash"),
+            "DECIMAL" => iconify_icon!("feather:percent"),
+            "DATE" => iconify_icon!("feather:calendar"),
+            "DATETIME" => iconify_icon!("feather:clock"),
+            "ENUM" => iconify_icon!("feather:list"),
+            "ATTACHMENT" => iconify_icon!("feather:paperclip"),
+            "GEOMETRY" => iconify_icon!("feather:map-pin"),
+            _ => iconify_icon!("feather:type"),
+        },
+        DraftElement::Group(_) => iconify_icon!("feather:folder"),
+        DraftElement::Section(_) => iconify_icon!("feather:bookmark"),
+        DraftElement::Note(_) => iconify_icon!("feather:info"),
+        DraftElement::Unknown => iconify_icon!("feather:circle"),
     }
 }
 
