@@ -153,6 +153,25 @@ enum Cardinality {
 }
 
 """
+A typed field (DESIGN §2.1).
+"""
+type Column {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	label: String!
+	type: ColumnType!
+	"""
+	§2.6 requiredness, its two constant cases (G.7 *Required on
+	columns*); conditional rules arrive with the rule editor.
+	"""
+	required: Boolean!
+	audience: Audience!
+}
+
+"""
 A column's type: one object per constructor, carrying only the
 facts that constructor has — including whether it holds **many
 values** (`multiple`, the kernel's arity, DESIGN §2.2), which only
@@ -263,78 +282,9 @@ input DiscardRevisionDraftInput {
 }
 
 """
-A typed field (DESIGN §2.1).
-"""
-type DraftColumn {
-	id: ID!
-	"""
-	The containing group or section; `null` at the root.
-	"""
-	parentId: ID
-	label: String!
-	type: ColumnType!
-	"""
-	§2.6 requiredness, its two constant cases (G.7 *Required on
-	columns*); conditional rules arrive with the rule editor.
-	"""
-	required: Boolean!
-	audience: Audience!
-}
-
-"""
 A column, a group, a section or a note.
 """
-union DraftElement = DraftColumn | DraftGroup | DraftSection | DraftNote
-
-"""
-An ordered container of elements (DESIGN §2.1).
-"""
-type DraftGroup {
-	id: ID!
-	"""
-	The containing group or section; `null` at the root.
-	"""
-	parentId: ID
-	label: String!
-	cardinality: Cardinality!
-	audience: Audience!
-}
-
-"""
-An explication: prose, no data. A `REVIEWER` note is authored
-guidance for instructors.
-"""
-type DraftNote {
-	id: ID!
-	"""
-	The containing group or section; `null` at the root.
-	"""
-	parentId: ID
-	"""
-	Heading; `null` when none.
-	"""
-	title: String
-	body: String!
-	audience: Audience!
-}
-
-"""
-A header section: presentation, may contain elements (DESIGN
-§2.6). Its id is a kernel `NodeId` (§2.6, surface node identity).
-"""
-type DraftSection {
-	id: ID!
-	"""
-	The containing group or section; `null` at the root.
-	"""
-	parentId: ID
-	title: String!
-	"""
-	Help text under the title; `null` when none.
-	"""
-	help: String
-	audience: Audience!
-}
+union Element = Column | Group | Section | Note
 
 type EmailFormat {
 	kind: TextFormatKind!
@@ -394,6 +344,20 @@ type GeometryType {
 """
 input GeometryTypeInput {
 	multiple: Boolean! = false
+}
+
+"""
+An ordered container of elements (DESIGN §2.1).
+"""
+type Group {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	label: String!
+	cardinality: Cardinality!
+	audience: Audience!
 }
 
 type IbanFormat {
@@ -500,6 +464,24 @@ type Mutation {
 	afterwards.
 	"""
 	discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!
+}
+
+"""
+An explication: prose, no data. A `REVIEWER` note is authored
+guidance for instructors.
+"""
+type Note {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	"""
+	Heading; `null` when none.
+	"""
+	title: String
+	body: String!
+	audience: Audience!
 }
 
 """
@@ -664,7 +646,25 @@ type RevisionDraft {
 	container precedes its children; siblings in their order),
 	each naming its parent.
 	"""
-	elements: [DraftElement!]!
+	elements: [Element!]!
+}
+
+"""
+A header section: presentation, may contain elements (DESIGN
+§2.6). Its id is a kernel `NodeId` (§2.6, surface node identity).
+"""
+type Section {
+	id: ID!
+	"""
+	The containing group or section; `null` at the root.
+	"""
+	parentId: ID
+	title: String!
+	"""
+	Help text under the title; `null` when none.
+	"""
+	help: String
+	audience: Audience!
 }
 
 """

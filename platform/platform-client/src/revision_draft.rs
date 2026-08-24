@@ -50,16 +50,16 @@ pub struct RevisionDraft {
     pub base: Option<cynic::Id>,
     /// The authored tree, document order; each element names its
     /// parent (a group or a section).
-    pub elements: Vec<DraftElement>,
+    pub elements: Vec<Element>,
 }
 
 #[derive(cynic::InlineFragments, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftElement")]
-pub enum DraftElement {
-    Column(DraftColumn),
-    Group(DraftGroup),
-    Section(DraftSection),
-    Note(DraftNote),
+#[cynic(graphql_type = "Element")]
+pub enum Element {
+    Column(Column),
+    Group(Group),
+    Section(Section),
+    Note(Note),
     #[cynic(fallback)]
     Unknown,
 }
@@ -74,8 +74,8 @@ pub enum Audience {
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftColumn")]
-pub struct DraftColumn {
+#[cynic(graphql_type = "Column")]
+pub struct Column {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub label: String,
@@ -86,8 +86,8 @@ pub struct DraftColumn {
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftGroup")]
-pub struct DraftGroup {
+#[cynic(graphql_type = "Group")]
+pub struct Group {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub label: String,
@@ -96,8 +96,8 @@ pub struct DraftGroup {
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftSection")]
-pub struct DraftSection {
+#[cynic(graphql_type = "Section")]
+pub struct Section {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub title: String,
@@ -106,8 +106,8 @@ pub struct DraftSection {
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
-#[cynic(graphql_type = "DraftNote")]
-pub struct DraftNote {
+#[cynic(graphql_type = "Note")]
+pub struct Note {
     pub id: cynic::Id,
     pub parent_id: Option<cynic::Id>,
     pub title: Option<String>,
@@ -761,9 +761,9 @@ mod tests {
         let document = serde_json::to_value(&read).unwrap();
         let query = document["query"].as_str().unwrap();
         assert!(query.contains("revisionDraft"), "{query}");
-        assert!(query.contains("... on DraftColumn"), "{query}");
-        assert!(query.contains("... on DraftSection"), "{query}");
-        assert!(query.contains("... on DraftNote"), "{query}");
+        assert!(query.contains("... on Column"), "{query}");
+        assert!(query.contains("... on Section"), "{query}");
+        assert!(query.contains("... on Note"), "{query}");
         assert!(query.contains("... on IntegerType"), "{query}");
         assert!(query.contains("audience"), "{query}");
 

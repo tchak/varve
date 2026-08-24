@@ -11,7 +11,7 @@
 use cynic::MutationBuilder;
 use platform_client::Error;
 use platform_client::revision_draft::{
-    AttachmentType, Audience, Cardinality, ColumnType, ColumnTypeInput, DraftColumn, DraftElement,
+    AttachmentType, Audience, Cardinality, Column, ColumnType, ColumnTypeInput, Element,
     EnumOptionInput, MoveElement, MoveElementInput, MoveElementVariables, PlacementInput,
     ProcedureRevisionDraft, RegexFormatInput, RemoveElement, RemoveElementInput,
     RemoveElementVariables, TextFormatInput, UpdateColumn, UpdateColumnInput,
@@ -80,7 +80,7 @@ pub(super) fn kind_input(kind: &str) -> ColumnTypeInput {
 }
 
 /// A column's inline options as inputs that keep their ids.
-fn current_options(column: &DraftColumn) -> Vec<EnumOptionInput> {
+fn current_options(column: &Column) -> Vec<EnumOptionInput> {
     match &column.ty {
         ColumnType::Enum(e) => e
             .options
@@ -136,13 +136,13 @@ pub(super) async fn enum_column<'a>(
     cx: &Cx,
     procedure: &'a ProcedureRevisionDraft,
     element_id: &str,
-) -> Result<std::result::Result<(&'a DraftColumn, Vec<EnumOptionInput>), Notice>> {
+) -> Result<std::result::Result<(&'a Column, Vec<EnumOptionInput>), Notice>> {
     let column = procedure
         .revision_draft
         .as_ref()
         .and_then(|d| {
             d.elements.iter().find_map(|e| match e {
-                DraftElement::Column(c) if c.id.inner() == element_id => Some(c),
+                Element::Column(c) if c.id.inner() == element_id => Some(c),
                 _ => None,
             })
         })
@@ -233,7 +233,7 @@ pub(super) async fn apply_update(
         _ => Audience::All,
     });
     let result = match element {
-        DraftElement::Group(_) => {
+        Element::Group(_) => {
             let cardinality = match fields.get("cardinality") {
                 Some("MANY") => Some(Cardinality::Many),
                 Some(_) => Some(Cardinality::One),
@@ -254,7 +254,7 @@ pub(super) async fn apply_update(
             .await
             .map(|_| ())
         }
-        DraftElement::Column(column) => {
+        Element::Column(column) => {
             let ty = match column_type_input(cx, column, fields).await? {
                 Ok(ty) => ty,
                 Err(notice) => return Ok(Err(notice)),
@@ -275,7 +275,7 @@ pub(super) async fn apply_update(
             .await
             .map(|_| ())
         }
-        DraftElement::Section(_) => {
+        Element::Section(_) => {
             let title = match fields.get("title") {
                 Some(title) if title.trim().is_empty() => {
                     return Ok(Err(Notice {
@@ -304,7 +304,7 @@ pub(super) async fn apply_update(
             .await
             .map(|_| ())
         }
-        DraftElement::Note(_) => {
+        Element::Note(_) => {
             let body = match fields.get("body") {
                 Some(body) if body.trim().is_empty() => {
                     return Ok(Err(Notice {
@@ -332,7 +332,7 @@ pub(super) async fn apply_update(
             .await
             .map(|_| ())
         }
-        DraftElement::Unknown => Ok(()),
+        Element::Unknown => Ok(()),
     };
     match result {
         Ok(()) => Ok(Ok(())),
@@ -345,7 +345,7 @@ pub(super) async fn apply_update(
 /// otherwise. `None` when nothing type-related was sent.
 async fn column_type_input(
     cx: &Cx,
-    column: &DraftColumn,
+    column: &Column,
     fields: &Fields,
 ) -> Result<std::result::Result<Option<ColumnTypeInput>, Notice>> {
     let touched = [
@@ -557,7 +557,7 @@ pub(super) mod element {
                         return back_to_editor(cx, None, Some(notice)).await;
                     };
                     let parent = parent_of(element);
-                    let siblings: Vec<&DraftElement> =
+                    let siblings: Vec<&Element> =
                         elements.iter().filter(|e| parent_of(e) == parent).collect();
                     let index = siblings
                         .iter()

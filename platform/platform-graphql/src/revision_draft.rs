@@ -29,7 +29,7 @@ pub struct RevisionDraft {
     /// Every element of the authored tree, **document order** (a
     /// container precedes its children; siblings in their order),
     /// each naming its parent.
-    pub elements: Vec<DraftElement>,
+    pub elements: Vec<Element>,
 }
 
 impl RevisionDraft {
@@ -43,11 +43,11 @@ impl RevisionDraft {
     }
 }
 
-fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[TreeElement]) {
+fn push_elements(out: &mut Vec<Element>, parent: Option<&ID>, elements: &[TreeElement]) {
     for element in elements {
         let parent_id = parent.cloned();
         match element {
-            TreeElement::Column(c) => out.push(DraftElement::Column(DraftColumn {
+            TreeElement::Column(c) => out.push(Element::Column(Column {
                 id: ID::from(c.id.as_str()),
                 parent_id,
                 label: c.label.clone(),
@@ -57,7 +57,7 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
             })),
             TreeElement::Group(g) => {
                 let id = ID::from(g.id.as_str());
-                out.push(DraftElement::Group(DraftGroup {
+                out.push(Element::Group(Group {
                     id: id.clone(),
                     parent_id,
                     label: g.label.clone(),
@@ -68,7 +68,7 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
             }
             TreeElement::Section(s) => {
                 let id = ID::from(s.id.as_str());
-                out.push(DraftElement::Section(DraftSection {
+                out.push(Element::Section(Section {
                     id: id.clone(),
                     parent_id,
                     title: s.title.clone(),
@@ -77,7 +77,7 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
                 }));
                 push_elements(out, Some(&id), &s.children);
             }
-            TreeElement::Note(n) => out.push(DraftElement::Note(DraftNote {
+            TreeElement::Note(n) => out.push(Element::Note(Note {
                 id: ID::from(n.id.as_str()),
                 parent_id,
                 title: n.title.clone(),
@@ -90,11 +90,11 @@ fn push_elements(out: &mut Vec<DraftElement>, parent: Option<&ID>, elements: &[T
 
 /// A column, a group, a section or a note.
 #[derive(Union)]
-pub enum DraftElement {
-    Column(DraftColumn),
-    Group(DraftGroup),
-    Section(DraftSection),
-    Note(DraftNote),
+pub enum Element {
+    Column(Column),
+    Group(Group),
+    Section(Section),
+    Note(Note),
 }
 
 /// Who sees an element (platform P.4): `REVIEWER` is DN's private.
@@ -112,7 +112,7 @@ pub enum Audience {
 
 /// A typed field (DESIGN §2.1).
 #[derive(SimpleObject)]
-pub struct DraftColumn {
+pub struct Column {
     pub id: ID,
     /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,
@@ -127,7 +127,7 @@ pub struct DraftColumn {
 
 /// An ordered container of elements (DESIGN §2.1).
 #[derive(SimpleObject)]
-pub struct DraftGroup {
+pub struct Group {
     pub id: ID,
     /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,
@@ -139,7 +139,7 @@ pub struct DraftGroup {
 /// A header section: presentation, may contain elements (DESIGN
 /// §2.6). Its id is a kernel `NodeId` (§2.6, surface node identity).
 #[derive(SimpleObject)]
-pub struct DraftSection {
+pub struct Section {
     pub id: ID,
     /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,
@@ -152,7 +152,7 @@ pub struct DraftSection {
 /// An explication: prose, no data. A `REVIEWER` note is authored
 /// guidance for instructors.
 #[derive(SimpleObject)]
-pub struct DraftNote {
+pub struct Note {
     pub id: ID,
     /// The containing group or section; `null` at the root.
     pub parent_id: Option<ID>,

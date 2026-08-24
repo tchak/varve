@@ -6,7 +6,7 @@
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
 use platform_client::revision_draft::{
-    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, DraftElement,
+    AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, Element,
     ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
 };
 use platform_client::viewer::ViewerQuery;
@@ -505,15 +505,15 @@ fn the_client_mirrors_every_error_code() {
 /// The draft selection every draft mutation and the read share.
 const DRAFT: &str = "revisionDraft { base elements {
     __typename
-    ... on DraftColumn { id parentId label required audience type { __typename
+    ... on Column { id parentId label required audience type { __typename
         ... on TextType { format { __typename ... on RegexFormat { pattern } } }
         ... on IntegerType { unit } ... on DecimalType { unit }
         ... on EnumType { multiple options { id label } }
         ... on AttachmentType { multiple accept maxBytes }
         ... on GeometryType { multiple } } }
-    ... on DraftGroup { id parentId label cardinality audience }
-    ... on DraftSection { id parentId title help audience }
-    ... on DraftNote { id parentId title body audience }
+    ... on Group { id parentId label cardinality audience }
+    ... on Section { id parentId title help audience }
+    ... on Note { id parentId title body audience }
 } }";
 
 fn draft_mutation(field: &str, input_type: &str) -> String {
@@ -853,7 +853,7 @@ async fn sections_notes_and_audiences_journey() {
         )
         .await;
     let section = &p["revisionDraft"]["elements"][0];
-    assert_eq!(section["__typename"], "DraftSection");
+    assert_eq!(section["__typename"], "Section");
     assert_eq!(section["title"], "Identité");
     assert!(section["help"].is_null());
     assert_eq!(section["audience"], "ALL");
@@ -871,7 +871,7 @@ async fn sections_notes_and_audiences_journey() {
         )
         .await;
     let note = &p["revisionDraft"]["elements"][1];
-    assert_eq!(note["__typename"], "DraftNote");
+    assert_eq!(note["__typename"], "Note");
     assert_eq!(note["parentId"], json!(sid));
     assert!(note["title"].is_null());
     assert_eq!(note["audience"], "REVIEWER");
@@ -1141,7 +1141,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
     .add_column;
     let draft = added.revision_draft.expect("draft started");
     assert!(draft.base.is_none());
-    let DraftElement::Column(column) = draft.elements[0].clone() else {
+    let Element::Column(column) = draft.elements[0].clone() else {
         panic!("{:?}", draft.elements);
     };
     assert_eq!(column.label, "Surface");
@@ -1187,8 +1187,8 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
     let sdl = schema().sdl();
     for needle in [
         "revisionDraft: RevisionDraft",
-        "elements: [DraftElement!]!",
-        "union DraftElement = DraftColumn | DraftGroup | DraftSection | DraftNote",
+        "elements: [Element!]!",
+        "union Element = Column | Group | Section | Note",
         "union ColumnType = TextType | BooleanType | IntegerType | DecimalType | DateType | DatetimeType | EnumType | AttachmentType | GeometryType",
         "enum Audience",
         "audience: Audience!",
@@ -1213,7 +1213,7 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
     }
     // G.2 / G.5 Q1: the tree is flat — containers name their parent
     // and carry no children.
-    for container in ["DraftGroup", "DraftSection"] {
+    for container in ["Group", "Section"] {
         let start = sdl.find(&format!("type {container} {{")).expect(container);
         let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
         assert!(body.contains("parentId: ID"), "{body}");

@@ -44,10 +44,10 @@ use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, AddGroup, AddGroupInput, AddGroupVariables,
     AddNote, AddNoteInput, AddNoteVariables, AddSection, AddSectionInput, AddSectionVariables,
-    AttachmentType, Audience, Cardinality, ColumnType, DiscardRevisionDraft,
-    DiscardRevisionDraftInput, DiscardRevisionDraftVariables, DraftColumn, DraftElement,
-    DraftGroup, DraftNote, DraftSection, PlacementInput, ProcedureRevisionDraft,
-    ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, TextFormat, Unit,
+    AttachmentType, Audience, Cardinality, Column, ColumnType, DiscardRevisionDraft,
+    DiscardRevisionDraftInput, DiscardRevisionDraftVariables, Element, Group, Note, PlacementInput,
+    ProcedureRevisionDraft, ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Section,
+    TextFormat, Unit,
 };
 use platform_client::{Code, Error};
 use serde::{Deserialize, Serialize};
@@ -341,11 +341,11 @@ pub(super) mod add {
 /// The element an add created (G.7): the one in front of `before` in
 /// its parent, or the parent's last child.
 fn new_element_id(
-    elements: &[DraftElement],
+    elements: &[Element],
     parent: Option<&str>,
     before: Option<&str>,
 ) -> Option<String> {
-    let siblings: Vec<&DraftElement> = elements
+    let siblings: Vec<&Element> = elements
         .iter()
         .filter(|e| parent_of(e).as_deref() == parent)
         .collect();
@@ -501,7 +501,7 @@ enum Detail {
 }
 
 struct ColumnDetail {
-    column: DraftColumn,
+    column: Column,
     kind: String,
     /// The format select's value: "", EMAIL, PHONE, IBAN or REGEX.
     format: String,
@@ -515,15 +515,15 @@ struct ColumnDetail {
 }
 
 struct GroupDetail {
-    group: DraftGroup,
+    group: Group,
 }
 
 struct SectionDetail {
-    section: DraftSection,
+    section: Section,
 }
 
 struct NoteDetail {
-    note: DraftNote,
+    note: Note,
 }
 
 /// The page: header with the draft state, the notice, the structure
@@ -647,7 +647,7 @@ async fn editor_page(
         kind_names.push((*kind, t(cx, kind_message_id_of(kind)).await?));
     }
     let mut detail = match &selected_element {
-        Some(DraftElement::Column(column)) => Detail::Column(ColumnDetail {
+        Some(Element::Column(column)) => Detail::Column(ColumnDetail {
             column: column.clone(),
             kind: kind_of(&column.ty).to_owned(),
             format: text_format_of(&column.ty).0.to_owned(),
@@ -672,13 +672,13 @@ async fn editor_page(
                 _ => None,
             },
         }),
-        Some(DraftElement::Group(group)) => Detail::Group(GroupDetail {
+        Some(Element::Group(group)) => Detail::Group(GroupDetail {
             group: group.clone(),
         }),
-        Some(DraftElement::Section(section)) => Detail::Section(SectionDetail {
+        Some(Element::Section(section)) => Detail::Section(SectionDetail {
             section: section.clone(),
         }),
-        Some(DraftElement::Note(note)) => Detail::Note(NoteDetail { note: note.clone() }),
+        Some(Element::Note(note)) => Detail::Note(NoteDetail { note: note.clone() }),
         _ => Detail::Nothing,
     };
     if let Detail::Column(c) = &mut detail {
@@ -849,6 +849,8 @@ async fn editor_page(
                             data-schema-notice="" // A confirmation fades once read (app.css);
                             // a refusal stays until the next action.
                         },
+                        // A confirmation fades once read (app.css);
+                        // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
                         // a refusal stays until the next action.
                         // A confirmation fades once read (app.css);
@@ -2076,7 +2078,7 @@ impl TreeLabels {
 }
 
 struct Tree {
-    elements: Vec<DraftElement>,
+    elements: Vec<Element>,
     selected: Option<String>,
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
@@ -2084,7 +2086,7 @@ struct Tree {
 }
 
 impl Tree {
-    fn children(&self, parent: Option<&str>) -> Vec<&DraftElement> {
+    fn children(&self, parent: Option<&str>) -> Vec<&Element> {
         self.elements
             .iter()
             .filter(|e| parent_of(e).as_deref() == parent)
@@ -2112,12 +2114,10 @@ impl Tree {
         self.elements
             .iter()
             .filter_map(|e| match e {
-                DraftElement::Group(g) if !excluded.contains(&g.id.inner().to_owned()) => {
+                Element::Group(g) if !excluded.contains(&g.id.inner().to_owned()) => {
                     Some((g.id.inner().to_owned(), g.label.clone()))
                 }
-                DraftElement::Section(section)
-                    if !excluded.contains(&section.id.inner().to_owned()) =>
-                {
+                Element::Section(section) if !excluded.contains(&section.id.inner().to_owned()) => {
                     Some((section.id.inner().to_owned(), section.title.clone()))
                 }
                 _ => None,
@@ -2167,7 +2167,7 @@ async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result 
 async fn tree_row(
     cx: &Cx,
     tree: &Tree,
-    element: DraftElement,
+    element: Element,
     first: bool,
     last: bool,
     depth: usize,
@@ -2179,7 +2179,7 @@ async fn tree_row(
     // The multiplicity badge: only types that can hold many values
     // say "one" or "many"; the rest say nothing.
     let (multiplicity, is_container) = match &element {
-        DraftElement::Column(c) => (
+        Element::Column(c) => (
             match multiple_of_type(&c.ty) {
                 Some(true) => tree.labels.many.clone(),
                 Some(false) => tree.labels.one.clone(),
@@ -2187,14 +2187,14 @@ async fn tree_row(
             },
             false,
         ),
-        DraftElement::Group(g) => (
+        Element::Group(g) => (
             match g.cardinality {
                 Cardinality::One => tree.labels.one.clone(),
                 Cardinality::Many => tree.labels.many.clone(),
             },
             true,
         ),
-        DraftElement::Section(_) => (String::new(), true),
+        Element::Section(_) => (String::new(), true),
         _ => (String::new(), false),
     };
     let actions_name = t_args(cx, "schema.actions.for", &one_arg("label", text.clone())).await?;
@@ -2208,8 +2208,8 @@ async fn tree_row(
     let reviewer_only = tree.reviewer_only(&id);
     // A section reads as a heading bar, a note as an aside; groups
     // and columns keep the plain data-carrying row.
-    let is_section = matches!(element, DraftElement::Section(_));
-    let is_note = matches!(element, DraftElement::Note(_));
+    let is_section = matches!(element, Element::Section(_));
+    let is_note = matches!(element, Element::Note(_));
     let current_parent = parent_of(&element);
     view! {
         <li
@@ -2450,18 +2450,18 @@ async fn row_actions(tree: &Tree, facts: RowFacts) -> Result {
 }
 
 /// A column's type in a word or two; a group's "group".
-async fn element_summary(cx: &Cx, element: &DraftElement) -> Result<String> {
+async fn element_summary(cx: &Cx, element: &Element) -> Result<String> {
     Ok(match element {
-        DraftElement::Group(_) => t(cx, "schema.kind.group").await?,
-        DraftElement::Column(c) => {
+        Element::Group(_) => t(cx, "schema.kind.group").await?,
+        Element::Column(c) => {
             let kind = t(cx, kind_message_id(&c.ty)).await?;
             match unit_of(&c.ty) {
                 Some(unit) => format!("{kind} ({})", unit_name(unit)),
                 None => kind,
             }
         }
-        DraftElement::Section(_) => t(cx, "schema.kind.section").await?,
-        DraftElement::Note(_) => t(cx, "schema.kind.note").await?,
+        Element::Section(_) => t(cx, "schema.kind.section").await?,
+        Element::Note(_) => t(cx, "schema.kind.note").await?,
         _ => String::new(),
     })
 }
@@ -2600,35 +2600,35 @@ async fn add_form(
 
 // ---------------------------------------------------------------- element helpers
 
-pub(super) fn id_of(element: &DraftElement) -> &str {
+pub(super) fn id_of(element: &Element) -> &str {
     match element {
-        DraftElement::Column(c) => c.id.inner(),
-        DraftElement::Group(g) => g.id.inner(),
-        DraftElement::Section(s) => s.id.inner(),
-        DraftElement::Note(n) => n.id.inner(),
-        DraftElement::Unknown => "",
+        Element::Column(c) => c.id.inner(),
+        Element::Group(g) => g.id.inner(),
+        Element::Section(s) => s.id.inner(),
+        Element::Note(n) => n.id.inner(),
+        Element::Unknown => "",
     }
 }
 
-pub(super) fn parent_of(element: &DraftElement) -> Option<String> {
+pub(super) fn parent_of(element: &Element) -> Option<String> {
     match element {
-        DraftElement::Column(c) => c.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        DraftElement::Group(g) => g.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        DraftElement::Section(s) => s.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        DraftElement::Note(n) => n.parent_id.as_ref().map(|p| p.inner().to_owned()),
-        DraftElement::Unknown => None,
+        Element::Column(c) => c.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        Element::Group(g) => g.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        Element::Section(s) => s.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        Element::Note(n) => n.parent_id.as_ref().map(|p| p.inner().to_owned()),
+        Element::Unknown => None,
     }
 }
 
 /// The row text: a column or group's label, a section's title, a
 /// note's title or its text.
-pub(super) fn label_of(element: &DraftElement) -> &str {
+pub(super) fn label_of(element: &Element) -> &str {
     match element {
-        DraftElement::Column(c) => &c.label,
-        DraftElement::Group(g) => &g.label,
-        DraftElement::Section(s) => &s.title,
-        DraftElement::Note(n) => n.title.as_deref().unwrap_or(&n.body),
-        DraftElement::Unknown => "",
+        Element::Column(c) => &c.label,
+        Element::Group(g) => &g.label,
+        Element::Section(s) => &s.title,
+        Element::Note(n) => n.title.as_deref().unwrap_or(&n.body),
+        Element::Unknown => "",
     }
 }
 
@@ -2648,13 +2648,13 @@ pub(super) fn text_format_of(ty: &ColumnType) -> (&'static str, &str) {
 }
 
 /// The row's `data-element-kind`.
-pub(super) fn element_kind(element: &DraftElement) -> &'static str {
+pub(super) fn element_kind(element: &Element) -> &'static str {
     match element {
-        DraftElement::Column(_) => "column",
-        DraftElement::Group(_) => "group",
-        DraftElement::Section(_) => "section",
-        DraftElement::Note(_) => "note",
-        DraftElement::Unknown => "",
+        Element::Column(_) => "column",
+        Element::Group(_) => "group",
+        Element::Section(_) => "section",
+        Element::Note(_) => "note",
+        Element::Unknown => "",
     }
 }
 
@@ -2663,9 +2663,9 @@ pub(super) fn element_kind(element: &DraftElement) -> &'static str {
 /// words — so no `label`: the icon component hides unlabelled icons
 /// from assistive tech. Ids resolve against the staged feather set
 /// at compile time (`build.rs`); a mistyped id fails the build.
-fn element_icon(element: &DraftElement) -> IconData {
+fn element_icon(element: &Element) -> IconData {
     match element {
-        DraftElement::Column(c) => match kind_of(&c.ty) {
+        Element::Column(c) => match kind_of(&c.ty) {
             "BOOLEAN" => iconify_icon!("feather:check-square"),
             "INTEGER" => iconify_icon!("feather:hash"),
             "DECIMAL" => iconify_icon!("feather:percent"),
@@ -2676,10 +2676,10 @@ fn element_icon(element: &DraftElement) -> IconData {
             "GEOMETRY" => iconify_icon!("feather:map-pin"),
             _ => iconify_icon!("feather:type"),
         },
-        DraftElement::Group(_) => iconify_icon!("feather:folder"),
-        DraftElement::Section(_) => iconify_icon!("feather:bookmark"),
-        DraftElement::Note(_) => iconify_icon!("feather:info"),
-        DraftElement::Unknown => iconify_icon!("feather:circle"),
+        Element::Group(_) => iconify_icon!("feather:folder"),
+        Element::Section(_) => iconify_icon!("feather:bookmark"),
+        Element::Note(_) => iconify_icon!("feather:info"),
+        Element::Unknown => iconify_icon!("feather:circle"),
     }
 }
 
@@ -2687,7 +2687,7 @@ fn element_icon(element: &DraftElement) -> IconData {
 /// [`Tree::reviewer_only`]'s business — inheritance, platform P.4).
 /// The element's *effective* audience is reviewer-only: its own
 /// marker, or any ancestor's (platform P.4 — inheritance).
-pub(super) fn effectively_reviewer(elements: &[DraftElement], id: &str) -> bool {
+pub(super) fn effectively_reviewer(elements: &[Element], id: &str) -> bool {
     let mut current = Some(id.to_owned());
     while let Some(current_id) = current {
         let Some(element) = elements.iter().find(|e| id_of(e) == current_id) else {
@@ -2701,13 +2701,13 @@ pub(super) fn effectively_reviewer(elements: &[DraftElement], id: &str) -> bool 
     false
 }
 
-pub(super) fn audience_of(element: &DraftElement) -> Audience {
+pub(super) fn audience_of(element: &Element) -> Audience {
     match element {
-        DraftElement::Column(c) => c.audience,
-        DraftElement::Group(g) => g.audience,
-        DraftElement::Section(s) => s.audience,
-        DraftElement::Note(n) => n.audience,
-        DraftElement::Unknown => Audience::All,
+        Element::Column(c) => c.audience,
+        Element::Group(g) => g.audience,
+        Element::Section(s) => s.audience,
+        Element::Note(n) => n.audience,
+        Element::Unknown => Audience::All,
     }
 }
 

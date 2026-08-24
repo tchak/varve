@@ -8,8 +8,7 @@ pub(super) mod schema;
 
 use cynic::QueryBuilder;
 use platform_client::revision_draft::{
-    DraftElement, ProcedureRevisionDraft, ProcedureRevisionDraftQuery,
-    ProcedureRevisionDraftVariables,
+    Element, ProcedureRevisionDraft, ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables,
 };
 use topcoat::{
     Result,
@@ -52,10 +51,10 @@ pub(super) async fn procedure_draft(cx: &Cx) -> Result<ProcedureRevisionDraft> {
 
 /// How many columns and groups a flat element list holds (sections
 /// and notes are presentation, uncounted here).
-pub(super) fn counts(elements: &[DraftElement]) -> (usize, usize) {
+pub(super) fn counts(elements: &[Element]) -> (usize, usize) {
     elements.iter().fold((0, 0), |(c, g), e| match e {
-        DraftElement::Column(_) => (c + 1, g),
-        DraftElement::Group(_) => (c, g + 1),
+        Element::Column(_) => (c + 1, g),
+        Element::Group(_) => (c, g + 1),
         _ => (c, g),
     })
 }
