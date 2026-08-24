@@ -351,3 +351,68 @@ unrepresentable on input; a type change away from `TEXT` resets it
 time on the kernel's linear-time engine
 (`varve_surface::Format::verify`) — a refused pattern is
 `INVALID_EDIT` now, not a stored mistake surfacing at publication.
+
+**The element union is not draft-scoped (settled 2026-08-24).**
+`DraftElement = DraftColumn | DraftGroup | DraftSection | DraftNote`
+renames to **`Element = Column | Group | Section | Note`**;
+`RevisionDraft.elements: [Element!]!`. The `Draft` prefix had followed
+the container's name without an argument of its own — the operations
+were already bare (`moveElement`, `removeElement`, item 3) — and the
+shape is not draft-specific: the authored tree exists at every point
+of a revision's life (publication derives schema and surfaces from
+it, the audience marker survives on the published version, and the
+next draft forks from its base's tree — platform P.4), so published
+and historical revisions expose the same union (G.8). If a draft-only
+fact ever appears, it belongs on `RevisionDraft` itself, never on
+forked element types. Naming checks, recorded: bare `Group` is safe
+precisely because teams were named `Team` to keep "group"
+kernel-reserved (P.4 vocabulary — the union member is the rightful
+holder of the name); and GraphQL `Element` is the *tree* element —
+four kinds — not the kernel's `varve_schema::Element` (columns and
+groups only), a distinction the API never has to draw because no
+schema-element type is exposed.
+
+## G.8 One tree, viewer-scoped (settled 2026-08-24)
+
+How revisions expose their structure, settled ahead of the published
+read side by design argument on G.2 and platform P.4 (the authored
+tree and the compiled pair), so the G.7 union could be named for
+reuse rather than renamed at reuse.
+
+1. **The compiled surface pair is never an API object.** The API
+   exposes one thing: a viewer-scoped element tree per revision —
+   `Revision.elements: [Element!]!`, the G.7 union, flattened with
+   `parentId` like the draft's. Which compiled surface backs it is
+   resolved from the viewer at the root (G.2 rule 1, literally): an
+   applicant reading `CaseFile.revision.elements` gets the tree
+   backed by the applicant surface; a reviewer, the full tree; an
+   administrator browsing a procedure's revisions likewise. Nobody
+   queries "the applicant surface" as a noun — surfaces stay the
+   kernel's enforcement machinery (DESIGN §2.9), below the API's
+   waterline. Genuinely independent authored artifacts (export
+   layouts, print templates — P.4) would be their own objects; the
+   applicant/reviewer pair never is.
+2. **The audience invariant.** A viewer's tree never contains an
+   element whose effective audience excludes that viewer — pruning
+   guarantees it by construction: an element surviving on the
+   applicant view has no `REVIEWER` marker anywhere on its ancestor
+   path, so its authored and effective audience are both `ALL`.
+   `audience` on the applicant view is therefore uniformly `ALL` —
+   degenerate but honest, and it stays non-null: the field is
+   informative exactly for viewers who see elements narrower than
+   another audience's view (the reviewer badge, P.4), and it
+   degrades gracefully when the enum grows (DN's experts, the third
+   audience P.4 already anticipates — they would receive the
+   `ALL`-only tree today and their own slice later, same invariant,
+   no shape change).
+3. **`Revision.elements` is static per (revision, viewer).**
+   State-dependent facts — writability after checkpoints,
+   instruction freezing the applicant's writable set (DESIGN §2.9) —
+   never land on elements: one revision is read through many case
+   files in different states, so writability is a case-file-level
+   read beside the cells, not an element fact.
+4. **Coherence with entry visibility comes free.** The applicant's
+   redacted log (DESIGN §2.9) filters by the applicant surface's
+   static column set — exactly the column set of the pruned tree the
+   same viewer receives from `elements`. The two reads cannot
+   disagree, by construction rather than by discipline.
