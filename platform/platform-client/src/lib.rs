@@ -103,20 +103,24 @@ pub enum Code {
     /// A revision-draft edit refused by the draft or the kernel; the
     /// message says why and the draft is unchanged.
     InvalidEdit,
-    /// The draft changed since it was read: re-read and retry.
+    /// The target changed since it was read: re-read and retry.
     Conflict,
+    /// A lifecycle transition refused from the procedure's current
+    /// state; nothing changed.
+    InvalidTransition,
     /// The platform failed, not the request.
     Internal,
 }
 
 impl Code {
     /// Every code, for the server-side set-equality test.
-    pub const ALL: [Code; 6] = [
+    pub const ALL: [Code; 7] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
         Code::InvalidEdit,
         Code::Conflict,
+        Code::InvalidTransition,
         Code::Internal,
     ];
 
@@ -128,6 +132,7 @@ impl Code {
             Code::SlugTaken => "SLUG_TAKEN",
             Code::InvalidEdit => "INVALID_EDIT",
             Code::Conflict => "CONFLICT",
+            Code::InvalidTransition => "INVALID_TRANSITION",
             Code::Internal => "INTERNAL",
         }
     }

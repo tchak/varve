@@ -3,8 +3,8 @@
 
 use async_graphql::{Context, ID, InputObject, MaybeUndefined, Object};
 use platform_core::{
-    ColumnPatch, CreateOrganizationError, EditError, GroupPatch, NotePatch, RevisionDraftError,
-    SectionPatch, Tree,
+    ColumnPatch, CreateOrganizationError, EditError, GroupPatch, LifecycleError, NotePatch,
+    RevisionDraftError, SectionPatch, Tree,
 };
 
 use crate::error::{Code, coded, forbidden, internal, invalid_input};
@@ -49,6 +49,20 @@ pub struct CreateProcedureInput {
     /// Free-text description.
     #[graphql(default)]
     pub description: String,
+}
+
+/// `closeProcedure` input.
+#[derive(InputObject)]
+pub struct CloseProcedureInput {
+    /// The procedure; the viewer must administer it.
+    pub procedure_id: ID,
+}
+
+/// `reopenProcedure` input.
+#[derive(InputObject)]
+pub struct ReopenProcedureInput {
+    /// The procedure; the viewer must administer it.
+    pub procedure_id: ID,
 }
 
 /// `addColumn` input.
@@ -295,6 +309,18 @@ fn draft_error(error: RevisionDraftError) -> async_graphql::Error {
     }
 }
 
+fn lifecycle_error(error: LifecycleError) -> async_graphql::Error {
+    match error {
+        LifecycleError::Transition(e) => coded(Code::InvalidTransition, e.to_string()),
+        LifecycleError::Db(e) if e.is_condition_failed() => coded(
+            Code::Conflict,
+            "the procedure changed since it was read; re-read and retry",
+        ),
+        LifecycleError::Db(e) => internal(e),
+        LifecycleError::Corrupt(e) => internal(e),
+    }
+}
+
 #[Object]
 impl Mutation {
     /// Creates an organization; the viewer becomes its first member.
@@ -363,6 +389,46 @@ impl Mutation {
         )
         .await
         .map_err(internal)?;
+        Ok(Procedure {
+            procedure,
+            organization: OrganizationRef::from(&organization),
+        })
+    }
+
+    /// Closes a published procedure to new submissions (platform
+    /// P.4 *Procedure lifecycle*); `INVALID_TRANSITION` from any
+    /// other state.
+    async fn close_procedure(
+        &self,
+        ctx: &Context<'_>,
+        input: CloseProcedureInput,
+    ) -> async_graphql::Result<Procedure> {
+        let (principal, mut db) = session(ctx)?;
+        let (mut procedure, organization) =
+            administered_procedure(&mut db, principal.account_id, &input.procedure_id).await?;
+        platform_core::close_procedure(&mut db, &mut procedure, principal.account_id)
+            .await
+            .map_err(lifecycle_error)?;
+        Ok(Procedure {
+            procedure,
+            organization: OrganizationRef::from(&organization),
+        })
+    }
+
+    /// Reopens a closed procedure on its last published revision —
+    /// no publication involved; `INVALID_TRANSITION` from any other
+    /// state.
+    async fn reopen_procedure(
+        &self,
+        ctx: &Context<'_>,
+        input: ReopenProcedureInput,
+    ) -> async_graphql::Result<Procedure> {
+        let (principal, mut db) = session(ctx)?;
+        let (mut procedure, organization) =
+            administered_procedure(&mut db, principal.account_id, &input.procedure_id).await?;
+        platform_core::reopen_procedure(&mut db, &mut procedure, principal.account_id)
+            .await
+            .map_err(lifecycle_error)?;
         Ok(Procedure {
             procedure,
             organization: OrganizationRef::from(&organization),

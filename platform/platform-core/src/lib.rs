@@ -44,7 +44,7 @@ pub mod tree;
 pub mod tree_edit;
 
 pub use account::{
-    Account, AuthError, RegisterError, register, update_profile, verify_credentials,
+    Account, AuthError, RegisterError, find_account, register, update_profile, verify_credentials,
 };
 pub use api_token::{
     API_TOKEN_LIFETIME_MONTHS, ApiToken, CreateApiTokenError, IssuedToken,

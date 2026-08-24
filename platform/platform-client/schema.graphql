@@ -153,6 +153,16 @@ enum Cardinality {
 }
 
 """
+`closeProcedure` input.
+"""
+input CloseProcedureInput {
+	"""
+	The procedure; the viewer must administer it.
+	"""
+	procedureId: ID!
+}
+
+"""
 A typed field (DESIGN §2.1).
 """
 type Column {
@@ -407,6 +417,18 @@ type Mutation {
 	"""
 	createProcedure(input: CreateProcedureInput!): Procedure!
 	"""
+	Closes a published procedure to new submissions (platform
+	P.4 *Procedure lifecycle*); `INVALID_TRANSITION` from any
+	other state.
+	"""
+	closeProcedure(input: CloseProcedureInput!): Procedure!
+	"""
+	Reopens a closed procedure on its last published revision —
+	no publication involved; `INVALID_TRANSITION` from any other
+	state.
+	"""
+	reopenProcedure(input: ReopenProcedureInput!): Procedure!
+	"""
 	Adds a column to the procedure's revision draft (starting the
 	draft when none is in progress). The new column is the element
 	in front of `placement.beforeId` in its parent — or the parent's
@@ -558,6 +580,17 @@ type Procedure {
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	"""
+	The lifecycle state (G.2 rule 5): a union of state-specific
+	objects — facts live where they are meaningful, no nullable
+	`since`.
+	"""
+	state: ProcedureState!
+	"""
+	The audit trail (G.9), oldest first: lifecycle transitions
+	and draft discards, never autosaves — bounded by design.
+	"""
+	events: [ProcedureEvent!]!
+	"""
 	The owning organization.
 	"""
 	organization: OrganizationRef!
@@ -568,10 +601,92 @@ type Procedure {
 	revisionDraft: RevisionDraft
 }
 
+"""
+Closed to new submissions.
+"""
+type ProcedureClosedState {
+	"""
+	Since when the procedure is closed.
+	"""
+	since: DateTime!
+}
+
+"""
+Never published. Its only fact is the row's creation time.
+"""
+type ProcedureDraftState {
+	createdAt: DateTime!
+}
+
+type ProcedureEvent {
+	"""
+	Time-ordered (UUID v7): the log's sequence as well as its id.
+	"""
+	id: ID!
+	"""
+	What happened.
+	"""
+	kind: ProcedureEventKind!
+	"""
+	Who acted; `null` for a system event — or an account since
+	deleted.
+	"""
+	actor: AccountRef
+	"""
+	When it happened.
+	"""
+	createdAt: DateTime!
+}
+
+"""
+The event alphabet (platform P.4), generated from the
+platform-core enum. `PUBLISHED` has no writer until the kernel
+edge lands.
+"""
+enum ProcedureEventKind {
+	CREATED
+	PUBLISHED
+	CLOSED
+	REOPENED
+	DRAFT_DISCARDED
+}
+
+"""
+Open for submissions.
+"""
+type ProcedurePublishedState {
+	"""
+	Since when the procedure is open — reset by reopening, so
+	deliberately not `publishedAt`; revision publication dates
+	live on revisions (platform P.4).
+	"""
+	since: DateTime!
+}
+
 type ProcedureRef {
 	id: ID!
 	title: String!
+	"""
+	The bare lifecycle state.
+	"""
+	state: ProcedureStateValue!
 	organization: OrganizationRef!
+}
+
+"""
+The lifecycle state (G.2 rule 5): a union of state-specific
+objects, subject-prefixed.
+"""
+union ProcedureState = ProcedureDraftState | ProcedurePublishedState | ProcedureClosedState
+
+"""
+The bare state, for list rows and filters (G.2 rule 5's parallel
+enum, generated from the platform-core discriminant).
+"""
+enum ProcedureStateValue {
+	DRAFT
+	PUBLISHED
+	CLOSED
 }
 
 type Query {
@@ -630,6 +745,16 @@ input RemoveElementInput {
 	Any element (a group or section with its subtree).
 	"""
 	id: ID!
+}
+
+"""
+`reopenProcedure` input.
+"""
+input ReopenProcedureInput {
+	"""
+	The procedure; the viewer must administer it.
+	"""
+	procedureId: ID!
 }
 
 """

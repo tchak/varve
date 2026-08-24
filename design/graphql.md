@@ -427,3 +427,38 @@ reuse rather than renamed at reuse.
    static column set — exactly the column set of the pruned tree the
    same viewer receives from `elements`. The two reads cannot
    disagree, by construction rather than by discipline.
+
+## G.9 The lifecycle slice (settled 2026-08-24)
+
+The API surface of platform P.4's *Procedure lifecycle* and *Event
+logs*, shipped before publication itself (the kernel edge).
+
+1. **The state rides at two altitudes, per G.2 rule 5.** The full
+   `Procedure` carries `state: ProcedureState!`, the union of
+   subject-prefixed members (`ProcedureDraftState { createdAt }` —
+   the row's creation is the draft state's one fact —
+   `ProcedurePublishedState { since }`, `ProcedureClosedState
+   { since }`); `ProcedureRef` carries `state:
+   ProcedureStateValue!`, the bare parallel enum — a list row shows
+   a badge without breaching G.2 rule 1 (an enum is a scalar leaf;
+   the facts stay on the full object). Both generate from the one
+   platform-core discriminant. `since` is deliberately not
+   `publishedAt` (G.2 rule 5's amendment).
+2. **`closeProcedure` / `reopenProcedure`**, G.2.7-shaped (one
+   input, full object back). A transition the machine refuses —
+   closing a draft, reopening an open procedure — is the new
+   structured code **`INVALID_TRANSITION`**: distinct from
+   `CONFLICT`, which stays the optimistic-concurrency answer
+   (re-read and retry) and now covers lifecycle races as well as
+   draft races. `publishRevision` joins with the kernel edge and
+   lands in `Published` from any state (P.4).
+3. **`Procedure.events: [ProcedureEvent!]!`** — the audit trail,
+   oldest first, an array not a connection: the log holds lifecycle
+   transitions and draft discards, never autosaves (P.4), so it is
+   bounded by design (G.2 rule 4). A row is `{ id, kind:
+   ProcedureEventKind!, actor: AccountRef, createdAt }`; `actor` is
+   `null` for a system event or an account since deleted — the
+   entry outlives both. `PUBLISHED` is in the kind enum from day
+   one (the alphabet is settled) with no writer until publication
+   lands. Full-object only: the trail is the administrator's
+   detail view, not list-row material.

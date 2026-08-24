@@ -244,6 +244,11 @@ pub async fn register(
     created.ok_or(RegisterError::EmailTaken)
 }
 
+/// Looks an account up by id.
+pub async fn find_account(db: &mut toasty::Db, id: uuid::Uuid) -> toasty::Result<Option<Account>> {
+    Account::filter_by_id(id).first().exec(db).await
+}
+
 /// Updates an account's profile: the display name (trimmed of
 /// surrounding whitespace) and, when `locale` is present, the stored
 /// locale preference. Returns the updated row (fresh `updated_at`).

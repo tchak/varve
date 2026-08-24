@@ -1,12 +1,16 @@
-//! `Procedure` (full, root only) and `ProcedureRef`. Catalog scalars
-//! and the revision draft — published revisions, surfaces, and the
-//! lifecycle arrive with the kernel edge (P1).
+//! `Procedure` (full, root only) and `ProcedureRef`. Catalog
+//! scalars, the revision draft, and the lifecycle (G.9): the state
+//! union (G.2 rule 5) with the event log on the full object, the
+//! bare state enum on the Ref — published revisions and surfaces
+//! still arrive with the kernel edge (P1).
 
-use async_graphql::{ID, Object};
+use async_graphql::{Context, ID, Object};
 
 use crate::error::internal;
 use crate::organization::OrganizationRef;
+use crate::procedure_event::{ProcedureEvent, procedure_events};
 use crate::revision_draft::RevisionDraft;
+use crate::session;
 
 /// The full procedure. Visible to the owning organization's members
 /// (G.6). Built from a row loaded **with its revision draft**
@@ -40,6 +44,20 @@ impl Procedure {
         self.procedure.updated_at
     }
 
+    /// The lifecycle state (G.2 rule 5): a union of state-specific
+    /// objects — facts live where they are meaningful, no nullable
+    /// `since`.
+    async fn state(&self) -> async_graphql::Result<ProcedureState> {
+        procedure_state(&self.procedure)
+    }
+
+    /// The audit trail (G.9), oldest first: lifecycle transitions
+    /// and draft discards, never autosaves — bounded by design.
+    async fn events(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ProcedureEvent>> {
+        let (_, mut db) = session(ctx)?;
+        procedure_events(&mut db, self.procedure.id).await
+    }
+
     /// The owning organization.
     async fn organization(&self) -> &OrganizationRef {
         &self.organization
@@ -64,10 +82,13 @@ impl Procedure {
     }
 }
 
-/// A procedure as lists name it: scalars plus its ancestor Ref.
+/// A procedure as lists name it: scalars plus its ancestor Ref. The
+/// state rides as the bare enum (G.2 rule 5's parallel enum) — the
+/// facts stay on the full object's union.
 pub struct ProcedureRef {
     id: uuid::Uuid,
     title: String,
+    state: platform_core::ProcedureStateValue,
     organization: OrganizationRef,
 }
 
@@ -76,6 +97,7 @@ impl ProcedureRef {
         Self {
             id: procedure.id,
             title: procedure.title,
+            state: procedure.state,
             organization,
         }
     }
@@ -91,7 +113,73 @@ impl ProcedureRef {
         &self.title
     }
 
+    /// The bare lifecycle state.
+    async fn state(&self) -> ProcedureStateValue {
+        self.state.into()
+    }
+
     async fn organization(&self) -> &OrganizationRef {
         &self.organization
     }
+}
+
+/// The lifecycle state (G.2 rule 5): a union of state-specific
+/// objects, subject-prefixed.
+#[derive(async_graphql::Union)]
+pub enum ProcedureState {
+    Draft(ProcedureDraftState),
+    Published(ProcedurePublishedState),
+    Closed(ProcedureClosedState),
+}
+
+/// Never published. Its only fact is the row's creation time.
+#[derive(async_graphql::SimpleObject)]
+pub struct ProcedureDraftState {
+    pub created_at: jiff::Timestamp,
+}
+
+/// Open for submissions.
+#[derive(async_graphql::SimpleObject)]
+pub struct ProcedurePublishedState {
+    /// Since when the procedure is open — reset by reopening, so
+    /// deliberately not `publishedAt`; revision publication dates
+    /// live on revisions (platform P.4).
+    pub since: jiff::Timestamp,
+}
+
+/// Closed to new submissions.
+#[derive(async_graphql::SimpleObject)]
+pub struct ProcedureClosedState {
+    /// Since when the procedure is closed.
+    pub since: jiff::Timestamp,
+}
+
+/// The bare state, for list rows and filters (G.2 rule 5's parallel
+/// enum, generated from the platform-core discriminant).
+#[derive(async_graphql::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[graphql(remote = "platform_core::ProcedureStateValue")]
+pub enum ProcedureStateValue {
+    Draft,
+    Published,
+    Closed,
+}
+
+/// The row's lifecycle columns as the union; a corrupt pair is an
+/// internal error, never a guess.
+pub(crate) fn procedure_state(
+    procedure: &platform_core::Procedure,
+) -> async_graphql::Result<ProcedureState> {
+    Ok(
+        match platform_core::current_state(procedure).map_err(internal)? {
+            platform_core::ProcedureState::Draft => ProcedureState::Draft(ProcedureDraftState {
+                created_at: procedure.created_at,
+            }),
+            platform_core::ProcedureState::Published { since } => {
+                ProcedureState::Published(ProcedurePublishedState { since })
+            }
+            platform_core::ProcedureState::Closed { since } => {
+                ProcedureState::Closed(ProcedureClosedState { since })
+            }
+        },
+    )
 }

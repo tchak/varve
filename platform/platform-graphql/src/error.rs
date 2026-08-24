@@ -20,9 +20,13 @@ pub enum Code {
     /// kernel's validation rejects (duplicate id, nesting beyond
     /// policy). The message carries the reason; the draft is unchanged.
     InvalidEdit,
-    /// The draft changed since the client last read it (two editors
-    /// racing): re-read and retry.
+    /// The target changed since the client last read it (two editors
+    /// or administrators racing): re-read and retry.
     Conflict,
+    /// A lifecycle transition the state machine refuses from the
+    /// procedure's current state (closing a draft, reopening an open
+    /// procedure). The message carries the refusal; nothing changed.
+    InvalidTransition,
     /// The platform failed, not the request: a store error or a
     /// wiring bug. The cause is logged server-side and never
     /// serialized — a client learns nothing about the database.
@@ -32,12 +36,13 @@ pub enum Code {
 impl Code {
     /// Every code; `platform-client` mirrors this set and a test
     /// keeps the two equal.
-    pub const ALL: [Code; 6] = [
+    pub const ALL: [Code; 7] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
         Code::InvalidEdit,
         Code::Conflict,
+        Code::InvalidTransition,
         Code::Internal,
     ];
 
@@ -49,6 +54,7 @@ impl Code {
             Code::SlugTaken => "SLUG_TAKEN",
             Code::InvalidEdit => "INVALID_EDIT",
             Code::Conflict => "CONFLICT",
+            Code::InvalidTransition => "INVALID_TRANSITION",
             Code::Internal => "INTERNAL",
         }
     }

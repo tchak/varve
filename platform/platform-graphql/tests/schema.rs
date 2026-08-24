@@ -5,6 +5,11 @@
 
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
+use platform_client::procedure::{
+    CloseProcedure, CloseProcedureInput, CloseProcedureVariables, ProcedureEventKind,
+    ProcedureLifecycleQuery, ProcedureLifecycleVariables, ProcedureState, ReopenProcedure,
+    ReopenProcedureInput, ReopenProcedureVariables,
+};
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, Element,
     ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
@@ -401,6 +406,9 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "scalar Slug",
         "slug: Slug!",
         "members: [Member!]!",
+        "union ProcedureState = ProcedureDraftState | ProcedurePublishedState | ProcedureClosedState",
+        "state: ProcedureStateValue!",
+        "events: [ProcedureEvent!]!",
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
     }
@@ -1219,4 +1227,207 @@ fn sdl_has_the_revision_draft_slice_and_no_recursive_type() {
         assert!(body.contains("parentId: ID"), "{body}");
         assert!(!body.contains('['), "{container} has a list field:\n{body}");
     }
+}
+
+/// The lifecycle read every test below shares: the state union with
+/// every member inline, and the audit trail.
+const PROCEDURE_LIFECYCLE: &str = "query($id: ID!) {
+    procedure(id: $id) {
+        id
+        state {
+            __typename
+            ... on ProcedureDraftState { createdAt }
+            ... on ProcedurePublishedState { since }
+            ... on ProcedureClosedState { since }
+        }
+        events { kind actor { name } createdAt }
+    }
+}";
+
+/// Publication does not exist yet (it arrives with the kernel edge),
+/// so lifecycle tests force the row into `Published` directly.
+async fn force_published(db: &mut toasty::Db, procedure_id: &str) {
+    let id: uuid::Uuid = procedure_id.parse().expect("uuid");
+    let mut procedure = platform_core::find_procedure(db, id)
+        .await
+        .expect("find")
+        .expect("exists");
+    procedure
+        .update()
+        .state(platform_core::ProcedureStateValue::Published)
+        .state_since(Some(jiff::Timestamp::now()))
+        .exec(db)
+        .await
+        .expect("force published");
+}
+
+#[tokio::test]
+async fn procedure_lifecycle_over_the_schema() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("lifecycle"), "Org")
+        .await;
+    let org_id = id_of(&org);
+    let procedure_id = id_of(&api.create_procedure(&alice, &org_id, "Bourse").await);
+
+    // A new procedure is a draft: the union answers the draft member
+    // with its one fact, the trail holds `created` with its actor.
+    let read = api
+        .data(&alice, PROCEDURE_LIFECYCLE, json!({ "id": &procedure_id }))
+        .await["procedure"]
+        .take();
+    assert_eq!(read["state"]["__typename"], "ProcedureDraftState");
+    assert!(read["state"]["createdAt"].is_string(), "{read}");
+    assert_eq!(read["events"][0]["kind"], "CREATED");
+    assert_eq!(read["events"][0]["actor"]["name"], "alice");
+
+    // The Ref carries the bare enum (G.2 rule 5's parallel enum).
+    let listed = api
+        .data(
+            &alice,
+            "query($id: ID!) { organization(id: $id) { procedures { id state } } }",
+            json!({ "id": &org_id }),
+        )
+        .await;
+    assert_eq!(listed["organization"]["procedures"][0]["state"], "DRAFT");
+
+    // The machine's refusals arrive as `INVALID_TRANSITION`, and a
+    // non-member gets the uninformative `FORBIDDEN`.
+    const CLOSE: &str = "mutation($input: CloseProcedureInput!) {
+        closeProcedure(input: $input) { id state { __typename } }
+    }";
+    const REOPEN: &str = "mutation($input: ReopenProcedureInput!) {
+        reopenProcedure(input: $input) { id state { __typename } }
+    }";
+    let input = json!({ "input": { "procedureId": &procedure_id } });
+    assert_eq!(
+        api.error_code(&alice, CLOSE, input.clone()).await,
+        "INVALID_TRANSITION"
+    );
+    assert_eq!(
+        api.error_code(&alice, REOPEN, input.clone()).await,
+        "INVALID_TRANSITION"
+    );
+    let bob = account(&mut db, "bob").await;
+    assert_eq!(
+        api.error_code(&bob, CLOSE, input.clone()).await,
+        "FORBIDDEN"
+    );
+
+    // Published (forced — publication waits on the kernel edge) →
+    // closed → reopened, each answering with the new state member.
+    force_published(&mut db, &procedure_id).await;
+    let closed = api.data(&alice, CLOSE, input.clone()).await;
+    assert_eq!(
+        closed["closeProcedure"]["state"]["__typename"],
+        "ProcedureClosedState"
+    );
+    let reopened = api.data(&alice, REOPEN, input.clone()).await;
+    assert_eq!(
+        reopened["reopenProcedure"]["state"]["__typename"],
+        "ProcedurePublishedState"
+    );
+
+    // The trail tells the whole story, oldest first.
+    let read = api
+        .data(&alice, PROCEDURE_LIFECYCLE, json!({ "id": &procedure_id }))
+        .await["procedure"]
+        .take();
+    let kinds: Vec<&str> = read["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["CREATED", "CLOSED", "REOPENED"]);
+    assert!(read["state"]["since"].is_string(), "{read}");
+}
+
+#[tokio::test]
+async fn the_typed_client_walks_the_lifecycle() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("typed-lc"), "Org")
+        .await;
+    let procedure_id = id_of(&api.create_procedure(&alice, &id_of(&org), "Aide").await);
+    let client = api.client(&alice);
+
+    let lifecycle = platform_client::run(
+        &client,
+        ProcedureLifecycleQuery::build(ProcedureLifecycleVariables {
+            id: cynic::Id::new(&procedure_id),
+        }),
+    )
+    .await
+    .expect("lifecycle")
+    .procedure
+    .expect("visible to its administrator");
+    assert!(matches!(lifecycle.state, ProcedureState::Draft(_)));
+    assert_eq!(lifecycle.events[0].kind, ProcedureEventKind::Created);
+    assert_eq!(
+        lifecycle.events[0].actor.as_ref().expect("actor").name,
+        "alice"
+    );
+
+    // A refused transition arrives as the typed code.
+    let refused = platform_client::run(
+        &client,
+        CloseProcedure::build(CloseProcedureVariables {
+            input: CloseProcedureInput {
+                procedure_id: cynic::Id::new(&procedure_id),
+            },
+        }),
+    )
+    .await
+    .expect_err("closing a draft");
+    assert_eq!(
+        refused.code(),
+        Some(platform_client::Code::InvalidTransition)
+    );
+
+    force_published(&mut db, &procedure_id).await;
+    let closed = platform_client::run(
+        &client,
+        CloseProcedure::build(CloseProcedureVariables {
+            input: CloseProcedureInput {
+                procedure_id: cynic::Id::new(&procedure_id),
+            },
+        }),
+    )
+    .await
+    .expect("close")
+    .close_procedure;
+    assert!(matches!(closed.state, ProcedureState::Closed(_)));
+
+    let reopened = platform_client::run(
+        &client,
+        ReopenProcedure::build(ReopenProcedureVariables {
+            input: ReopenProcedureInput {
+                procedure_id: cynic::Id::new(&procedure_id),
+            },
+        }),
+    )
+    .await
+    .expect("reopen")
+    .reopen_procedure;
+    let ProcedureState::Published(published) = &reopened.state else {
+        panic!("expected published, got {:?}", reopened.state);
+    };
+    // Reopening reset `since` to the reopen, after the close.
+    let ProcedureState::Closed(closed_state) = &closed.state else {
+        unreachable!()
+    };
+    assert!(published.since >= closed_state.since);
+    assert_eq!(
+        reopened.events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        [
+            ProcedureEventKind::Created,
+            ProcedureEventKind::Closed,
+            ProcedureEventKind::Reopened,
+        ]
+    );
 }

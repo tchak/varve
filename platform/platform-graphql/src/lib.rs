@@ -10,7 +10,10 @@
 //! **Current scope: the P0 slice** (G.6) — organizations, teams,
 //! procedures, and their members, with the three `create*` mutations
 //! — plus the **revision-draft slice**: a procedure's draft schema
-//! ([`revision_draft`]) and the element mutations that edit it.
+//! ([`revision_draft`]) and the element mutations that edit it —
+//! plus the **lifecycle slice** (G.9): the state union and event
+//! log on `Procedure`, `closeProcedure` and `reopenProcedure`
+//! (publication arrives with the kernel edge).
 //! The type graph follows G.2: full objects only at root
 //! ([`organization::Organization`], [`team::Team`],
 //! [`procedure::Procedure`]), `*Ref` types everywhere a list or a
@@ -30,6 +33,7 @@ pub mod member;
 pub mod mutation;
 pub mod organization;
 pub mod procedure;
+pub mod procedure_event;
 pub mod query;
 pub mod revision_draft;
 pub mod slug;
