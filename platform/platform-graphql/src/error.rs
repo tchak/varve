@@ -27,6 +27,10 @@ pub enum Code {
     /// procedure's current state (closing a draft, reopening an open
     /// procedure). The message carries the refusal; nothing changed.
     InvalidTransition,
+    /// The draft cannot publish as-is: nothing is in progress, or a
+    /// choice has no options (G.7 — a legal draft state, refused at
+    /// publication). Fix the draft and retry.
+    InvalidDraft,
     /// The platform failed, not the request: a store error or a
     /// wiring bug. The cause is logged server-side and never
     /// serialized — a client learns nothing about the database.
@@ -36,13 +40,14 @@ pub enum Code {
 impl Code {
     /// Every code; `platform-client` mirrors this set and a test
     /// keeps the two equal.
-    pub const ALL: [Code; 7] = [
+    pub const ALL: [Code; 8] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
         Code::InvalidEdit,
         Code::Conflict,
         Code::InvalidTransition,
+        Code::InvalidDraft,
         Code::Internal,
     ];
 
@@ -55,6 +60,7 @@ impl Code {
             Code::InvalidEdit => "INVALID_EDIT",
             Code::Conflict => "CONFLICT",
             Code::InvalidTransition => "INVALID_TRANSITION",
+            Code::InvalidDraft => "INVALID_DRAFT",
             Code::Internal => "INTERNAL",
         }
     }

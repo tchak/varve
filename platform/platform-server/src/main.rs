@@ -95,7 +95,12 @@ async fn run() -> Result<(), ServerError> {
     let database_url =
         std::env::var("DATABASE_URL").map_err(|_| ServerError::MissingDatabaseUrl)?;
     let cookie_key = cookie_key()?;
-    let db = platform_core::connect(&database_url).await?;
+    let db = platform_core::connect_with(
+        &database_url,
+        platform_store::models(),
+        &[&platform_store::MIGRATIONS],
+    )
+    .await?;
     let assets = match AssetBundle::load() {
         Ok(bundle) => Some(bundle),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {

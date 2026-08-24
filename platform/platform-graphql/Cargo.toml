@@ -18,8 +18,15 @@ platform-core = { version = "0.1.0", path = "../platform-core" }
 # The revision draft is a kernel `Schema`; its GraphQL shape is a
 # flattening of the kernel types (G.6, revision-draft slice).
 varve-core = { path = "../../crates/varve-core" }
+varve-impact = { path = "../../crates/varve-impact" }
 varve-schema = { path = "../../crates/varve-schema" }
 varve-surface = { path = "../../crates/varve-surface" }
+# `publishRevision` is the composition point (P.4 *Publication*): the
+# mutation opens the transaction, scopes the kernel store over it,
+# and calls the platform-core use case.
+platform-store = { version = "0.1.0", path = "../platform-store" }
+# The shared-executor mutex of that composition.
+tokio = { version = "1", features = ["sync"] }
 # Only for the `toasty::Db` handle resolvers receive; the driver and
 # model features are `platform-core`'s business.
 serde_json = "1"

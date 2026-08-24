@@ -12,8 +12,10 @@
 //! — plus the **revision-draft slice**: a procedure's draft schema
 //! ([`revision_draft`]) and the element mutations that edit it —
 //! plus the **lifecycle slice** (G.9): the state union and event
-//! log on `Procedure`, `closeProcedure` and `reopenProcedure`
-//! (publication arrives with the kernel edge).
+//! log on `Procedure`, `closeProcedure` and `reopenProcedure` —
+//! plus **publication** (G.10): `publishRevision`, the composition
+//! point that opens the transaction, scopes `platform-store` over
+//! it, and runs the impact-gated use case.
 //! The type graph follows G.2: full objects only at root
 //! ([`organization::Organization`], [`team::Team`],
 //! [`procedure::Procedure`]), `*Ref` types everywhere a list or a
@@ -29,6 +31,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod impact;
 pub mod member;
 pub mod mutation;
 pub mod organization;
@@ -41,6 +44,19 @@ pub mod team;
 
 use async_graphql::{Context, EmptySubscription, Schema};
 use platform_core::Principal;
+
+/// What `publishRevision` answers (G.10): the report always, the
+/// procedure as it now stands, and whether anything was written.
+#[derive(async_graphql::SimpleObject)]
+pub struct PublishRevisionResult {
+    /// What this publication does (or would do) to records.
+    pub report: impact::ImpactReport,
+    /// `false`: the report exceeded `SAFE` without `confirm` — the
+    /// procedure is untouched; re-send with `confirm: true`.
+    pub published: bool,
+    /// The procedure, published or untouched.
+    pub procedure: procedure::Procedure,
+}
 
 pub use mutation::Mutation;
 pub use query::Query;

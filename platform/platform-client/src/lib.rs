@@ -108,19 +108,23 @@ pub enum Code {
     /// A lifecycle transition refused from the procedure's current
     /// state; nothing changed.
     InvalidTransition,
+    /// The draft cannot publish as-is (nothing in progress, or a
+    /// choice with no options): fix the draft and retry.
+    InvalidDraft,
     /// The platform failed, not the request.
     Internal,
 }
 
 impl Code {
     /// Every code, for the server-side set-equality test.
-    pub const ALL: [Code; 7] = [
+    pub const ALL: [Code; 8] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
         Code::InvalidEdit,
         Code::Conflict,
         Code::InvalidTransition,
+        Code::InvalidDraft,
         Code::Internal,
     ];
 
@@ -133,6 +137,7 @@ impl Code {
             Code::InvalidEdit => "INVALID_EDIT",
             Code::Conflict => "CONFLICT",
             Code::InvalidTransition => "INVALID_TRANSITION",
+            Code::InvalidDraft => "INVALID_DRAFT",
             Code::Internal => "INTERNAL",
         }
     }

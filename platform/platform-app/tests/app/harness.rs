@@ -21,7 +21,13 @@ pub async fn test_app() -> Option<(Router, toasty::Db)> {
             return None;
         }
     };
-    let db = platform_core::connect(&url).await.expect("connect");
+    let db = platform_core::connect_with(
+        &url,
+        platform_store::models(),
+        &[&platform_store::MIGRATIONS],
+    )
+    .await
+    .expect("connect");
     Some((
         platform_app::router(db.clone(), topcoat::cookie::Key::generate(), None),
         db,

@@ -4,10 +4,11 @@
 use async_graphql::{Context, ID, InputObject, MaybeUndefined, Object};
 use platform_core::{
     ColumnPatch, CreateOrganizationError, EditError, GroupPatch, LifecycleError, NotePatch,
-    RevisionDraftError, SectionPatch, Tree,
+    PublishProcedureError, PublishProcedureOutcome, RevisionDraftError, SectionPatch, Tree,
 };
 
 use crate::error::{Code, coded, forbidden, internal, invalid_input};
+use crate::impact::ImpactReport;
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::Procedure;
 use crate::revision_draft::{
@@ -63,6 +64,19 @@ pub struct CloseProcedureInput {
 pub struct ReopenProcedureInput {
     /// The procedure; the viewer must administer it.
     pub procedure_id: ID,
+}
+
+/// `publishRevision` input.
+#[derive(InputObject)]
+pub struct PublishRevisionInput {
+    /// The procedure whose revision draft publishes; the viewer must
+    /// administer it.
+    pub procedure_id: ID,
+    /// Accept a report worse than `SAFE` (G.10): without it such a
+    /// report is returned with `published: false` and nothing is
+    /// written.
+    #[graphql(default)]
+    pub confirm: bool,
 }
 
 /// `addColumn` input.
@@ -309,6 +323,26 @@ fn draft_error(error: RevisionDraftError) -> async_graphql::Error {
     }
 }
 
+fn publish_error(error: PublishProcedureError) -> async_graphql::Error {
+    match error {
+        PublishProcedureError::NoDraft | PublishProcedureError::EmptyEnum(_) => {
+            coded(Code::InvalidDraft, error.to_string())
+        }
+        PublishProcedureError::StaleDraft => coded(
+            Code::Conflict,
+            "the draft's base is no longer the published head; discard or rebase the draft",
+        ),
+        PublishProcedureError::Db(e) if e.is_condition_failed() => coded(
+            Code::Conflict,
+            "the procedure changed since it was read; re-read and retry",
+        ),
+        PublishProcedureError::CorruptDraft(e) => internal(e),
+        PublishProcedureError::CorruptState(e) => internal(e),
+        PublishProcedureError::Kernel(e) => internal(e),
+        PublishProcedureError::Db(e) => internal(e),
+    }
+}
+
 fn lifecycle_error(error: LifecycleError) -> async_graphql::Error {
     match error {
         LifecycleError::Transition(e) => coded(Code::InvalidTransition, e.to_string()),
@@ -433,6 +467,63 @@ impl Mutation {
             procedure,
             organization: OrganizationRef::from(&organization),
         })
+    }
+
+    /// Publishes the procedure's revision draft (G.10): free reports
+    /// publish immediately; a lossy, checked or breaking one without
+    /// `confirm` answers with `published: false` and writes nothing.
+    /// Publishing transitions the lifecycle — from `Closed` it is the
+    /// reopen.
+    async fn publish_revision(
+        &self,
+        ctx: &Context<'_>,
+        input: PublishRevisionInput,
+    ) -> async_graphql::Result<crate::PublishRevisionResult> {
+        let (principal, mut db) = session(ctx)?;
+        let (mut procedure, organization) =
+            administered_procedure(&mut db, principal.account_id, &input.procedure_id).await?;
+        // The composition point (P.4 *Publication*): one transaction,
+        // the kernel store scoped over its shared executor, platform
+        // writes beside it, one commit.
+        let mut tx = db.transaction().await.map_err(internal)?;
+        let outcome = {
+            let shared: platform_core::SharedExecutor =
+                tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
+            let store = platform_store::PlatformStore::new(&shared);
+            platform_core::publish_procedure(
+                &shared,
+                &store,
+                &mut procedure,
+                principal.account_id,
+                input.confirm,
+            )
+            .await
+        };
+        match outcome {
+            Ok(PublishProcedureOutcome::Published { report, .. }) => {
+                tx.commit().await.map_err(internal)?;
+                Ok(crate::PublishRevisionResult {
+                    report: ImpactReport::from(&report),
+                    published: true,
+                    procedure: Procedure {
+                        procedure,
+                        organization: OrganizationRef::from(&organization),
+                    },
+                })
+            }
+            // Nothing was written; the dropped transaction rolls back.
+            Ok(PublishProcedureOutcome::RequiresConfirmation { report }) => {
+                Ok(crate::PublishRevisionResult {
+                    report: ImpactReport::from(&report),
+                    published: false,
+                    procedure: Procedure {
+                        procedure,
+                        organization: OrganizationRef::from(&organization),
+                    },
+                })
+            }
+            Err(error) => Err(publish_error(error)),
+        }
     }
 
     /// Adds a column to the procedure's revision draft (starting the

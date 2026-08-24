@@ -153,6 +153,16 @@ enum Cardinality {
 }
 
 """
+§3's vocabulary, generated from the kernel enum.
+"""
+enum ChangeClass {
+	SAFE
+	LOSSY
+	CHECKED
+	BREAKING
+}
+
+"""
 `closeProcedure` input.
 """
 input CloseProcedureInput {
@@ -179,6 +189,32 @@ type Column {
 	"""
 	required: Boolean!
 	audience: Audience!
+}
+
+"""
+The change's shape (§3); the cast detail stays kernel-side for
+now.
+"""
+enum ColumnChangeKind {
+	ADDED
+	REMOVED
+	CAST
+	SCOPE_MOVED
+	FORBIDDEN
+}
+
+"""
+One changed column.
+"""
+type ColumnImpactEntry {
+	columnId: ID!
+	class: ChangeClass!
+	change: ColumnChangeKind!
+	"""
+	For choice transitions that drop options (§2.11): exactly
+	which ids.
+	"""
+	removedOptions: [ID!]!
 }
 
 """
@@ -374,6 +410,20 @@ type IbanFormat {
 	kind: TextFormatKind!
 }
 
+"""
+What a publication would do to the records reading through it.
+"""
+type ImpactReport {
+	"""
+	The one-line verdict: the worst class any column hits.
+	"""
+	worst: ChangeClass!
+	"""
+	Per-column changes, unchanged columns omitted.
+	"""
+	columns: [ColumnImpactEntry!]!
+}
+
 type IntegerType {
 	kind: ColumnTypeKind!
 	unit: Unit
@@ -428,6 +478,14 @@ type Mutation {
 	state.
 	"""
 	reopenProcedure(input: ReopenProcedureInput!): Procedure!
+	"""
+	Publishes the procedure's revision draft (G.10): free reports
+	publish immediately; a lossy, checked or breaking one without
+	`confirm` answers with `published: false` and writes nothing.
+	Publishing transitions the lifecycle — from `Closed` it is the
+	reopen.
+	"""
+	publishRevision(input: PublishRevisionInput!): PublishRevisionResult!
 	"""
 	Adds a column to the procedure's revision draft (starting the
 	draft when none is in progress). The new column is the element
@@ -687,6 +745,43 @@ enum ProcedureStateValue {
 	DRAFT
 	PUBLISHED
 	CLOSED
+}
+
+"""
+`publishRevision` input.
+"""
+input PublishRevisionInput {
+	"""
+	The procedure whose revision draft publishes; the viewer must
+	administer it.
+	"""
+	procedureId: ID!
+	"""
+	Accept a report worse than `SAFE` (G.10): without it such a
+	report is returned with `published: false` and nothing is
+	written.
+	"""
+	confirm: Boolean! = false
+}
+
+"""
+What `publishRevision` answers (G.10): the report always, the
+procedure as it now stands, and whether anything was written.
+"""
+type PublishRevisionResult {
+	"""
+	What this publication does (or would do) to records.
+	"""
+	report: ImpactReport!
+	"""
+	`false`: the report exceeded `SAFE` without `confirm` — the
+	procedure is untouched; re-send with `confirm: true`.
+	"""
+	published: Boolean!
+	"""
+	The procedure, published or untouched.
+	"""
+	procedure: Procedure!
 }
 
 type Query {

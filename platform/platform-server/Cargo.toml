@@ -14,6 +14,7 @@ base64 = "0.22"
 dotenvy = "0.15.7"
 platform-app = { version = "0.1.0", path = "../platform-app" }
 platform-core = { version = "0.1.0", path = "../platform-core" }
+platform-store = { version = "0.1.0", path = "../platform-store" }
 thiserror.workspace = true
 toasty = "0.10.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }

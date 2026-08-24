@@ -6,16 +6,17 @@
 use cynic::{MutationBuilder, QueryBuilder};
 use platform_client::organization::{OrganizationQuery, OrganizationVariables};
 use platform_client::procedure::{
-    CloseProcedure, CloseProcedureInput, CloseProcedureVariables, ProcedureEventKind,
-    ProcedureLifecycleQuery, ProcedureLifecycleVariables, ProcedureState, ReopenProcedure,
-    ReopenProcedureInput, ReopenProcedureVariables,
+    ChangeClass, CloseProcedure, CloseProcedureInput, CloseProcedureVariables, ProcedureEventKind,
+    ProcedureLifecycleQuery, ProcedureLifecycleVariables, ProcedureState, PublishRevision,
+    PublishRevisionInput, PublishRevisionVariables, ReopenProcedure, ReopenProcedureInput,
+    ReopenProcedureVariables,
 };
 use platform_client::revision_draft::{
     AddColumn, AddColumnInput, AddColumnVariables, ColumnType, ColumnTypeInput, Element,
     ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables, Unit,
 };
 use platform_client::viewer::ViewerQuery;
-use platform_core::{Principal, connect, register};
+use platform_core::{Principal, register};
 use platform_graphql::{InProcess, PlatformSchema, execute, schema};
 use serde_json::{Value, json};
 
@@ -27,7 +28,18 @@ async fn test_db() -> Option<toasty::Db> {
             return None;
         }
     };
-    Some(connect(&url).await.expect("connect to test database"))
+    // `connect_with`: the kernel tables ride the same database
+    // (P.3, *migrations and registration*) — `publishRevision`
+    // executes against them.
+    Some(
+        platform_core::connect_with(
+            &url,
+            platform_store::models(),
+            &[&platform_store::MIGRATIONS],
+        )
+        .await
+        .expect("connect to test database"),
+    )
 }
 
 /// A fresh account as a principal.
@@ -1429,5 +1441,174 @@ async fn the_typed_client_walks_the_lifecycle() {
             ProcedureEventKind::Closed,
             ProcedureEventKind::Reopened,
         ]
+    );
+}
+
+const PUBLISH: &str = "mutation($input: PublishRevisionInput!) {
+    publishRevision(input: $input) {
+        published
+        report { worst columns { columnId class change } }
+        procedure {
+            id
+            state { __typename ... on ProcedurePublishedState { since } }
+            revisionDraft { base }
+            events { kind }
+        }
+    }
+}";
+
+#[tokio::test]
+async fn publish_revision_over_the_schema() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("publish"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Bourse").await);
+    let input = json!({ "input": { "procedureId": pid } });
+
+    // Nothing in progress: INVALID_DRAFT.
+    assert_eq!(
+        api.error_code(&alice, PUBLISH, input.clone()).await,
+        "INVALID_DRAFT"
+    );
+
+    // A draft with a column publishes free on first publication.
+    api.edit(
+        &alice,
+        "addColumn",
+        "AddColumnInput",
+        json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+    )
+    .await;
+    let data = api.data(&alice, PUBLISH, input.clone()).await;
+    let result = &data["publishRevision"];
+    assert_eq!(result["published"], true);
+    assert_eq!(result["report"]["worst"], "SAFE");
+    assert_eq!(
+        result["procedure"]["state"]["__typename"],
+        "ProcedurePublishedState"
+    );
+    // The draft is consumed, and the trail gained PUBLISHED.
+    assert!(result["procedure"]["revisionDraft"].is_null(), "{result}");
+    let kinds: Vec<&str> = result["procedure"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["CREATED", "PUBLISHED"]);
+
+    // The next draft forks from the head: base is the revision, and
+    // the published tree seeds it (the column is already there).
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Ville", "type": { "text": {} } }),
+        )
+        .await;
+    assert!(!p["revisionDraft"]["base"].is_null(), "{p}");
+    let labels: Vec<&str> = p["revisionDraft"]["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Nom", "Ville"]);
+
+    // A non-member cannot publish.
+    let bob = account(&mut db, "bob").await;
+    assert_eq!(
+        api.error_code(&bob, PUBLISH, input.clone()).await,
+        "FORBIDDEN"
+    );
+
+    // An empty choice is refused at publication (G.7).
+    api.edit(
+        &alice,
+        "addColumn",
+        "AddColumnInput",
+        json!({ "procedureId": pid, "label": "Choix", "type": { "enum": { "options": [] } } }),
+    )
+    .await;
+    assert_eq!(
+        api.error_code(&alice, PUBLISH, input.clone()).await,
+        "INVALID_DRAFT"
+    );
+}
+
+#[tokio::test]
+async fn a_breaking_publication_gates_through_the_api() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("publish-gate"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Aide").await);
+    let input = json!({ "input": { "procedureId": pid } });
+
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Champ", "type": { "text": {} } }),
+        )
+        .await;
+    let column_id = p["revisionDraft"]["elements"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    api.data(&alice, PUBLISH, input.clone()).await;
+
+    // Retype to a castless type: the report gates, nothing changes.
+    api.edit(
+        &alice,
+        "updateColumn",
+        "UpdateColumnInput",
+        json!({ "procedureId": pid, "id": column_id, "type": { "geometry": {} } }),
+    )
+    .await;
+    let data = api.data(&alice, PUBLISH, input.clone()).await;
+    let result = &data["publishRevision"];
+    assert_eq!(result["published"], false);
+    assert_eq!(result["report"]["worst"], "BREAKING");
+    assert_eq!(result["report"]["columns"][0]["columnId"], column_id);
+    assert_eq!(result["report"]["columns"][0]["change"], "FORBIDDEN");
+    // The procedure still shows the draft: nothing was consumed.
+    assert!(!result["procedure"]["revisionDraft"].is_null(), "{result}");
+
+    // Confirmed through the typed client: published, report intact.
+    let client = api.client(&alice);
+    let confirmed = platform_client::run(
+        &client,
+        PublishRevision::build(PublishRevisionVariables {
+            input: PublishRevisionInput {
+                procedure_id: cynic::Id::new(&pid),
+                confirm: true,
+            },
+        }),
+    )
+    .await
+    .expect("confirmed publish")
+    .publish_revision;
+    assert!(confirmed.published);
+    assert_eq!(confirmed.report.worst, ChangeClass::Breaking);
+    assert!(matches!(
+        confirmed.procedure.state,
+        ProcedureState::Published(_)
+    ));
+    assert_eq!(
+        confirmed
+            .procedure
+            .events
+            .iter()
+            .filter(|e| e.kind == ProcedureEventKind::Published)
+            .count(),
+        2
     );
 }

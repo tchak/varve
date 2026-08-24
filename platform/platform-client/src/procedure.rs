@@ -150,6 +150,18 @@ mod tests {
                 .unwrap()
                 .contains("reopenProcedure(input: $input)")
         );
+
+        let publish = PublishRevision::build(PublishRevisionVariables {
+            input: PublishRevisionInput {
+                procedure_id: cynic::Id::new("abc"),
+                confirm: false,
+            },
+        });
+        let document = serde_json::to_value(&publish).unwrap();
+        let query = document["query"].as_str().unwrap();
+        assert!(query.contains("publishRevision(input: $input)"), "{query}");
+        assert!(query.contains("report"), "{query}");
+        assert_eq!(document["variables"]["input"]["confirm"], false);
     }
 }
 
@@ -274,6 +286,79 @@ pub struct ReopenProcedureInput {
 #[derive(cynic::QueryVariables, Debug)]
 pub struct ReopenProcedureVariables {
     pub input: ReopenProcedureInput,
+}
+
+/// `publishRevision` input; `confirm` accepts a report worse than
+/// `SAFE` (G.10).
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct PublishRevisionInput {
+    pub procedure_id: cynic::Id,
+    pub confirm: bool,
+}
+
+/// Variables of [`PublishRevision`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct PublishRevisionVariables {
+    pub input: PublishRevisionInput,
+}
+
+/// `mutation($input: PublishRevisionInput!) { publishRevision(input: $input) { … } }`.
+/// `INVALID_DRAFT` when nothing is in progress or a choice has no
+/// options; `CONFLICT` when the draft's base is no longer the head.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "PublishRevisionVariables")]
+pub struct PublishRevision {
+    #[arguments(input: $input)]
+    pub publish_revision: PublishRevisionResult,
+}
+
+/// The report always, the procedure as it now stands, and whether
+/// anything was written.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "PublishRevisionResult")]
+pub struct PublishRevisionResult {
+    pub report: ImpactReport,
+    pub published: bool,
+    pub procedure: ProcedureLifecycle,
+}
+
+/// What a publication does (or would do) to records.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "ImpactReport")]
+pub struct ImpactReport {
+    pub worst: ChangeClass,
+    pub columns: Vec<ColumnImpactEntry>,
+}
+
+/// One changed column of the report.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "ColumnImpactEntry")]
+pub struct ColumnImpactEntry {
+    pub column_id: cynic::Id,
+    pub class: ChangeClass,
+    pub change: ColumnChangeKind,
+    pub removed_options: Vec<cynic::Id>,
+}
+
+/// §3's vocabulary.
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[cynic(graphql_type = "ChangeClass")]
+pub enum ChangeClass {
+    Safe,
+    Lossy,
+    Checked,
+    Breaking,
+}
+
+/// The change's shape.
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[cynic(graphql_type = "ColumnChangeKind")]
+pub enum ColumnChangeKind {
+    Added,
+    Removed,
+    Cast,
+    ScopeMoved,
+    Forbidden,
 }
 
 /// `mutation($input: ReopenProcedureInput!) { reopenProcedure(input: $input) { … } }`.
