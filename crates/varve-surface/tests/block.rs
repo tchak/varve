@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use varve_core::{BlockId, ColumnId, GroupId, RevisionId, SurfaceId};
+use varve_core::{BlockId, ColumnId, GroupId, NodeId, RevisionId, SurfaceId};
 use varve_logic::{Atom, ColumnRef, Expr};
 use varve_schema::{
     Arity, AttachmentConstraints, Block, BlockRef, Cardinality, Column, DepthPolicy, Element,
@@ -14,8 +14,8 @@ use varve_schema::{
     revision_id,
 };
 use varve_surface::{
-    BlockDefaults, BlockDefaultsError, ColumnNode, Format, GroupNode, Node, Surface, WritePolicy,
-    admissibility, validate,
+    BlockDefaults, BlockDefaultsError, ColumnNode, Format, GroupNode, Node, Section, Surface,
+    WritePolicy, admissibility, validate,
 };
 use varve_value::RecordValues;
 
@@ -283,6 +283,195 @@ fn inclusion_pastes_with_provenance_and_nothing_downstream_knows() {
     let before = surface.clone();
     assert_eq!(
         defaults.include_into(&mut surface, None),
+        Err(varve_surface::IncludeError::DuplicateGroup(GroupId::new(
+            "rib"
+        )))
+    );
+    assert_eq!(surface, before);
+}
+
+fn text_column(id: &str, label: &str) -> Column {
+    Column {
+        id: ColumnId::new(id),
+        label: label.into(),
+        ty: ScalarType::Text,
+        arity: Arity::One,
+    }
+}
+
+fn group(id: &str, label: &str, children: Vec<Element>) -> Group {
+    Group {
+        id: GroupId::new(id),
+        label: label.into(),
+        cardinality: Cardinality::One,
+        children,
+        included_from: None,
+    }
+}
+
+fn ban_resolver(anchor: &str) -> ResolverDeclaration {
+    ResolverDeclaration {
+        id: varve_core::ResolverId::new("ban"),
+        version: 1,
+        anchor: GroupId::new(anchor),
+        input: vec![(ColumnId::new("voie"), ScalarType::Text)],
+        result_type: vec![ResultField {
+            name: "label".into(),
+            ty: ScalarType::Text,
+        }],
+        mapping: vec![],
+    }
+}
+
+/// An "adresse" block whose shell nests a "commune" group and ships a
+/// paired declaration — enough structure to collide in every way a
+/// shell can.
+fn adresse_block() -> Block {
+    Block {
+        id: BlockId::new("adresse"),
+        version: 1,
+        group: group(
+            "adresse",
+            "Adresse",
+            vec![
+                Element::Column(text_column("voie", "Voie")),
+                Element::Group(group(
+                    "commune",
+                    "Commune",
+                    vec![Element::Column(text_column("code-insee", "Code INSEE"))],
+                )),
+            ],
+        ),
+        resolvers: vec![ban_resolver("adresse")],
+    }
+}
+
+#[test]
+fn inclusion_refusals_check_the_whole_shell() {
+    let block = adresse_block();
+
+    // A *nested* shell group colliding with the including schema — the
+    // check walks the whole shell, not just its top.
+    let mut schema = Schema {
+        root: vec![Element::Group(group("commune", "Commune", vec![]))],
+        resolvers: vec![],
+    };
+    let before = schema.clone();
+    assert_eq!(
+        block.include_into(&mut schema, None),
+        Err(varve_schema::IncludeError::DuplicateGroup(GroupId::new(
+            "commune"
+        )))
+    );
+    assert_eq!(schema, before);
+
+    // A block column colliding with an existing column.
+    let mut schema = Schema {
+        root: vec![Element::Column(text_column("code-insee", "Code INSEE"))],
+        resolvers: vec![],
+    };
+    let before = schema.clone();
+    assert_eq!(
+        block.include_into(&mut schema, None),
+        Err(varve_schema::IncludeError::DuplicateColumn(ColumnId::new(
+            "code-insee"
+        )))
+    );
+    assert_eq!(schema, before);
+
+    // A declaration already present under the same (anchor, id) — the
+    // identity of §10 Q17: same id under *another* anchor would be fine.
+    let mut schema = Schema {
+        root: vec![],
+        resolvers: vec![ban_resolver("adresse")],
+    };
+    let before = schema.clone();
+    assert_eq!(
+        block.include_into(&mut schema, None),
+        Err(varve_schema::IncludeError::DuplicateResolver(
+            varve_core::ResolverId::new("ban")
+        )),
+    );
+    assert_eq!(schema, before);
+}
+
+#[test]
+fn inclusion_lands_in_a_nested_container_on_both_halves() {
+    // Schema side: the container is a group inside a group — the paste
+    // recurses to it, provenance and declarations ride along.
+    let block = adresse_block();
+    let mut schema = Schema {
+        root: vec![Element::Group(group(
+            "identite",
+            "Identité",
+            vec![Element::Group(group("contact", "Contact", vec![]))],
+        ))],
+        resolvers: vec![],
+    };
+    block
+        .include_into(&mut schema, Some(&GroupId::new("contact")))
+        .unwrap();
+    let Element::Group(identite) = &schema.root[0] else {
+        panic!("root group")
+    };
+    let Element::Group(contact) = &identite.children[0] else {
+        panic!("nested group")
+    };
+    let Element::Group(pasted) = &contact.children[0] else {
+        panic!("pasted shell")
+    };
+    assert_eq!(pasted.included_from, Some(block.reference()));
+    assert_eq!(
+        included_blocks(&schema),
+        vec![(GroupId::new("adresse"), block.reference())]
+    );
+    assert_eq!(schema.resolvers, vec![ban_resolver("adresse")]);
+
+    // Surface side: the container group node sits under a section — the
+    // paste recurses through presentation nodes too.
+    let defaults = rib_defaults();
+    let banque = GroupNode {
+        group: GroupId::new("banque"),
+        prompt: None,
+        visibility: None,
+        children: vec![],
+    };
+    let mut surface = Surface {
+        id: SurfaceId::new("public"),
+        revision: RevisionId::new("pending"),
+        nodes: vec![Node::Section(Section {
+            id: NodeId::new("coordonnees"),
+            title: "Coordonnées".into(),
+            help: None,
+            visibility: None,
+            children: vec![Node::Group(banque)],
+        })],
+        ineligibility: None,
+    };
+    // An absent container refuses surface-side too.
+    assert_eq!(
+        defaults.include_into(&mut surface, Some(&GroupId::new("nope"))),
+        Err(varve_surface::IncludeError::UnknownContainer(GroupId::new(
+            "nope"
+        )))
+    );
+    defaults
+        .include_into(&mut surface, Some(&GroupId::new("banque")))
+        .unwrap();
+    let Node::Section(section) = &surface.nodes[0] else {
+        panic!("section")
+    };
+    let Node::Group(banque) = &section.children[0] else {
+        panic!("container node")
+    };
+    assert!(matches!(
+        &banque.children[0],
+        Node::Group(g) if g.group == GroupId::new("rib")
+    ));
+    // Including again finds the pasted node even at that depth.
+    let before = surface.clone();
+    assert_eq!(
+        defaults.include_into(&mut surface, Some(&GroupId::new("banque"))),
         Err(varve_surface::IncludeError::DuplicateGroup(GroupId::new(
             "rib"
         )))
