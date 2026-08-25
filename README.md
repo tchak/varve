@@ -1,6 +1,7 @@
 # Varve
 
 [![CI](https://github.com/tchak/varve/actions/workflows/ci.yml/badge.svg)](https://github.com/tchak/varve/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tchak/varve/graph/badge.svg)](https://codecov.io/gh/tchak/varve)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust 2024](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](Cargo.toml)
 ![Status: pre-publication, 0.1.0 placeholder](https://img.shields.io/badge/status-pre--publication-lightgrey.svg)
@@ -73,6 +74,22 @@ Pre-publish (`publish = false` everywhere; nothing on crates.io).
   assembly/import, surfaces joined with their wire envelope
 - `crates/varve-wire` — tagged JSONL: writer, reader, history and
   snapshot import
+- `crates/varve-files` — Tier 5: content-addressed blob store for
+  attachments and resolver payloads over `object_store` backends;
+  encrypting implementations take a per-blob X25519 keyring
+- `crates/varve-store` — Tier 5: async persistence traits for kernel
+  objects (registries, surfaces, record logs) plus the in-memory
+  reference implementation
+- `crates/varve-service` — the choreography narrow waist:
+  transactional sequences over the store traits (first operation:
+  impact-gated publication)
+- `platform/` — the platform above the kernel (`design/platform.md`):
+  `platform-app` (the topcoat web app), `-server` (the binary),
+  `-core` (platform domain: accounts, organizations, procedures, the
+  authored tree), `-store` (the `varve-store` traits over PostgreSQL),
+  `-graphql` (the public schema, executed in-process), `-client` (its
+  typed transport-agnostic client), `-i18n` (the MessageFormat 2
+  runtime over ICU4X)
 - `tools/m0` — the corpus harness (oracle over the public DN dataset)
 - `fuzz/` — cargo-fuzz targets (see below)
 - `corpus/` — corpus analyses and results
@@ -86,19 +103,65 @@ async — timestamps and salts are inputs.
 Version control is [jj](https://github.com/jj-vcs/jj) (colocated git).
 
 ```sh
-cargo test --workspace              # 277 tests, incl. property suites
+cargo test --workspace              # 567 tests + doctests, incl. property suites
 cargo clippy --workspace --all-targets
 cargo fmt --all --check
+topcoat fmt platform                # formats view! macro bodies, which rustfmt leaves alone
 scripts/check-layering.sh           # DESIGN §13.5: no runtime/web/ORM crate below Tier 5
 scripts/fetch-corpus.sh             # download the DN corpus (~124 MB gz)
 cargo run --release -p m0           # M0 harness over the corpus
 ```
 
-CI (`.github/workflows/ci.yml`) runs the first four plus `cargo doc`
-with warnings denied and a fuzz regression pass on every push and PR.
-A second workflow (`fuzz.yml`) fuzzes each target for ten minutes
-weekly (or on demand, with a chosen duration), merges new coverage
-into the seeds and opens a pull request with them.
+CI (`.github/workflows/ci.yml`) runs the same checks on every push
+and PR — tests under [cargo-nextest](https://nexte.st) (one process
+per test; prefer it locally too, plain `cargo test` can hide
+cross-process races), `cargo doc` with warnings denied, the layering
+guard, and a fuzz regression pass. Two more workflows: `fuzz.yml`
+fuzzes each target for ten minutes weekly (or on demand, with a
+chosen duration), merges new coverage into the seeds and opens a pull
+request with them; `coverage.yml` measures coverage with
+cargo-llvm-cov on every push to main and publishes it to
+[Codecov](https://app.codecov.io/gh/tchak/varve).
+
+### The platform app locally
+
+The web app is a [topcoat](https://github.com/tokio-rs/topcoat) app
+over PostgreSQL. One-time setup:
+
+```sh
+cargo install topcoat-cli           # the `topcoat` binary (dev server, fmt, assets)
+createdb varve_platform_dev
+cp .env.example .env                # then fill in COOKIE_KEY (openssl rand -base64 64)
+```
+
+Then:
+
+```sh
+topcoat dev -p platform-server
+```
+
+builds, bundles the assets (the Tailwind stylesheet), serves on
+`127.0.0.1:3000`, and watches: on change it rebuilds, rebundles,
+restarts, and open pages reload themselves. Pending migrations apply
+at boot. Plain `cargo run -p platform-server` also works, minus
+assets (pages come up unstyled) and reload.
+
+### The DB-backed and browser tests
+
+`cargo test --workspace` needs no setup: tests gated on a database or
+a browser pass vacuously without one. To run them for real, the way
+CI does:
+
+```sh
+createdb varve_platform_test
+export VARVE_TEST_DATABASE_URL=postgres://localhost/varve_platform_test  # real env, not .env
+cargo run -p platform-app --example install-browsers  # Playwright engines, pinned via Cargo.lock
+cargo nextest run --workspace
+```
+
+The browser e2e suite (`platform/platform-app/tests/e2e/`) runs on
+every installed Playwright engine — chromium, firefox, webkit — and
+skips the absent ones.
 
 Fuzz targets live in `fuzz/` (excluded from the workspace; needs
 `cargo install cargo-fuzz` and a nightly toolchain):
