@@ -1138,13 +1138,21 @@ async fn close_and_reopen_transition_and_log() {
         ]
     );
 
-    // The columns a fresh read sees match the in-place row.
+    // The columns a fresh read sees match the in-place row. The
+    // timestamp compares within Postgres's microsecond precision:
+    // the in-memory row keeps the nanoseconds the clock produced,
+    // the stored column cannot hold them.
     let fetched = find_procedure(&mut db, procedure.id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(fetched.state, procedure.state);
-    assert_eq!(fetched.state_since, procedure.state_since);
+    let stored = fetched.state_since.expect("stored since");
+    let held = procedure.state_since.expect("held since");
+    assert!(
+        stored.duration_since(held).abs() < jiff::SignedDuration::from_micros(1),
+        "{stored} vs {held}"
+    );
 }
 
 #[tokio::test]
@@ -1196,10 +1204,13 @@ async fn publish(
         .await?
         .expect("procedure exists");
     let mut tx = db.transaction().await?;
-    let shared: platform_core::SharedExecutor =
-        tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
-    let outcome = publish_procedure(&shared, store, &mut procedure, actor, confirm).await?;
-    drop(shared);
+    // The mutex borrows the transaction; its scope ends before the
+    // commit needs the borrow back.
+    let outcome = {
+        let shared: platform_core::SharedExecutor =
+            tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
+        publish_procedure(&shared, store, &mut procedure, actor, confirm).await?
+    };
     tx.commit().await?;
     Ok((outcome, procedure))
 }
