@@ -602,7 +602,26 @@ change away from them takes the arity back to one. Out of scope,
 deliberately: publishing, surface properties, blocks and published
 nomenclatures, undo.
 
-## P.5 GraphQL schema
+**Procedure history (settled 2026-08-25).** The procedure page grows
+a *History* section: the event log (graphql.md G.11) rendered
+newest-first — presentation order only, the log stays oldest-first —
+one localized line per event naming what happened, who acted
+("system" when nobody did), and when (CLDR date, MF2 messages, never
+assembled). Each `PUBLISHED` row links to
+`…/procedures/{pid}/history/{event-id}`, the **diff page**: the
+publication's impact report (`ProcedurePublishedEvent.report` —
+recomputed at read time, G.11.4) rendered as the publish
+confirmation renders its report, with two differences the entry
+labels (G.11.5) buy: removed columns are *named*, not aggregated
+into a count, and no companion elements fetch is needed. A first
+publication (`base: null`) renders through the same path — the
+report against the empty schema is the initial column list, no
+special case. The publish confirmation adopts the server-resolved
+labels too, retiring its client-side label lookup and its removal
+aggregation. Deliberately out: browsing a historical revision's full
+tree (the G.8 read side — the diff page shows what a publication
+*changed*, not everything it contained) and any pagination — the
+trail is bounded by design (G.9.3).
 
 **Moved to `design/graphql.md` (2026-08-22).** The schema design grew
 past a section; it has its own document with its own numbering (G.x).

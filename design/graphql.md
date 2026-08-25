@@ -179,6 +179,16 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    procedure's table configuration, the viewer's saved view, or both
    — and how that interacts with surface scoping and mixed revisions
    (DESIGN §5.5). P1, with the reviewer table.
+4. **Persisting the confirmed report.** Today the history diff
+   (G.11) recomputes exactly what `publishRevision` gated on,
+   because `ImpactReport` is a pure function of the two schemas.
+   The day record assessments join the report (G.10.2's reserved
+   room), a publish-time report over live records becomes a
+   point-in-time fact recomputation cannot reproduce — showing
+   "what the administrator confirmed" would then mean persisting
+   the report on the `published` event's facts at publish time.
+   Not needed until that day; the historical read stays the
+   schema-only classification either way.
 
 ## G.6 The P0 slice (settled 2026-08-22)
 
@@ -489,8 +499,11 @@ logs*, shipped before publication itself (the kernel edge).
    `null` for a system event or an account since deleted — the
    entry outlives both. `PUBLISHED` is in the kind enum from day
    one (the alphabet is settled) with no writer until publication
-   lands. Full-object only: the trail is the administrator's
-   detail view, not list-row material.
+   lands (it gained one with G.10.4). Full-object only: the trail
+   is the administrator's detail view, not list-row material.
+   **Amended 2026-08-25 (G.11):** `ProcedureEvent` becomes an
+   interface so the `published` event can carry its facts; the
+   row's shared shape is unchanged.
 
 ## G.10 `publishRevision` (settled 2026-08-24)
 
@@ -518,6 +531,8 @@ The G.1 mutation made concrete, on platform P.4 *Publication*.
    says what changed). The kernel report's unit and constraint
    detail, blocks, broken rules, and record assessments join the
    type as the platform grows them; the shape leaves room.
+   **Amended 2026-08-25 (G.11.4):** `ColumnImpactEntry` carries
+   `label: String!`, resolved server-side from the two schemas.
 3. **Errors.** A procedure with no draft, or a draft an enum of
    which has no options (G.7: publication is where an empty choice
    is refused; the kernel deliberately accepts it as a draft
@@ -539,3 +554,69 @@ The G.1 mutation made concrete, on platform P.4 *Publication*.
    do without one being attempted. `publishRevision` stays the only
    writer; the read is the store's point lookup of the base schema
    plus the pure classifier.
+
+## G.11 History and the publication diff (settled 2026-08-25)
+
+The read side of the audit trail: the events list *is* the history,
+and each publication answers the diff it made. Settled by design
+argument on G.9, G.10 and the kernel store shape.
+
+1. **The events list is the history; no new list.**
+   `Procedure.events` (G.9.3) already carries the timeline —
+   lifecycle transitions with actors and dates, bounded by design —
+   and the `published` rows carry `{ revision, base }` facts
+   (G.10.4). History needed no new query, only those facts made
+   API-visible. Newest-first is presentation; the log stays oldest
+   first.
+2. **`ProcedureEvent` becomes an interface** — the schema's first —
+   with the G.9.3 row as its shared shape (`id`, `kind`, `actor`,
+   `createdAt`) and one member per kind:
+   `ProcedureCreatedEvent | ProcedurePublishedEvent |
+   ProcedureClosedEvent | ProcedureReopenedEvent`. Only
+   `ProcedurePublishedEvent` adds fields: `revision: ID!` and
+   `base: ID` (`null` = first publication — the honest optional the
+   platform facts already store). This is G.2 rule 5 applied to
+   events — facts live where they are meaningful, so no nullable
+   `revision` on a `CLOSED` row — but as an interface, not a union:
+   the state unions share nothing, while every event shares the
+   trail's shape, and union members would each re-declare it.
+   `kind` stays on the interface, the G.7.2 precedent (clients that
+   want the constructor without matching on `__typename`).
+3. **The diff hangs on the event, not on a `Revision` object.**
+   `base` is a *publication* fact, not a revision fact: a revert
+   republishes the same content-address with a different base
+   (DESIGN §2.1), and content-addressed objects converge across
+   lineages — so "revision → its base" is not a function, and the
+   event is the publication edge a diff describes. G.2 rule 1's
+   root `revision(id)` remains reserved for the G.8 read side
+   (browsing a historical tree), which this slice deliberately does
+   not build.
+4. **The diff *is* the report, recomputed.**
+   `ProcedurePublishedEvent.report: ImpactReport!` — the exact
+   classification `publishRevision` gated on (G.10.1), computed at
+   read time from the two content-addressed schemas
+   (`RevisionStore::schema` point lookups; a `null` base classifies
+   against the empty schema, so a first publication renders as the
+   initial column list with no special case) through the pure
+   classifier — the G.10.5 move again, resolved only when the field
+   is selected. Recomputation is *exact* because today's report is
+   a pure function of the two schemas; the day record assessments
+   join it, the historical read keeps the schema-only
+   classification and persisting the confirmed report becomes G.5
+   Q4. With the labels now on the entries (below), the report needs
+   no companion tree fetch to render.
+5. **`ColumnImpactEntry.label: String!`** (amends G.10.2): resolved
+   server-side from the next schema, falling back to the base
+   schema for `REMOVED` columns — kernel schemas carry labels, so
+   the store already holds them for every published revision. This
+   serves every consumer of the type: the publish confirmation had
+   to aggregate removals into a count because a removed column has
+   no label in the *draft* tree the client holds; the base schema
+   names it.
+6. **`Procedure.event(id: ID!): ProcedureEvent`** — the point
+   lookup the diff page reads, beside the list. Without it, reading
+   one publication's report means selecting `report` across the
+   whole list and computing every publication's classification to
+   show one. `null` for an unknown id, the G.6.2 absent/invisible
+   rule; no breach of G.2 rule 1 (a scoped point lookup inside the
+   full object, not a traversal).
