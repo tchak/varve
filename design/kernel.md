@@ -2397,6 +2397,67 @@ Only then: `surface`, `store`, service.
     Decide when count bounds are first built; the choice is invisible
     to the wire until then.
 
+23. **What a publication commits to.** Found 2026-08-25 through the
+    platform's history page: a surface-only change (a section renamed,
+    a requiredness rule tightened) derives the same revision id as its
+    base — §2.13 decision 7, deliberate and not in question here — so
+    publication appends a DAG node whose revision equals its parent's
+    (a duplicate id in a DAG keyed by revision id) and stores its
+    surfaces under the same `(revision, surface id)` keys,
+    **overwriting the previous publication's surfaces in place**. The
+    old presentation is destroyed: `authored_against_revision` still
+    resolves, but the surface an actor was actually shown is gone, and
+    the history diff between the two publications is empty by
+    construction — not unrendered, uncomputable. For a kernel whose
+    thesis is history read back layer by layer, an overwrite on the
+    publish path is corruption, not a display gap. The candidate
+    shape: surfaces gain their own content addresses
+    (`surface_canonical` exists; block defaults already hash — §2.13
+    decision 7 calls surfaces "separate objects"), the surface store
+    becomes immutable under that address (put is idempotent or
+    refuses, never replaces), and `Publication` carries its surface
+    addresses beside the revision id — **publication identity =
+    revision + surface set**, while revision identity stays
+    schema-only so records never migrate over presentation.
+    Sub-questions: is a fully identical publication (same revision,
+    same surfaces) refused as a no-op or appended as a deliberate
+    re-publish; does the wire `surface` line grow a `hash` field and
+    the manifest pin surface addresses (§5 — Q14's completeness
+    argument says a bundle should verify them); and what the platform
+    event's facts carry (P.4) so the diff page can name both
+    endpoints. Blocks Q24 — a surface diff needs both surfaces kept.
+
+24. **Surface changes and relabels are invisible to the impact
+    report.** Found with Q23: `classify` is schema → schema, so every
+    surface fact is outside the report's vocabulary — and §2.6
+    deliberately made requiredness a surface property, so the change
+    most consequential for in-flight records (optional → required: a
+    record admissible yesterday is non-admissible today, with no entry
+    written) can neither appear in the report nor trigger the
+    confirmation gate, which fires only above `Safe`. Adjacent and
+    schema-side: labels are identity-bearing (§2.13 decision 7) but
+    the classification compares only type, arity and scope, so a
+    relabel publishes a genuinely new revision whose report reads "no
+    changes." Placement is constrained by §7: **nothing depends on
+    `varve-surface`**, and `varve-impact` (Tier 2) sits below it, so
+    `impact` cannot name surface types. Candidates: (a) a diff module
+    in `varve-surface` itself — surface × surface → its own report,
+    reusing `impact`'s `ChangeClass` vocabulary (a Tier 3 → Tier 2
+    dependency, legal), composed with the schema report by whoever
+    holds both (`varve-service`, the platform) — the same hand-down
+    pattern §7 already records for rules and pending resolutions;
+    (b) platform-side only, a diff over the two stored authoring
+    trees; (c) widening `varve-impact` to take surfaces — rejected on
+    sight, it points the dependency up the tier and breaks "nothing
+    depends on `varve-surface`". Sub-questions: does an
+    admissibility-tightening surface change deserve the confirm gate
+    the way `Lossy` does (records never break — §2.6, never globally
+    invalid — but they lapse, which is Q21's time-varying
+    admissibility in another costume); and does the schema-side report
+    grow a `Relabeled` change kind independently — it needs no surface
+    and no new dependency. Blocked by Q23: there is no surface diff
+    while only the latest surface survives.
+
 ## 11. Prior art to consult
 
 **Directly liftable**
