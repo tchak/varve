@@ -186,7 +186,7 @@ where
     };
 
     let state = ProcedureState::from_columns(procedure.state, procedure.state_since)?
-        .publish(jiff::Timestamp::now());
+        .publish(crate::procedure::stored_now());
     let (value, since) = state.columns();
     let facts = PublishedFacts {
         revision: revision.as_str().to_owned(),

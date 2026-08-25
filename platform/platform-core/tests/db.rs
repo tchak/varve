@@ -1138,21 +1138,16 @@ async fn close_and_reopen_transition_and_log() {
         ]
     );
 
-    // The columns a fresh read sees match the in-place row. The
-    // timestamp compares within Postgres's microsecond precision:
-    // the in-memory row keeps the nanoseconds the clock produced,
-    // the stored column cannot hold them.
+    // The columns a fresh read sees match the in-place row —
+    // exactly: `stored_now` mints at the store's microsecond
+    // precision, so the updated row and its fresh read cannot
+    // disagree.
     let fetched = find_procedure(&mut db, procedure.id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(fetched.state, procedure.state);
-    let stored = fetched.state_since.expect("stored since");
-    let held = procedure.state_since.expect("held since");
-    assert!(
-        stored.duration_since(held).abs() < jiff::SignedDuration::from_micros(1),
-        "{stored} vs {held}"
-    );
+    assert_eq!(fetched.state_since, procedure.state_since);
 }
 
 #[tokio::test]

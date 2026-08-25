@@ -300,6 +300,16 @@ pub enum LifecycleError {
     Db(#[from] toasty::Error),
 }
 
+/// The clock as a stored column will hold it: Postgres keeps
+/// timestamps at microsecond precision, so a nanosecond `now` would
+/// make the in-place-updated row disagree with its own fresh read.
+/// Every timestamp minted for a row goes through this.
+pub fn stored_now() -> jiff::Timestamp {
+    jiff::Timestamp::now()
+        .round(jiff::Unit::Microsecond)
+        .expect("rounding a real clock reading to microseconds cannot overflow")
+}
+
 /// Closes a published procedure to new submissions
 /// ([`ProcedureState::close`]), logging the `closed` event. On
 /// success the row is updated in place.
@@ -308,7 +318,7 @@ pub async fn close_procedure(
     procedure: &mut Procedure,
     actor_account_id: uuid::Uuid,
 ) -> Result<(), LifecycleError> {
-    let state = current_state(procedure)?.close(jiff::Timestamp::now())?;
+    let state = current_state(procedure)?.close(stored_now())?;
     apply_transition(
         db,
         procedure,
@@ -327,7 +337,7 @@ pub async fn reopen_procedure(
     procedure: &mut Procedure,
     actor_account_id: uuid::Uuid,
 ) -> Result<(), LifecycleError> {
-    let state = current_state(procedure)?.reopen(jiff::Timestamp::now())?;
+    let state = current_state(procedure)?.reopen(stored_now())?;
     apply_transition(
         db,
         procedure,
