@@ -154,6 +154,16 @@ pub enum EditError {
     UnknownParent(Parent),
     #[error("no such element: {0:?}")]
     UnknownElement(ElementId),
+    /// A parent that names an existing element of the wrong kind:
+    /// only groups and sections hold children.
+    #[error("parent {0:?} is not a group or a section")]
+    ParentNotContainer(ElementId),
+    /// An id that names nothing in the tree, of any kind. The typed
+    /// variants above carry the kind the caller *asked* for; this one
+    /// is for the API layer, which resolves a bare string id against
+    /// the tree and cannot honestly name a kind for a miss.
+    #[error("no element with id '{0}'")]
+    UnknownId(String),
     /// The `before` anchor is not a child of the placement's parent
     /// (or, on a move, is the moved element itself).
     #[error("{anchor:?} is not a child of {parent:?}")]

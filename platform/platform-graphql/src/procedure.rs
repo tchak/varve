@@ -72,12 +72,12 @@ impl Procedure {
         if self.procedure.revision_draft.is_unloaded() {
             return Err(internal("procedure loaded without its revision draft"));
         }
-        let working = platform_core::working_tree(&self.procedure).map_err(internal)?;
-        Ok(RevisionDraft::new(
-            working.base.as_deref(),
-            &working.tree,
-            working.in_progress,
-        ))
+        let platform_core::WorkingTree {
+            tree,
+            base,
+            in_progress,
+        } = platform_core::working_tree(&self.procedure).map_err(internal)?;
+        Ok(RevisionDraft::new(base.as_deref(), tree, in_progress))
     }
 }
 

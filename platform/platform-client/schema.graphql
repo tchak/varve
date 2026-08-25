@@ -540,8 +540,10 @@ type Mutation {
 	"""
 	removeElement(input: RemoveElementInput!): Procedure!
 	"""
-	Drops the procedure's revision draft; `revisionDraft` is `null`
-	afterwards.
+	Drops the stored working buffer, if any: `revisionDraft`
+	reverts to *head until touched* — the published head's tree
+	(or the empty tree when never published) with `inProgress:
+	false`. On a pristine draft this is a no-op.
 	"""
 	discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!
 }

@@ -14,7 +14,7 @@ use async_graphql::{Enum, ID, InputObject, OneofObject, SimpleObject, Union};
 use platform_core::{
     ElementId, Parent, Placement, Tree, TreeColumn, TreeElement, TreeGroup, TreeNote, TreeSection,
 };
-use varve_core::{ColumnId, GroupId, OptionId};
+use varve_core::OptionId;
 use varve_schema::{AttachmentConstraints, NomenclatureRef, OptionRow, ScalarType};
 use varve_surface::Format;
 
@@ -41,20 +41,21 @@ pub struct RevisionDraft {
     /// store a draft. `publishRevision` refuses a pristine draft
     /// (`INVALID_DRAFT`); `discardRevisionDraft` on one is a no-op.
     pub in_progress: bool,
-    /// The draft's derived kernel schema, kept for [`Self::report`].
+    /// The authored tree, kept for [`Self::report`] — the kernel
+    /// schema is derived there, only when the report is selected.
     #[graphql(skip)]
-    schema: varve_schema::Schema,
+    tree: Tree,
 }
 
 impl RevisionDraft {
-    pub fn new(base: Option<&str>, tree: &Tree, in_progress: bool) -> Self {
+    pub fn new(base: Option<&str>, tree: Tree, in_progress: bool) -> Self {
         let mut elements = Vec::new();
         push_elements(&mut elements, None, &tree.elements);
         Self {
             base: base.map(ID::from),
             elements,
             in_progress,
-            schema: tree.schema(),
+            tree,
         }
     }
 }
@@ -87,7 +88,8 @@ impl RevisionDraft {
             }
             None => None,
         };
-        let report = platform_core::draft_report(base.as_ref(), &self.schema).map_err(internal)?;
+        let report =
+            platform_core::draft_report(base.as_ref(), &self.tree.schema()).map_err(internal)?;
         Ok(crate::impact::ImpactReport::from(&report))
     }
 }
@@ -417,56 +419,54 @@ pub fn column_type(
     format: Option<&Format>,
 ) -> ColumnType {
     let multiple = arity == varve_schema::Arity::Many;
-    {
-        match ty {
-            ScalarType::Text => ColumnType::Text(TextType {
-                kind: ColumnTypeKind::Text,
-                format: format.map(text_format),
-            }),
-            ScalarType::Boolean => ColumnType::Boolean(BooleanType {
-                kind: ColumnTypeKind::Boolean,
-            }),
-            ScalarType::Integer(unit) => ColumnType::Integer(IntegerType {
-                kind: ColumnTypeKind::Integer,
-                unit: unit.map(Into::into),
-            }),
-            ScalarType::Decimal(unit) => ColumnType::Decimal(DecimalType {
-                kind: ColumnTypeKind::Decimal,
-                unit: unit.map(Into::into),
-            }),
-            ScalarType::Date => ColumnType::Date(DateType {
-                kind: ColumnTypeKind::Date,
-            }),
-            ScalarType::Datetime => ColumnType::Datetime(DatetimeType {
-                kind: ColumnTypeKind::Datetime,
-            }),
-            ScalarType::Enum(backing) => ColumnType::Enum(EnumType {
-                kind: ColumnTypeKind::Enum,
-                multiple,
-                options: match backing {
-                    NomenclatureRef::Inline(rows) => rows
-                        .iter()
-                        .map(|row| EnumOption {
-                            id: ID::from(row.id.as_str()),
-                            label: row.label.clone(),
-                        })
-                        .collect(),
-                    // Not producible through this API yet; shown as
-                    // an enum with no inline options rather than hidden.
-                    NomenclatureRef::Published { .. } => Vec::new(),
-                },
-            }),
-            ScalarType::Attachment(constraints) => ColumnType::Attachment(AttachmentType {
-                kind: ColumnTypeKind::Attachment,
-                multiple,
-                accept: constraints.accept.clone(),
-                max_bytes: constraints.max_bytes,
-            }),
-            ScalarType::Geometry => ColumnType::Geometry(GeometryType {
-                kind: ColumnTypeKind::Geometry,
-                multiple,
-            }),
-        }
+    match ty {
+        ScalarType::Text => ColumnType::Text(TextType {
+            kind: ColumnTypeKind::Text,
+            format: format.map(text_format),
+        }),
+        ScalarType::Boolean => ColumnType::Boolean(BooleanType {
+            kind: ColumnTypeKind::Boolean,
+        }),
+        ScalarType::Integer(unit) => ColumnType::Integer(IntegerType {
+            kind: ColumnTypeKind::Integer,
+            unit: unit.map(Into::into),
+        }),
+        ScalarType::Decimal(unit) => ColumnType::Decimal(DecimalType {
+            kind: ColumnTypeKind::Decimal,
+            unit: unit.map(Into::into),
+        }),
+        ScalarType::Date => ColumnType::Date(DateType {
+            kind: ColumnTypeKind::Date,
+        }),
+        ScalarType::Datetime => ColumnType::Datetime(DatetimeType {
+            kind: ColumnTypeKind::Datetime,
+        }),
+        ScalarType::Enum(backing) => ColumnType::Enum(EnumType {
+            kind: ColumnTypeKind::Enum,
+            multiple,
+            options: match backing {
+                NomenclatureRef::Inline(rows) => rows
+                    .iter()
+                    .map(|row| EnumOption {
+                        id: ID::from(row.id.as_str()),
+                        label: row.label.clone(),
+                    })
+                    .collect(),
+                // Not producible through this API yet; shown as
+                // an enum with no inline options rather than hidden.
+                NomenclatureRef::Published { .. } => Vec::new(),
+            },
+        }),
+        ScalarType::Attachment(constraints) => ColumnType::Attachment(AttachmentType {
+            kind: ColumnTypeKind::Attachment,
+            multiple,
+            accept: constraints.accept.clone(),
+            max_bytes: constraints.max_bytes,
+        }),
+        ScalarType::Geometry => ColumnType::Geometry(GeometryType {
+            kind: ColumnTypeKind::Geometry,
+            multiple,
+        }),
     }
 }
 
@@ -663,20 +663,18 @@ pub struct PlacementInput {
 impl PlacementInput {
     /// Resolves parent and anchor against `tree`: both must name
     /// elements in the draft (which kind is looked up, since the API
-    /// carries one `ID` for all four). A parent that is not a group
-    /// or section — or unknown — is [`platform_core::EditError::UnknownParent`].
+    /// carries one `ID` for all four). An unknown id is
+    /// [`platform_core::EditError::UnknownId`]; a parent that exists
+    /// but is not a group or section is
+    /// [`platform_core::EditError::ParentNotContainer`].
     pub fn resolve(&self, tree: &Tree) -> Result<Placement, platform_core::EditError> {
         Ok(Placement {
             parent: match &self.parent_id {
                 None => Parent::Root,
-                Some(id) => match element_id(tree, id) {
-                    Ok(ElementId::Group(group)) => Parent::Group(group),
-                    Ok(ElementId::Section(section)) => Parent::Section(section),
-                    _ => {
-                        return Err(platform_core::EditError::UnknownParent(Parent::Group(
-                            GroupId::new(id.as_str()),
-                        )));
-                    }
+                Some(id) => match element_id(tree, id)? {
+                    ElementId::Group(group) => Parent::Group(group),
+                    ElementId::Section(section) => Parent::Section(section),
+                    other => return Err(platform_core::EditError::ParentNotContainer(other)),
                 },
             },
             before: match &self.before_id {
@@ -688,7 +686,8 @@ impl PlacementInput {
 }
 
 /// The kernel identity behind a draft `ID`: whichever kind the draft
-/// holds under that string.
+/// holds under that string; a miss is
+/// [`platform_core::EditError::UnknownId`].
 pub fn element_id(tree: &Tree, id: &ID) -> Result<ElementId, platform_core::EditError> {
     fn find(elements: &[TreeElement], id: &str) -> Option<ElementId> {
         elements.iter().find_map(|e| match e {
@@ -703,9 +702,8 @@ pub fn element_id(tree: &Tree, id: &ID) -> Result<ElementId, platform_core::Edit
             _ => None,
         })
     }
-    find(&tree.elements, id.as_str()).ok_or_else(|| {
-        platform_core::EditError::UnknownElement(ElementId::Column(ColumnId::new(id.as_str())))
-    })
+    find(&tree.elements, id.as_str())
+        .ok_or_else(|| platform_core::EditError::UnknownId(id.as_str().to_owned()))
 }
 
 /// A new column as `addColumn` builds it.

@@ -368,7 +368,7 @@ impl Mutation {
         match platform_core::create_organization_for(
             &mut db,
             input.slug.as_str(),
-            &input.name,
+            input.name.trim(),
             principal.account_id,
         )
         .await
@@ -393,7 +393,7 @@ impl Mutation {
         let organization =
             administered_organization(&mut db, principal.account_id, &input.organization_id)
                 .await?;
-        let team = platform_core::create_team(&mut db, organization.id, &input.name)
+        let team = platform_core::create_team(&mut db, organization.id, input.name.trim())
             .await
             .map_err(internal)?;
         Ok(Team {
@@ -418,8 +418,8 @@ impl Mutation {
             &mut db,
             organization.id,
             principal.account_id,
-            &input.title,
-            &input.description,
+            input.title.trim(),
+            input.description.trim(),
         )
         .await
         .map_err(internal)?;
@@ -540,15 +540,18 @@ impl Mutation {
         let label = input.label.trim().to_owned();
         edit_revision_draft(ctx, &input.procedure_id, move |tree| {
             let placement = input.placement.resolve(tree)?;
-            // Omitted, requiredness defaults by the column's
-            // *effective* audience (G.7): public required,
+            // One resolution of the parent's effective audience
+            // decides both facts (G.7 *Required on columns*): the
+            // stored audience is the authored one already clamped to
+            // it — `add_element`'s own clamp is then the idempotent
+            // backstop — and, omitted, requiredness defaults by the
+            // column's effective audience: public required,
             // reviewer-only optional.
-            let audience: platform_core::Audience = input.audience.into();
-            let effective =
-                platform_core::effective_audience(tree, &placement.parent)?.narrowest(audience);
+            let audience = platform_core::effective_audience(tree, &placement.parent)?
+                .narrowest(input.audience.into());
             let required = input
                 .required
-                .unwrap_or(effective == platform_core::Audience::All);
+                .unwrap_or(audience == platform_core::Audience::All);
             platform_core::add_element(
                 tree,
                 &placement,
@@ -763,8 +766,10 @@ impl Mutation {
         .await
     }
 
-    /// Drops the procedure's revision draft; `revisionDraft` is `null`
-    /// afterwards.
+    /// Drops the stored working buffer, if any: `revisionDraft`
+    /// reverts to *head until touched* — the published head's tree
+    /// (or the empty tree when never published) with `inProgress:
+    /// false`. On a pristine draft this is a no-op.
     async fn discard_revision_draft(
         &self,
         ctx: &Context<'_>,

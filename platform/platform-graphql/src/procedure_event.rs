@@ -3,15 +3,20 @@
 //! for a system event or an account since deleted; the log entry
 //! itself outlives both.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use async_graphql::{ID, Object};
 
 use crate::error::internal;
 use crate::member::AccountRef;
 
-/// One entry in a procedure's audit trail.
+/// One entry in a procedure's audit trail. The actor is shared across
+/// entries (`Arc`): one administrator usually accounts for the whole
+/// trail.
 pub struct ProcedureEvent {
     event: platform_core::ProcedureEvent,
-    actor: Option<platform_core::Account>,
+    actor: Option<Arc<platform_core::Account>>,
 }
 
 #[Object]
@@ -29,7 +34,7 @@ impl ProcedureEvent {
     /// Who acted; `null` for a system event — or an account since
     /// deleted.
     async fn actor(&self) -> Option<AccountRef<'_>> {
-        self.actor.as_ref().map(AccountRef)
+        self.actor.as_deref().map(AccountRef)
     }
 
     /// When it happened.
@@ -51,8 +56,9 @@ pub enum ProcedureEventKind {
 }
 
 /// A procedure's events, oldest first, actors resolved. One account
-/// fetch per event — the list is bounded by design (transitions and
-/// draft discards), so no dataloader yet (P.6 owns that story).
+/// fetch per **distinct** actor — the list is bounded by design
+/// (lifecycle transitions only), so no dataloader yet (P.6 owns that
+/// story).
 pub(crate) async fn procedure_events(
     db: &mut toasty::Db,
     procedure_id: uuid::Uuid,
@@ -60,15 +66,24 @@ pub(crate) async fn procedure_events(
     let events = platform_core::list_procedure_events(db, procedure_id)
         .await
         .map_err(internal)?;
-    let mut resolved = Vec::with_capacity(events.len());
-    for event in events {
-        let actor = match event.actor_account_id {
-            Some(id) => platform_core::find_account(db, id)
+    let mut actors: HashMap<uuid::Uuid, Option<Arc<platform_core::Account>>> = HashMap::new();
+    for event in &events {
+        if let Some(id) = event.actor_account_id
+            && let std::collections::hash_map::Entry::Vacant(slot) = actors.entry(id)
+        {
+            let account = platform_core::find_account(db, id)
                 .await
-                .map_err(internal)?,
-            None => None,
-        };
-        resolved.push(ProcedureEvent { event, actor });
+                .map_err(internal)?;
+            slot.insert(account.map(Arc::new));
+        }
     }
-    Ok(resolved)
+    Ok(events
+        .into_iter()
+        .map(|event| {
+            let actor = event
+                .actor_account_id
+                .and_then(|id| actors.get(&id).cloned().flatten());
+            ProcedureEvent { event, actor }
+        })
+        .collect())
 }

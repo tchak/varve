@@ -149,13 +149,25 @@ impl Query {
         let procedures = platform_core::list_account_procedures(&mut db, principal.account_id)
             .await
             .map_err(internal)?;
-        Ok(procedures
+        procedures
             .into_iter()
-            .filter_map(|procedure| {
-                let organization = organizations.get(&procedure.organization_id)?.clone();
-                Some(ProcedureRef::new(procedure, organization))
+            .map(|procedure| {
+                // Both reads walk the viewer's memberships, so a miss
+                // is a wiring bug — or a membership added between the
+                // two reads, which a retry resolves. Surfaced, never
+                // silently dropped.
+                let organization = organizations
+                    .get(&procedure.organization_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        internal(format!(
+                            "procedure {} listed without its organization {}",
+                            procedure.id, procedure.organization_id
+                        ))
+                    })?;
+                Ok(ProcedureRef::new(procedure, organization))
             })
-            .collect())
+            .collect()
     }
 }
 
