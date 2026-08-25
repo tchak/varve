@@ -64,6 +64,7 @@ use topcoat::{
 use crate::{
     auth::{account, principal},
     components::{
+        breadcrumbs::Crumb,
         button::{ButtonSize, ButtonVariant, button_variants},
         dropdown_menu::{
             dropdown_menu, dropdown_menu_content, dropdown_menu_item, dropdown_menu_label,
@@ -97,6 +98,15 @@ async fn redirect_to(cx: &Cx, location: String) -> Result {
         (StatusCode::SEE_OTHER)
         ((header::LOCATION, location))
     }
+}
+
+/// The breadcrumb trail's root (P.4 *Breadcrumb navigation*): the
+/// localized *Organizations* crumb every trail starts with.
+async fn organizations_crumb(cx: &Cx) -> Result<Crumb> {
+    Ok(Crumb::link(
+        t(cx, "organizations.title").await?,
+        href!(organizations::page).resolve(cx),
+    ))
 }
 
 /// Several message arguments at once.

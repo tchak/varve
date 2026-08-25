@@ -167,7 +167,11 @@ async fn the_history_lists_events_and_each_publication_answers_its_diff() {
         html.contains("\u{201c}Nom\u{201d} is added \u{2014} no impact on existing answers."),
         "{html}"
     );
-    assert!(html.contains("Back to the procedure"), "{html}");
+    // Upward navigation is the breadcrumb trail: the procedure is a
+    // link, the publication itself the current crumb.
+    assert!(html.contains("data-breadcrumbs"), "{html}");
+    assert!(html.contains(&format!("href=\"{procedure}\"")), "{html}");
+    assert!(html.contains("aria-current=\"page\""), "{html}");
 
     // Second publication: one column added, one removed. Newest
     // first on the page; the diff names the removal by the *base*
@@ -270,5 +274,5 @@ async fn the_history_speaks_french() {
         html.contains("«\u{a0}Nom\u{a0}» est ajoutée \u{2014} sans impact"),
         "{html}"
     );
-    assert!(html.contains("Retour à la procédure"), "{html}");
+    assert!(html.contains("Fil d'Ariane"), "{html}");
 }

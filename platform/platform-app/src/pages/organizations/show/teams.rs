@@ -31,6 +31,7 @@ use topcoat::{
 use crate::{
     client,
     components::{
+        breadcrumbs::{Crumb, breadcrumbs},
         button::button,
         card::{card, card_content, card_footer, card_header},
         field::field,
@@ -78,7 +79,15 @@ async fn organization_teams(cx: &Cx) -> Result<OrganizationTeams> {
 async fn teams_page(cx: &Cx, organization: OrganizationTeams, form: CreationForm) -> Result {
     let organization_id: uuid::Uuid = organization.id.inner().parse()?;
     let title = t(cx, "teams.title").await?;
-    let lead = t(cx, "teams.lead").await?;
+    let crumb_label = t(cx, "nav.breadcrumb").await?;
+    let crumbs = vec![
+        crate::pages::organizations_crumb(cx).await?,
+        Crumb::link(
+            organization.name.clone(),
+            href!(super::page, OrganizationId(organization_id)).resolve(cx),
+        ),
+        Crumb::here(title.clone()),
+    ];
     let list_heading = t(cx, "teams.list.title").await?;
     let empty = t(cx, "teams.list.empty").await?;
     let create_heading = t(cx, "teams.create.title").await?;
@@ -87,17 +96,8 @@ async fn teams_page(cx: &Cx, organization: OrganizationTeams, form: CreationForm
     view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
+                breadcrumbs(label: crumb_label, crumbs: crumbs)
                 page_title((title))
-                <p class="text-sm text-muted-foreground">
-                    (lead)
-                    " "
-                    <a
-                        href=(href!(super::page, OrganizationId(organization_id)))
-                        class="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                        (organization.name.as_str())
-                    </a>
-                </p>
             </div>
             card(
                 card_header(<h2 class="leading-none font-semibold">(list_heading)</h2>)

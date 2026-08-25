@@ -16,6 +16,10 @@ file = "src/components/alert.rs"
 hash = "sha256:237e2d1d23687302808316618a4de08cbf0cf5ffbadb49117d00df86a9166b0f"
 file = "src/components/badge.rs"
 
+[registries.topcoat.components.breadcrumb]
+hash = "sha256:1540711f2c98e58dd0ca0fbce8f7a7a2a103b6d3f48dbfbf2fc5a8581bc5d152"
+file = "src/components/breadcrumb.rs"
+
 [registries.topcoat.components.button]
 hash = "sha256:ba4ab32d87e4c9a982faf657258edd8cf2a0da904ece5976e70185eeb5808f57"
 file = "src/components/button.rs"

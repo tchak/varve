@@ -32,6 +32,7 @@ use crate::{
     client,
     components::{
         badge::{BadgeVariant, badge},
+        breadcrumbs::{Crumb, breadcrumbs},
         button::{ButtonSize, ButtonVariant, button, button_variants},
         page_title::page_title,
         tabs::{tabs, tabs_list, tabs_trigger},
@@ -80,7 +81,7 @@ pub(in crate::pages) async fn header(
         &one_arg("procedure", procedure.title.clone()),
     )
     .await?;
-    let back = t(cx, "schema.back").await?;
+    let crumb_label = t(cx, "nav.breadcrumb").await?;
     let draft_badge = t(cx, "procedure.draft.badge").await?;
     let discard_label = t(cx, "schema.discard").await?;
     let publish_label = t(cx, "schema.publish").await?;
@@ -103,6 +104,27 @@ pub(in crate::pages) async fn header(
         OrganizationId(organization_id),
         ProcedureId(procedure_id)
     );
+    let crumbs = vec![
+        crate::pages::organizations_crumb(cx).await?,
+        Crumb::link(
+            procedure.organization.name.clone(),
+            href!(
+                crate::pages::organizations::show::page,
+                OrganizationId(organization_id)
+            )
+            .resolve(cx),
+        ),
+        Crumb::link(
+            t(cx, "procedures.title").await?,
+            href!(
+                crate::pages::organizations::show::procedures::page,
+                OrganizationId(organization_id)
+            )
+            .resolve(cx),
+        ),
+        Crumb::link(procedure.title.clone(), procedure_href.resolve(cx)),
+        Crumb::here(t(cx, "schema.crumb").await?),
+    ];
     let discard_href = href!(
         page,
         OrganizationId(organization_id),
@@ -118,15 +140,8 @@ pub(in crate::pages) async fn header(
         signal pid = procedure_id_string.clone();
 
         <div class="flex flex-col gap-2">
+            breadcrumbs(label: crumb_label, crumbs: crumbs)
             page_title((title))
-            <p class="text-sm text-muted-foreground">
-                <a
-                    href=(procedure_href)
-                    class="font-medium text-foreground underline-offset-4 hover:underline"
-                >
-                    (back)
-                </a>
-            </p>
             <div
                 class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
             >

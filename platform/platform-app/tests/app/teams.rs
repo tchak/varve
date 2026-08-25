@@ -103,8 +103,11 @@ async fn the_list_starts_empty_and_creation_shows_everywhere() {
     assert_eq!(response.status(), StatusCode::OK);
     let html = body_text(response).await;
     assert!(html.contains("<h1"), "{html}");
-    assert!(html.contains("Teams of"), "{html}");
+    // The breadcrumb trail carries the upward navigation: the
+    // organization is a link, the page itself the current crumb.
+    assert!(html.contains("data-breadcrumbs"), "{html}");
     assert!(html.contains(&format!("href=\"{organization}\"")), "{html}");
+    assert!(html.contains("aria-current=\"page\""), "{html}");
     assert!(html.contains("Staffed"), "{html}");
     assert!(html.contains("No teams yet."), "{html}");
     assert!(html.contains("id=\"team-name\""), "{html}");
@@ -187,7 +190,8 @@ async fn the_page_speaks_french() {
         .await;
     let html = body_text(response).await;
     assert!(html.contains("lang=\"fr\""), "{html}");
-    assert!(html.contains("Équipes de"), "{html}");
+    assert!(html.contains("Fil d'Ariane"), "{html}");
+    assert!(html.contains("Organisations"), "{html}");
     assert!(html.contains("Créer une équipe"), "{html}");
     assert!(html.contains("Aucune équipe pour le moment."), "{html}");
 }

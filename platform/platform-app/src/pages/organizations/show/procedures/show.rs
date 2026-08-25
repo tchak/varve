@@ -26,6 +26,7 @@ use crate::{
     client,
     components::{
         badge::{BadgeVariant, badge},
+        breadcrumbs::{Crumb, breadcrumbs},
         button::{ButtonSize, ButtonVariant, button_variants},
         card::{card, card_content, card_header},
         page_title::page_title,
@@ -99,7 +100,19 @@ async fn procedure_page(
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
-    let lead = t(cx, "procedure.lead").await?;
+    let crumb_label = t(cx, "nav.breadcrumb").await?;
+    let crumbs = vec![
+        crate::pages::organizations_crumb(cx).await?,
+        Crumb::link(
+            procedure.organization.name.clone(),
+            href!(super::super::page, OrganizationId(organization_id)).resolve(cx),
+        ),
+        Crumb::link(
+            t(cx, "procedures.title").await?,
+            href!(super::page, OrganizationId(organization_id)).resolve(cx),
+        ),
+        Crumb::here(procedure.title.clone()),
+    ];
     let draft_heading = t(cx, "procedure.draft.title").await?;
     let draft_none = t(cx, "procedure.draft.none").await?;
     let draft_badge = t(cx, "procedure.draft.badge").await?;
@@ -124,17 +137,8 @@ async fn procedure_page(
     view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
+                breadcrumbs(label: crumb_label, crumbs: crumbs)
                 page_title((procedure.title.as_str()))
-                <p class="text-sm text-muted-foreground">
-                    (lead)
-                    " "
-                    <a
-                        href=(href!(super::super::page, OrganizationId(organization_id)))
-                        class="font-medium text-foreground underline-offset-4 hover:underline"
-                    >
-                        (procedure.organization.name.as_str())
-                    </a>
-                </p>
                 if !procedure.description.is_empty() {
                     <p class="text-sm">(procedure.description.as_str())</p>
                 }

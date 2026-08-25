@@ -27,6 +27,7 @@ use topcoat::{
 use crate::{
     client,
     components::{
+        breadcrumbs::{Crumb, breadcrumbs},
         card::{card, card_content, card_header},
         page_title::page_title,
     },
@@ -86,9 +87,15 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
     .await?;
     let procedures_empty = t(cx, "organization.procedures.empty").await?;
     let procedures_manage = t(cx, "organization.procedures.manage").await?;
+    let crumb_label = t(cx, "nav.breadcrumb").await?;
+    let crumbs = vec![
+        crate::pages::organizations_crumb(cx).await?,
+        Crumb::here(organization.name.clone()),
+    ];
     view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
+                breadcrumbs(label: crumb_label, crumbs: crumbs)
                 page_title((organization.name.as_str()))
                 <p
                     class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"

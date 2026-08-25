@@ -27,7 +27,7 @@ use crate::pages::organizations::show::procedures::show::impact::report_lines;
 use crate::{
     client,
     components::{
-        button::{ButtonSize, ButtonVariant, button_variants},
+        breadcrumbs::{Crumb, breadcrumbs},
         card::{card, card_content},
         page_title::page_title,
     },
@@ -62,6 +62,8 @@ pub async fn page(cx: &Cx) -> Result {
         diff_page(
             organization_id: organization_id,
             procedure_id: procedure_id,
+            organization_name: procedure.organization.name,
+            procedure_title: procedure.title,
             event: event
         )
     }
@@ -75,6 +77,8 @@ async fn diff_page(
     cx: &Cx,
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
+    organization_name: String,
+    procedure_title: String,
     event: PublishedEventDiff,
 ) -> Result {
     let heading = t_args(
@@ -103,15 +107,40 @@ async fn diff_page(
     };
     let lines = report_lines(cx, &event.report).await?;
     let no_changes = t(cx, "schema.impact.none").await?;
-    let back = t(cx, "history.back").await?;
-    let back_href = href!(
-        crate::pages::organizations::show::procedures::show::page,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
+    let crumb_label = t(cx, "nav.breadcrumb").await?;
+    let crumbs = vec![
+        crate::pages::organizations_crumb(cx).await?,
+        Crumb::link(
+            organization_name,
+            href!(
+                crate::pages::organizations::show::page,
+                OrganizationId(organization_id)
+            )
+            .resolve(cx),
+        ),
+        Crumb::link(
+            t(cx, "procedures.title").await?,
+            href!(
+                crate::pages::organizations::show::procedures::page,
+                OrganizationId(organization_id)
+            )
+            .resolve(cx),
+        ),
+        Crumb::link(
+            procedure_title,
+            href!(
+                crate::pages::organizations::show::procedures::show::page,
+                OrganizationId(organization_id),
+                ProcedureId(procedure_id)
+            )
+            .resolve(cx),
+        ),
+        Crumb::here(heading.clone()),
+    ];
     view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
+                breadcrumbs(label: crumb_label, crumbs: crumbs)
                 page_title((heading.as_str()))
                 <p class="text-sm text-muted-foreground">(lead.as_str())</p>
                 if let Some(first) = &first {
@@ -131,17 +160,6 @@ async fn diff_page(
                     }
                 )
             )
-            <p>
-                <a
-                    href=(back_href)
-                    class=(button_variants(
-                        ButtonVariant::Outline,
-                        ButtonSize::Sm,
-                    ))
-                >
-                    (back)
-                </a>
-            </p>
         </div>
     }
 }
