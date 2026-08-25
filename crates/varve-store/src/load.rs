@@ -72,19 +72,22 @@ pub async fn load_dag(
     let mut dag = RevisionDag::new();
     for (index, (publication, schema)) in store.publications(lineage).await?.into_iter().enumerate()
     {
-        let id = dag
-            .publish(schema, publication.parents.clone())
-            .map_err(|error| LoadError::Publication {
-                lineage: lineage.clone(),
-                index,
-                error,
-            })?;
-        if id != publication.revision {
+        if varve_schema::revision_id(&schema) != publication.revision {
             return Err(LoadError::RevisionIdMismatch {
                 lineage: lineage.clone(),
                 index,
             });
         }
+        dag.publish(
+            schema,
+            publication.surfaces.clone(),
+            publication.parents.clone(),
+        )
+        .map_err(|error| LoadError::Publication {
+            lineage: lineage.clone(),
+            index,
+            error,
+        })?;
     }
     Ok(dag)
 }

@@ -65,11 +65,12 @@ pub struct Procedure {
     /// publication happening.
     pub state_since: Option<jiff::Timestamp>,
 
-    /// The lineage head — a read model maintained only by
+    /// The lineage head — the head **publication's** content address
+    /// (§2.13 decision 9), a read model maintained only by
     /// publication ([`crate::publish`], the P.9 Q3 pattern): a new
     /// draft forks from it, and publication refuses a draft whose
     /// base no longer equals it. `None` until the first publication.
-    pub latest_revision: Option<String>,
+    pub latest_publication: Option<String>,
 
     /// Set on insert.
     #[auto]
@@ -84,7 +85,7 @@ pub struct Procedure {
     /// [`find_procedure_with_revision_draft`].
     pub revision_draft: Deferred<Option<RevisionDraft>>,
 
-    /// The authored tree of [`Self::latest_revision`], kept because
+    /// The authored tree of [`Self::latest_publication`], kept because
     /// the next draft forks from its base's *tree* (P.4: audiences
     /// and presentation nodes exist nowhere kernel-side), set only by
     /// publication. Deferred with the draft.
@@ -112,10 +113,10 @@ pub struct RevisionDraft {
     /// The authored tree under edit, as its stored JSON bytes.
     pub tree: TreeBytes,
 
-    /// The published revision this draft forks from (its id) — the
-    /// publication's parent. `None` until the procedure has a first
-    /// revision to fork from, which is every draft until the revision
-    /// DAG lands.
+    /// The publication this draft forks from (its content address,
+    /// §2.13 decision 9) — the next publication's parent and the
+    /// stale-fork anchor. `None` until the procedure has a first
+    /// publication to fork from.
     pub base: Option<String>,
 }
 
@@ -209,7 +210,7 @@ pub async fn find_procedure_with_revision_draft(
 /// fork on the first edit from exactly this shape.
 pub struct WorkingTree {
     pub tree: Tree,
-    /// The revision a fork records as its parent (the stale-fork
+    /// The publication a fork records as its parent (the stale-fork
     /// check's anchor): the stored draft's `base`, or the head.
     pub base: Option<String>,
     /// Whether a stored draft exists — the one fact the projection
@@ -237,7 +238,7 @@ pub fn working_tree(procedure: &Procedure) -> Result<WorkingTree, RevisionDraftE
                 Some(bytes) => bytes.decode()?,
                 None => Tree::default(),
             },
-            base: procedure.latest_revision.clone(),
+            base: procedure.latest_publication.clone(),
             in_progress: false,
         },
     })

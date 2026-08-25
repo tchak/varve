@@ -35,7 +35,8 @@
 
 use std::fmt;
 
-use varve_core::{BlockId, NomenclatureId, RecordId, RevisionId, SurfaceId};
+use varve_core::canonical::ContentHash;
+use varve_core::{BlockId, NomenclatureId, RecordId, RevisionId};
 use varve_record::Entry;
 use varve_revision::Publication;
 use varve_schema::{Block, OptionRow, Schema};
@@ -104,6 +105,11 @@ pub enum StoreError {
     /// publication, not a document to edit.
     #[error("block '{block}' v{version}: defaults already stored")]
     DefaultsExist { block: BlockId, version: u32 },
+    /// §2.13 decision 9: the surface store is immutable — a put under
+    /// an existing content hash must match the stored object,
+    /// never replace it.
+    #[error("surface '{hash}': stored object differs from the put")]
+    SurfaceMismatch { hash: ContentHash },
     /// The backend answered but what it holds is not what was written
     /// (missing object for a stored event, undecodable row, …).
     #[error("corrupt store: {0}")]
@@ -240,23 +246,22 @@ pub trait NomenclatureStore: Send + Sync {
     ) -> impl Future<Output = Result<Vec<(NomenclatureId, u32, Vec<OptionRow>)>, StoreError>> + Send;
 }
 
-/// Surfaces (§2.1, §2.6), keyed `(surface.revision, surface.id)`.
-/// Upsert: a surface is authored and re-authored while its procedure
-/// is drafted; freezing surfaces once their revision serves live
-/// records is service policy, not a storage property.
+/// Surfaces (§2.1, §2.6), content-addressed and **immutable** (§2.13
+/// decision 9): keyed by [`varve_surface::Surface::content_hash`]. A
+/// put is idempotent; a put whose hash exists with different content
+/// is refused ([`StoreError::SurfaceMismatch`]) — history is read
+/// back through publications, whose surface maps name the hashes.
 pub trait SurfaceStore: Send + Sync {
-    fn put_surface(&self, surface: &Surface)
-    -> impl Future<Output = Result<(), StoreError>> + Send;
+    /// Store the surface under its content hash, which is returned.
+    fn put_surface(
+        &self,
+        surface: &Surface,
+    ) -> impl Future<Output = Result<ContentHash, StoreError>> + Send;
 
+    /// Point lookup by content address — the publication's surface
+    /// map is where hashes come from.
     fn surface(
         &self,
-        revision: &RevisionId,
-        id: &SurfaceId,
+        hash: &ContentHash,
     ) -> impl Future<Output = Result<Option<Surface>, StoreError>> + Send;
-
-    /// All surfaces of a revision, ascending by surface id.
-    fn surfaces(
-        &self,
-        revision: &RevisionId,
-    ) -> impl Future<Output = Result<Vec<Surface>, StoreError>> + Send;
 }

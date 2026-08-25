@@ -90,7 +90,12 @@ impl Procedure {
             base,
             in_progress,
         } = platform_core::working_tree(&self.procedure).map_err(internal)?;
-        Ok(RevisionDraft::new(base.as_deref(), tree, in_progress))
+        Ok(RevisionDraft::new(
+            self.procedure.id,
+            base.as_deref(),
+            tree,
+            in_progress,
+        ))
     }
 }
 

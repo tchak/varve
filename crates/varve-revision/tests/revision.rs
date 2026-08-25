@@ -1,7 +1,13 @@
-use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, RevisionId};
+use std::collections::BTreeMap;
+
+use varve_core::canonical::{CanonicalValue, ContentHash, canonical_bytes, hash_plain};
+use varve_core::{
+    ColumnId, GroupId, NomenclatureId, OptionId, PublicationId, RevisionId, SurfaceId,
+};
 use varve_revision::{
-    AggregatePolicy, MergeConflict, NomenclatureRegistry, PublishNomenclatureError, RevisionDag,
-    aggregate, merge,
+    AggregatePolicy, MergeConflict, NomenclatureRegistry, Publication, PublishError,
+    PublishNomenclatureError, RevisionDag, aggregate, merge, publication_canonical,
+    publication_from,
 };
 use varve_schema::{
     Arity, Cardinality, Column, Element, Group, OptionRow, ScalarType, Schema, Unit, revision_id,
@@ -51,41 +57,153 @@ fn revision_ids_converge_and_diverge() {
 
 #[test]
 fn dag_publishes_and_deduplicates() {
+    let s1 = schema(vec![column("a", ScalarType::Text)]);
+    let s2 = schema(vec![
+        column("a", ScalarType::Text),
+        column("b", ScalarType::Boolean),
+    ]);
+    let (rev1, rev2) = (revision_id(&s1), revision_id(&s2));
     let mut dag = RevisionDag::new();
-    let r1 = dag
-        .publish(schema(vec![column("a", ScalarType::Text)]), vec![])
+    let p1 = dag.publish(s1.clone(), BTreeMap::new(), vec![]).unwrap();
+    let p2 = dag
+        .publish(s2.clone(), BTreeMap::new(), vec![p1.clone()])
         .unwrap();
-    let r2 = dag
-        .publish(
-            schema(vec![
-                column("a", ScalarType::Text),
-                column("b", ScalarType::Boolean),
-            ]),
-            vec![r1.clone()],
-        )
-        .unwrap();
-    assert_eq!(dag.get(&r2).unwrap().parents, vec![r1.clone()]);
-    assert_eq!(dag.latest(), Some(&r2));
-    // Republishing r1's schema after r2 is a *revert*: the same object
+    // The object's parents are revisions — its place in the DAG.
+    assert_eq!(dag.get(&rev2).unwrap().parents, vec![rev1.clone()]);
+    assert_eq!(dag.latest(), Some(&p2));
+    // Republishing s1 after s2 is a *revert*: the same object
     // (content-addressed — no new revision), but a new publication
-    // event: it is `latest` again, following r2.
-    let again = dag
-        .publish(
-            schema(vec![column("a", ScalarType::Text)]),
-            vec![r2.clone()],
-        )
+    // event under a fresh id (its parents differ): it is the head
+    // again, following p2.
+    let p3 = dag
+        .publish(s1.clone(), BTreeMap::new(), vec![p2.clone()])
         .unwrap();
-    assert_eq!(again, r1);
-    assert_eq!(dag.latest(), Some(&r1));
+    assert_ne!(p3, p1);
+    assert_eq!(dag.publication(&p3).unwrap().revision, rev1);
+    assert_eq!(dag.latest(), Some(&p3));
     assert_eq!(dag.history().count(), 3);
-    assert_eq!(dag.publications().last().unwrap().parents, vec![r2.clone()]);
+    assert_eq!(
+        dag.publications().last().unwrap().1.parents,
+        vec![p2.clone()]
+    );
     // The object's own parents are those of its first publication.
-    assert_eq!(dag.get(&r1).unwrap().parents, vec![]);
+    assert_eq!(dag.get(&rev1).unwrap().parents, vec![]);
     // Unknown parents are rejected.
     assert!(
-        dag.publish(schema(vec![]), vec![RevisionId::new("nope")])
-            .is_err()
+        dag.publish(
+            schema(vec![]),
+            BTreeMap::new(),
+            vec![PublicationId::new("nope")]
+        )
+        .is_err()
     );
+}
+
+/// §2.13 decision 9: a surface-only change is a real publication — a
+/// new event, no new object — and an identical one is a refused no-op.
+#[test]
+fn surface_only_publications_are_events_and_identical_is_a_noop() {
+    let s = schema(vec![column("a", ScalarType::Text)]);
+    let hash = |tag: &str| hash_plain(&CanonicalValue::String(tag.into())).unwrap();
+    let one: BTreeMap<SurfaceId, ContentHash> = [(SurfaceId::new("applicant"), hash("v1"))].into();
+    let two: BTreeMap<SurfaceId, ContentHash> = [(SurfaceId::new("applicant"), hash("v2"))].into();
+
+    let mut dag = RevisionDag::new();
+    let p1 = dag.publish(s.clone(), one.clone(), vec![]).unwrap();
+    // Same schema, same surfaces: refused.
+    assert_eq!(
+        dag.publish(s.clone(), one.clone(), vec![p1.clone()]),
+        Err(PublishError::IdenticalToHead)
+    );
+    // Same schema, renamed section (a different surface hash): a
+    // distinct publication over the same object.
+    let p2 = dag
+        .publish(s.clone(), two.clone(), vec![p1.clone()])
+        .unwrap();
+    assert_ne!(p2, p1);
+    assert_eq!(dag.publications().len(), 2);
+    assert_eq!(dag.history().count(), 2);
+    assert_eq!(
+        dag.publication(&p1).unwrap().revision,
+        dag.publication(&p2).unwrap().revision
+    );
+    // And back: the surface revert is a third event.
+    let p3 = dag.publish(s, one, vec![p2.clone()]).unwrap();
+    assert_ne!(p3, p1);
+    assert_eq!(dag.latest(), Some(&p3));
+}
+
+/// The publication codec (§2.13: canonical shapes live in code with
+/// test vectors): round-trip, the pinned byte shape, and refusals.
+#[test]
+fn publication_canonical_form_and_refusals() {
+    let hash = hash_plain(&CanonicalValue::String("surface".into())).unwrap();
+    let publication = Publication {
+        revision: revision_id(&schema(vec![column("a", ScalarType::Text)])),
+        parents: vec![PublicationId::new("p-1")],
+        surfaces: [(SurfaceId::new("applicant"), hash)].into(),
+    };
+    let canonical = publication_canonical(&publication);
+    assert_eq!(publication_from(&canonical).unwrap(), publication);
+    // The id is the plain hash of the canonical form.
+    assert_eq!(
+        publication.id().as_str(),
+        hash_plain(&canonical).unwrap().to_string()
+    );
+    // The pinned vector: field order is JCS's, empties are omitted.
+    let bytes = canonical_bytes(&canonical).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "{{\"parents\":[\"p-1\"],\"revision\":\"{}\",\"surfaces\":{{\"applicant\":\"{}\"}}}}",
+            publication.revision, hash
+        )
+    );
+    let first = Publication {
+        revision: publication.revision.clone(),
+        parents: vec![],
+        surfaces: BTreeMap::new(),
+    };
+    let canonical = publication_canonical(&first);
+    assert_eq!(
+        canonical_bytes(&canonical).unwrap(),
+        format!("{{\"revision\":\"{}\"}}", first.revision).into_bytes()
+    );
+    assert_eq!(publication_from(&canonical).unwrap(), first);
+
+    // Refusals: non-canonical empties, unknown keys, wrong shapes.
+    let obj = |pairs: Vec<(&str, CanonicalValue)>| {
+        CanonicalValue::Object(pairs.into_iter().map(|(k, v)| (k.into(), v)).collect())
+    };
+    let rev = CanonicalValue::String(first.revision.to_string());
+    for bad in [
+        obj(vec![
+            ("revision", rev.clone()),
+            ("parents", CanonicalValue::Array(vec![])),
+        ]),
+        obj(vec![
+            ("revision", rev.clone()),
+            ("surfaces", CanonicalValue::Object(Default::default())),
+        ]),
+        obj(vec![
+            ("revision", rev.clone()),
+            ("extra", CanonicalValue::Null),
+        ]),
+        obj(vec![("revision", CanonicalValue::Int(1))]),
+        obj(vec![
+            ("revision", rev),
+            (
+                "surfaces",
+                obj(vec![(
+                    "applicant",
+                    CanonicalValue::String("not-a-hash".into()),
+                )]),
+            ),
+        ]),
+    ] {
+        assert!(publication_from(&bad).is_err(), "{bad:?}");
+    }
 }
 
 #[test]
@@ -339,10 +457,13 @@ fn aggregate_joins_history_and_reports() {
     // The DAG builds its own aggregate over distinct revisions, in
     // first-publication order — a revert repeats no revision.
     let mut dag = RevisionDag::new();
-    let id1 = dag.publish(rev1.clone(), vec![]).unwrap();
-    let id2 = dag.publish(rev2.clone(), vec![id1.clone()]).unwrap();
-    dag.publish(rev1.clone(), vec![id2]).unwrap(); // revert
+    let id1 = dag.publish(rev1.clone(), BTreeMap::new(), vec![]).unwrap();
+    let id2 = dag
+        .publish(rev2.clone(), BTreeMap::new(), vec![id1.clone()])
+        .unwrap();
+    dag.publish(rev1.clone(), BTreeMap::new(), vec![id2])
+        .unwrap(); // revert
     let (from_dag, _) = dag.aggregate(&noms).unwrap();
-    let (from_slice, _) = aggregate(&[(id1, &rev1), (r(2), &rev2)], &noms).unwrap();
+    let (from_slice, _) = aggregate(&[(revision_id(&rev1), &rev1), (r(2), &rev2)], &noms).unwrap();
     assert_eq!(from_dag.columns.len(), from_slice.columns.len());
 }

@@ -19,7 +19,10 @@
 
 #![forbid(unsafe_code)]
 
-use varve_core::RevisionId;
+use std::collections::BTreeMap;
+
+use varve_core::canonical::ContentHash;
+use varve_core::{PublicationId, RevisionId, SurfaceId};
 use varve_impact::{ChangeClass, ImpactReport};
 use varve_revision::Publication;
 use varve_schema::{DepthPolicy, NomenclatureTable, Schema, SchemaError, revision_id};
@@ -35,11 +38,13 @@ use varve_surface::{Surface, SurfaceError};
 pub struct PublishRevision {
     /// The revision DAG to publish into.
     pub lineage: LineageId,
-    /// The head the caller forked from: `None` for a first
-    /// publication. Must equal the lineage's current head, else
-    /// [`PublishRevisionError::StaleBase`] — a conflict is detected,
-    /// never merged (§2.9's spirit at the lineage level).
-    pub base: Option<RevisionId>,
+    /// The head the caller forked from — a **publication id** (§2.13
+    /// decision 9: two surface-only publications from one revision are
+    /// distinct forks, which revision ids cannot tell apart). `None`
+    /// for a first publication. Must equal the lineage's current head,
+    /// else [`PublishRevisionError::StaleBase`] — a conflict is
+    /// detected, never merged (§2.9's spirit at the lineage level).
+    pub base: Option<PublicationId>,
     /// The schema to publish.
     pub schema: Schema,
     /// The compiled surfaces, each naming the schema's revision id
@@ -57,6 +62,9 @@ pub struct PublishRevision {
 pub enum PublishOutcome {
     /// The event is appended and the surfaces stored.
     Published {
+        /// The event's content address (§2.13 decision 9) — what a
+        /// host records as its new head and fork anchor.
+        publication: PublicationId,
         revision: RevisionId,
         report: ImpactReport,
     },
@@ -72,9 +80,18 @@ pub enum PublishRevisionError {
     /// lineage is empty and the caller claimed a base).
     #[error("lineage head is {head:?}, publication was authored against {base:?}")]
     StaleBase {
-        base: Option<RevisionId>,
-        head: Option<RevisionId>,
+        base: Option<PublicationId>,
+        head: Option<PublicationId>,
     },
+    /// Same revision, same surface set as the head (§2.13 decision 9):
+    /// a refused no-op — an append-only history has no meaning for a
+    /// node identical to its parent.
+    #[error("the publication is identical to the head — nothing to publish")]
+    NothingToPublish,
+    /// Two request surfaces share an id — a host bug: the surface set
+    /// is a map (§2.13 decision 9).
+    #[error("two surfaces share the id '{0}'")]
+    DuplicateSurface(SurfaceId),
     /// The schema fails kernel validation — a host bug: authoring is
     /// where invalid schemas are refused.
     #[error("schema does not validate: {0:?}")]
@@ -119,17 +136,35 @@ where
         return Err(PublishRevisionError::Schema(schema_errors));
     }
     let nomenclatures = NomenclatureTable::new();
+    let mut surfaces: BTreeMap<SurfaceId, ContentHash> = BTreeMap::new();
     for surface in &request.surfaces {
         let surface_errors = varve_surface::validate(surface, &request.schema, &nomenclatures);
         if !surface_errors.is_empty() {
             return Err(PublishRevisionError::Surface(surface_errors));
         }
+        if surfaces
+            .insert(surface.id.clone(), surface.content_hash())
+            .is_some()
+        {
+            return Err(PublishRevisionError::DuplicateSurface(surface.id.clone()));
+        }
+    }
+
+    let revision = revision_id(&request.schema);
+    // §2.13 decision 9: identical to the head — revision and surface
+    // set both — is a refused no-op, checked before the report so the
+    // caller hears "nothing to publish", not "safe".
+    if let Some((_, head_publication)) = dag.head()
+        && head_publication.revision == revision
+        && head_publication.surfaces == surfaces
+    {
+        return Err(PublishRevisionError::NothingToPublish);
     }
 
     let empty = Schema::default();
-    let from = head
-        .as_ref()
-        .and_then(|id| dag.get(id))
+    let from = dag
+        .head()
+        .and_then(|(_, p)| dag.get(&p.revision))
         .map(|published| &published.schema)
         .unwrap_or(&empty);
     let report = varve_impact::classify(from, &request.schema, &nomenclatures)?;
@@ -137,22 +172,28 @@ where
         return Ok(PublishOutcome::RequiresConfirmation { report });
     }
 
-    let revision = revision_id(&request.schema);
-    let parents: Vec<RevisionId> = head.into_iter().collect();
+    // The publication first — its append writes the revision object
+    // the surfaces reference (platform-store keeps that as a foreign
+    // key) — then the surfaces (idempotent, content-addressed).
+    // Atomicity across the calls is the host's transaction (crate
+    // docs); a torn MemoryStore sequence leaves a publication whose
+    // hashes surface as missing at first read, never silent.
+    let publication = Publication {
+        revision: revision.clone(),
+        parents: head.into_iter().collect(),
+        surfaces,
+    };
+    let id = publication.id();
     let index = dag.publications().len() as u64;
     store
-        .append_publication(
-            &request.lineage,
-            index,
-            &Publication {
-                revision: revision.clone(),
-                parents,
-            },
-            &request.schema,
-        )
+        .append_publication(&request.lineage, index, &publication, &request.schema)
         .await?;
     for surface in &request.surfaces {
         store.put_surface(surface).await?;
     }
-    Ok(PublishOutcome::Published { revision, report })
+    Ok(PublishOutcome::Published {
+        publication: id,
+        revision,
+        report,
+    })
 }

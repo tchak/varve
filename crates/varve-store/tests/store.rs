@@ -247,20 +247,15 @@ async fn publish_through(
     lineage: &LineageId,
     dag: &mut RevisionDag,
     schema: Schema,
-    parents: Vec<RevisionId>,
-) -> RevisionId {
+    parents: Vec<varve_core::PublicationId>,
+) -> varve_core::PublicationId {
     let index = dag.publications().len() as u64;
-    let id = dag.publish(schema.clone(), parents.clone()).unwrap();
+    let id = dag
+        .publish(schema.clone(), std::collections::BTreeMap::new(), parents)
+        .unwrap();
+    let (_, publication) = dag.publications().last().unwrap().clone();
     store
-        .append_publication(
-            lineage,
-            index,
-            &Publication {
-                revision: id.clone(),
-                parents,
-            },
-            &schema,
-        )
+        .append_publication(lineage, index, &publication, &schema)
         .await
         .unwrap();
     id
@@ -278,7 +273,8 @@ async fn check_revision_roundtrip(store: &impl RevisionStore) {
         vec![a.clone()],
     )
     .await;
-    // A revert: same object, new event (§2.1).
+    // A revert: same object, new event under a fresh publication id
+    // (§2.1, §2.13 decision 9 — its parents differ).
     let again = publish_through(
         store,
         &lineage,
@@ -287,15 +283,27 @@ async fn check_revision_roundtrip(store: &impl RevisionStore) {
         vec![b.clone()],
     )
     .await;
-    assert_eq!(again, a);
+    assert_ne!(again, a);
 
     let reloaded = load_dag(store, &lineage).await.unwrap();
-    assert_eq!(reloaded.latest(), Some(&a));
+    assert_eq!(reloaded.latest(), Some(&again));
     assert_eq!(reloaded.publications(), dag.publications());
-    assert!(reloaded.get(&b).is_some());
+    let rev_b = reloaded.publication(&b).unwrap().revision.clone();
+    assert!(reloaded.get(&rev_b).is_some());
+    assert_eq!(
+        reloaded.publication(&again).unwrap().revision,
+        revision_id(&schema(&["name"]))
+    );
 
     // Point lookup: the reading-lens fetch.
-    assert_eq!(store.schema(&a).await.unwrap().unwrap(), schema(&["name"]));
+    assert_eq!(
+        store
+            .schema(&revision_id(&schema(&["name"])))
+            .await
+            .unwrap()
+            .unwrap(),
+        schema(&["name"])
+    );
     assert!(
         store
             .schema(&RevisionId::new("nope"))
@@ -309,6 +317,8 @@ async fn check_revision_roundtrip(store: &impl RevisionStore) {
     let other = LineageId::new("proc-2");
     let mut dag2 = RevisionDag::new();
     let a2 = publish_through(store, &other, &mut dag2, schema(&["name"]), vec![]).await;
+    // Identical content — schema, no parents, no surfaces — converges
+    // on the same publication id too: content addressing end to end.
     assert_eq!(a2, a);
     assert_eq!(
         load_dag(store, &other).await.unwrap().publications().len(),
@@ -330,6 +340,7 @@ async fn check_publication_conflict(store: &impl RevisionStore) {
     let publication = Publication {
         revision: revision_id(&s),
         parents: vec![],
+        surfaces: std::collections::BTreeMap::new(),
     };
     store
         .append_publication(&lineage, 0, &publication, &s)
@@ -360,6 +371,7 @@ async fn check_loader_enforces_revision_ids(store: &impl RevisionStore) {
             &Publication {
                 revision: RevisionId::new("forged"),
                 parents: vec![],
+                surfaces: std::collections::BTreeMap::new(),
             },
             &schema(&["name"]),
         )
@@ -555,38 +567,28 @@ async fn loader_enforces_append_only() {
 // ---- surfaces -------------------------------------------------------
 
 async fn check_surfaces(store: &impl SurfaceStore) {
-    store.put_surface(&surface("rev-1", "form")).await.unwrap();
-    store
-        .put_surface(&surface("rev-1", "review"))
-        .await
-        .unwrap();
-    store.put_surface(&surface("rev-2", "form")).await.unwrap();
+    // Content-addressed and immutable (§2.13 decision 9): the put
+    // returns the hash, an identical re-put is idempotent, distinct
+    // content — even for one (revision, id) — lands beside, never
+    // over, what is stored.
+    let form = surface("rev-1", "form");
+    let h1 = store.put_surface(&form).await.unwrap();
+    assert_eq!(h1, form.content_hash());
+    assert_eq!(store.put_surface(&form).await.unwrap(), h1);
 
-    let of_rev1 = store.surfaces(&RevisionId::new("rev-1")).await.unwrap();
-    assert_eq!(
-        of_rev1.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-        vec!["form", "review"]
-    );
-
-    // Upsert: re-authoring replaces in place.
     let mut edited = surface("rev-1", "form");
     edited.nodes = vec![varve_surface::Node::Note(varve_surface::Note {
         id: varve_core::NodeId::new("bienvenue"),
         title: None,
         body: "bienvenue".into(),
     })];
-    store.put_surface(&edited).await.unwrap();
-    assert_eq!(
-        store
-            .surface(&RevisionId::new("rev-1"), &SurfaceId::new("form"))
-            .await
-            .unwrap()
-            .unwrap(),
-        edited
-    );
+    let h2 = store.put_surface(&edited).await.unwrap();
+    assert_ne!(h2, h1);
+    assert_eq!(store.surface(&h1).await.unwrap().unwrap(), form);
+    assert_eq!(store.surface(&h2).await.unwrap().unwrap(), edited);
     assert!(
         store
-            .surface(&RevisionId::new("rev-3"), &SurfaceId::new("form"))
+            .surface(&surface("rev-1", "review").content_hash())
             .await
             .unwrap()
             .is_none()

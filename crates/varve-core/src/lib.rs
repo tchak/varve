@@ -77,6 +77,14 @@ id_type!(
     SurfaceId
 );
 id_type!(
+    /// Content-address of one publication event (§2.1, §2.13 decision
+    /// 9): the log entry committing to a revision, the surface set
+    /// published with it, and its parent publications. Revision
+    /// identity stays schema-only — what gains identity here is the
+    /// event.
+    PublicationId
+);
+id_type!(
     /// Identity of a presentation node — a section or note — within
     /// surfaces (§2.6, surface node identity, settled 2026-08-23):
     /// minted once at authoring time, outside the kernel like column

@@ -2,7 +2,7 @@
 //! implementation (§13.2's oracle): the gate, the fork-point check,
 //! the surface writes, and the one-code-path first publication.
 
-use varve_core::{ColumnId, RevisionId, SurfaceId};
+use varve_core::{ColumnId, PublicationId, RevisionId, SurfaceId};
 use varve_impact::ChangeClass;
 use varve_schema::{Arity, Column, Element, ScalarType, Schema, revision_id};
 use varve_service::{PublishOutcome, PublishRevision, PublishRevisionError, publish_revision};
@@ -58,7 +58,7 @@ fn surfaces(schema: &Schema) -> Vec<Surface> {
 
 fn request(
     lineage: &LineageId,
-    base: Option<RevisionId>,
+    base: Option<PublicationId>,
     schema: Schema,
     confirm: bool,
 ) -> PublishRevision {
@@ -81,18 +81,29 @@ async fn first_publication_is_free_and_stores_the_pair() {
     let outcome = publish_revision(&store, request(&lineage, None, v1.clone(), false))
         .await
         .expect("publish");
-    let PublishOutcome::Published { revision, report } = outcome else {
+    let PublishOutcome::Published {
+        publication,
+        revision,
+        report,
+    } = outcome
+    else {
         panic!("first publication must not require confirmation");
     };
     assert_eq!(revision, revision_id(&v1));
     assert_eq!(report.worst(), ChangeClass::Safe);
 
-    // The DAG loads back verified, and both surfaces are stored
-    // against the revision.
+    // The DAG loads back verified; the publication commits to both
+    // surfaces (§2.13 decision 9) and each hash resolves in the store.
     let dag = load_dag(&store, &lineage).await.expect("load");
-    assert_eq!(dag.latest(), Some(&revision));
-    let stored = store.surfaces(&revision).await.expect("surfaces");
-    assert_eq!(stored.len(), 2);
+    assert_eq!(dag.latest(), Some(&publication));
+    let event = dag.publication(&publication).expect("event");
+    assert_eq!(event.revision, revision);
+    assert_eq!(event.surfaces.len(), 2);
+    for (id, hash) in &event.surfaces {
+        let stored = store.surface(hash).await.expect("get").expect("stored");
+        assert_eq!(&stored.id, id);
+        assert_eq!(stored.revision, revision);
+    }
 }
 
 #[tokio::test]
@@ -106,7 +117,7 @@ async fn a_breaking_change_gates_on_confirmation() {
         .await
         .expect("v1")
     {
-        PublishOutcome::Published { revision, .. } => revision,
+        PublishOutcome::Published { publication, .. } => publication,
         other => panic!("unexpected: {other:?}"),
     };
 
@@ -128,14 +139,19 @@ async fn a_breaking_change_gates_on_confirmation() {
     let outcome = publish_revision(&store, request(&lineage, Some(base), v2.clone(), true))
         .await
         .expect("confirmed");
-    let PublishOutcome::Published { revision, report } = outcome else {
+    let PublishOutcome::Published {
+        publication,
+        revision,
+        report,
+    } = outcome
+    else {
         panic!("confirmed publication must publish");
     };
     assert_eq!(report.worst(), ChangeClass::Breaking);
     assert_eq!(revision, revision_id(&v2));
     let dag = load_dag(&store, &lineage).await.expect("load");
     assert_eq!(dag.publications().len(), 2);
-    assert_eq!(dag.latest(), Some(&revision));
+    assert_eq!(dag.latest(), Some(&publication));
 }
 
 #[tokio::test]
@@ -148,7 +164,7 @@ async fn a_stale_base_is_refused() {
         .await
         .expect("v1")
     {
-        PublishOutcome::Published { revision, .. } => revision,
+        PublishOutcome::Published { publication, .. } => publication,
         other => panic!("unexpected: {other:?}"),
     };
 
@@ -173,7 +189,7 @@ async fn a_stale_base_is_refused() {
         .await
         .expect("v2")
     {
-        PublishOutcome::Published { revision, .. } => revision,
+        PublishOutcome::Published { publication, .. } => publication,
         other => panic!("unexpected: {other:?}"),
     };
     let v3 = schema(vec![column("c", ScalarType::Text)]);
@@ -196,33 +212,125 @@ async fn republishing_an_identical_schema_converges_on_the_object() {
         column("b", ScalarType::Text),
     ]);
 
-    let r1 = match publish_revision(&store, request(&lineage, None, v1.clone(), false))
+    let p1 = match publish_revision(&store, request(&lineage, None, v1.clone(), false))
         .await
         .expect("v1")
     {
-        PublishOutcome::Published { revision, .. } => revision,
+        PublishOutcome::Published { publication, .. } => publication,
         other => panic!("unexpected: {other:?}"),
     };
-    let r2 = match publish_revision(&store, request(&lineage, Some(r1.clone()), v2, false))
+    let p2 = match publish_revision(&store, request(&lineage, Some(p1.clone()), v2, false))
         .await
         .expect("v2")
     {
-        PublishOutcome::Published { revision, .. } => revision,
+        PublishOutcome::Published { publication, .. } => publication,
         other => panic!("unexpected: {other:?}"),
     };
 
     // Publishing v1's schema again is a revert: a third event, no new
-    // object, the id converging (§2.13).
-    let outcome = publish_revision(&store, request(&lineage, Some(r2), v1, true))
+    // object, the revision converging (§2.13) under a fresh
+    // publication id (decision 9 — its parents differ).
+    let outcome = publish_revision(&store, request(&lineage, Some(p2), v1.clone(), true))
         .await
         .expect("revert");
-    let PublishOutcome::Published { revision, .. } = outcome else {
+    let PublishOutcome::Published {
+        publication,
+        revision,
+        ..
+    } = outcome
+    else {
         panic!("revert publishes");
     };
-    assert_eq!(revision, r1);
+    assert_ne!(publication, p1);
+    assert_eq!(revision, revision_id(&v1));
     let dag = load_dag(&store, &lineage).await.expect("load");
     assert_eq!(dag.publications().len(), 3);
-    assert_eq!(dag.latest(), Some(&r1));
+    assert_eq!(dag.latest(), Some(&publication));
+}
+
+/// §2.13 decision 9: same revision, same surface set as the head —
+/// refused before the gate, as "nothing to publish", not "safe".
+#[tokio::test]
+async fn an_identical_publication_is_a_refused_noop() {
+    let store = MemoryStore::default();
+    let lineage = LineageId::new("proc-6");
+    let v1 = schema(vec![column("a", ScalarType::Text)]);
+
+    let head = match publish_revision(&store, request(&lineage, None, v1.clone(), false))
+        .await
+        .expect("v1")
+    {
+        PublishOutcome::Published { publication, .. } => publication,
+        other => panic!("unexpected: {other:?}"),
+    };
+    let err = publish_revision(&store, request(&lineage, Some(head), v1, false))
+        .await
+        .expect_err("noop");
+    assert!(matches!(err, PublishRevisionError::NothingToPublish));
+    let dag = load_dag(&store, &lineage).await.expect("load");
+    assert_eq!(dag.publications().len(), 1);
+}
+
+/// A surface-only change — the schema untouched — is a real
+/// publication (§2.13 decision 9): the empty-diff bug this resolves
+/// was a section rename vanishing from history.
+#[tokio::test]
+async fn a_surface_only_change_publishes() {
+    let store = MemoryStore::default();
+    let lineage = LineageId::new("proc-7");
+    let v1 = schema(vec![column("a", ScalarType::Text)]);
+
+    let p1 = match publish_revision(&store, request(&lineage, None, v1.clone(), false))
+        .await
+        .expect("v1")
+    {
+        PublishOutcome::Published { publication, .. } => publication,
+        other => panic!("unexpected: {other:?}"),
+    };
+    let mut renamed = request(&lineage, Some(p1.clone()), v1.clone(), false);
+    let Node::Column(node) = &mut renamed.surfaces[0].nodes[0] else {
+        panic!("column node");
+    };
+    node.prompt = Some("Votre nom".into());
+    let outcome = publish_revision(&store, renamed).await.expect("publish");
+    let PublishOutcome::Published {
+        publication,
+        revision,
+        ..
+    } = outcome
+    else {
+        panic!("a surface-only change publishes");
+    };
+    assert_ne!(publication, p1);
+    assert_eq!(revision, revision_id(&v1));
+    let dag = load_dag(&store, &lineage).await.expect("load");
+    assert_eq!(dag.publications().len(), 2);
+    // Both surface sets survive — nothing was overwritten.
+    let (first, second) = (
+        dag.publication(&p1).expect("p1").surfaces.clone(),
+        dag.publication(&publication).expect("p2").surfaces.clone(),
+    );
+    assert_ne!(first, second);
+    for hash in first.values().chain(second.values()) {
+        assert!(store.surface(hash).await.expect("get").is_some());
+    }
+}
+
+/// Two surfaces sharing an id is a host bug (the surface set is a
+/// map), refused before anything is written.
+#[tokio::test]
+async fn duplicate_surface_ids_are_refused() {
+    let store = MemoryStore::default();
+    let lineage = LineageId::new("proc-8");
+    let v1 = schema(vec![column("a", ScalarType::Text)]);
+    let mut req = request(&lineage, None, v1, false);
+    let clone = req.surfaces[0].clone();
+    req.surfaces.push(clone);
+    let err = publish_revision(&store, req).await.expect_err("refused");
+    assert!(matches!(
+        err,
+        PublishRevisionError::DuplicateSurface(id) if id == SurfaceId::new("applicant")
+    ));
 }
 
 #[tokio::test]

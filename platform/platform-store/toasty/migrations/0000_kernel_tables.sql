@@ -4,16 +4,16 @@ CREATE TABLE "revisions" (
     PRIMARY KEY ("revision")
 );
 CREATE TABLE "surfaces" (
+    "hash" TEXT NOT NULL,
     "revision" TEXT NOT NULL,
-    "surface" TEXT NOT NULL,
     "body" BYTEA NOT NULL,
-    PRIMARY KEY ("revision", "surface")
+    PRIMARY KEY ("hash")
 );
 CREATE TABLE "publications" (
     "lineage" TEXT NOT NULL,
     "index" BIGINT NOT NULL,
     "revision" TEXT NOT NULL,
-    "parents" TEXT[] NOT NULL,
+    "body" BYTEA NOT NULL,
     PRIMARY KEY ("lineage", "index")
 );
 -- Hand-written (the platform-core db.rs rule: the generator derives

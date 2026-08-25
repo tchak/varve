@@ -27,9 +27,10 @@ use crate::error::{internal, invalid_input};
 #[derive(SimpleObject)]
 #[graphql(complex)]
 pub struct RevisionDraft {
-    /// The published revision this draft forks from (or would fork
-    /// from — the head, until touched); `null` until the procedure
-    /// has one.
+    /// The publication this draft forks from (or would fork from —
+    /// the head, until touched; §2.13 decision 9: a publication id,
+    /// so surface-only publications anchor forks too); `null` until
+    /// the procedure has one.
     pub base: Option<ID>,
     /// Every element of the authored tree, **document order** (a
     /// container precedes its children; siblings in their order),
@@ -45,10 +46,18 @@ pub struct RevisionDraft {
     /// schema is derived there, only when the report is selected.
     #[graphql(skip)]
     tree: Tree,
+    /// The procedure — the lineage the base publication resolves in.
+    #[graphql(skip)]
+    procedure_id: uuid::Uuid,
 }
 
 impl RevisionDraft {
-    pub fn new(base: Option<&str>, tree: Tree, in_progress: bool) -> Self {
+    pub fn new(
+        procedure_id: uuid::Uuid,
+        base: Option<&str>,
+        tree: Tree,
+        in_progress: bool,
+    ) -> Self {
         let mut elements = Vec::new();
         push_elements(&mut elements, None, &tree.elements);
         Self {
@@ -56,6 +65,7 @@ impl RevisionDraft {
             elements,
             in_progress,
             tree,
+            procedure_id,
         }
     }
 }
@@ -78,12 +88,17 @@ impl RevisionDraft {
                 let shared: platform_core::SharedExecutor =
                     tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
                 let store = platform_store::PlatformStore::new(&shared);
+                // The base is a publication id (§2.13 decision 9),
+                // resolved through the lineage's event log — each
+                // publication arrives with its schema.
+                let lineage = varve_store::LineageId::new(self.procedure_id.to_string());
+                let publications = store.publications(&lineage).await.map_err(internal)?;
                 Some(
-                    store
-                        .schema(&varve_core::RevisionId::new(id.as_str()))
-                        .await
-                        .map_err(internal)?
-                        .ok_or_else(|| internal("draft's base revision is not in the store"))?,
+                    publications
+                        .into_iter()
+                        .find(|(publication, _)| publication.id().as_str() == id.as_str())
+                        .map(|(_, schema)| schema)
+                        .ok_or_else(|| internal("draft's base is not in the store"))?,
                 )
             }
             None => None,

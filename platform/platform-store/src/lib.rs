@@ -16,9 +16,12 @@
 //!
 //! Stored bytes are the wire's (§13.2: the natural storage row is
 //! the wire line): schemas as `varve_wire::schema_bytes`, surfaces
-//! as the JCS bytes of `varve_surface::canon::surface_canonical` —
-//! decode failures surface as [`StoreError::Corrupt`], never as a
-//! silent repair, matching the loaders' §2.13 posture.
+//! as the JCS bytes of `varve_surface::canon::surface_canonical`
+//! keyed by their content hash (§2.13 decision 9 — immutable, a
+//! divergent re-put refused), publications as the JCS bytes of
+//! `varve_revision::publication_canonical` — decode failures surface
+//! as [`StoreError::Corrupt`], never as a silent repair, matching
+//! the loaders' §2.13 posture.
 //!
 //! Scope: `RevisionStore` + `SurfaceStore` (publication, P.4). The
 //! record-log, block, and nomenclature tables land with case files.
@@ -29,7 +32,8 @@ mod rows;
 
 use toasty::Executor;
 use tokio::sync::Mutex;
-use varve_core::{RevisionId, SurfaceId};
+use varve_core::RevisionId;
+use varve_core::canonical::ContentHash;
 use varve_revision::Publication;
 use varve_schema::Schema;
 use varve_store::{LineageId, RevisionStore, StoreError, SurfaceStore};
@@ -107,17 +111,15 @@ impl RevisionStore for PlatformStore<'_> {
                 .await
                 .map_err(backend)?;
         }
+        let body = varve_core::canonical::canonical_bytes(&varve_revision::publication_canonical(
+            publication,
+        ))
+        .map_err(|e| StoreError::Corrupt(format!("publication does not encode: {e}")))?;
         PublicationRow::create()
             .lineage(lineage.as_str())
             .index(index)
             .revision(publication.revision.as_str())
-            .parents(
-                publication
-                    .parents
-                    .iter()
-                    .map(|p| p.as_str().to_owned())
-                    .collect::<Vec<_>>(),
-            )
+            .body(body)
             .exec(&mut **guard)
             .await
             .map_err(backend)?;
@@ -147,13 +149,14 @@ impl RevisionStore for PlatformStore<'_> {
                         row.revision
                     ))
                 })?;
-            out.push((
-                Publication {
-                    revision: RevisionId::new(row.revision.clone()),
-                    parents: row.parents.iter().map(RevisionId::new).collect(),
-                },
-                decode_schema(&row.revision, &object.schema)?,
-            ));
+            let publication = decode_publication(&row.body)?;
+            if publication.revision.as_str() != row.revision {
+                return Err(StoreError::Corrupt(format!(
+                    "publication row of '{}' carries a body naming '{}'",
+                    row.revision, publication.revision
+                )));
+            }
+            out.push((publication, decode_schema(&row.revision, &object.schema)?));
         }
         Ok(out)
     }
@@ -171,42 +174,43 @@ impl RevisionStore for PlatformStore<'_> {
 }
 
 impl SurfaceStore for PlatformStore<'_> {
-    async fn put_surface(&self, surface: &Surface) -> Result<(), StoreError> {
+    async fn put_surface(&self, surface: &Surface) -> Result<ContentHash, StoreError> {
+        let hash = surface.content_hash();
         let body =
             varve_core::canonical::canonical_bytes(&varve_surface::surface_canonical(surface))
                 .map_err(|e| StoreError::Corrupt(format!("surface does not encode: {e}")))?;
         let mut guard = self.exec.lock().await;
-        // Upsert (the trait contract): re-authored while drafted.
-        SurfaceRow::upsert_by_revision_and_surface(surface.revision.as_str(), surface.id.as_str())
-            .body(body)
+        // Immutable (§2.13 decision 9): idempotent under the content
+        // hash, a divergent row under it refused, never replaced.
+        let existing = SurfaceRow::filter_by_hash(hash.to_string())
+            .first()
             .exec(&mut **guard)
             .await
             .map_err(backend)?;
-        Ok(())
+        match existing {
+            Some(row) if row.body == body => {}
+            Some(_) => return Err(StoreError::SurfaceMismatch { hash }),
+            None => {
+                SurfaceRow::create()
+                    .hash(hash.to_string())
+                    .revision(surface.revision.as_str())
+                    .body(body)
+                    .exec(&mut **guard)
+                    .await
+                    .map_err(backend)?;
+            }
+        }
+        Ok(hash)
     }
 
-    async fn surface(
-        &self,
-        revision: &RevisionId,
-        id: &SurfaceId,
-    ) -> Result<Option<Surface>, StoreError> {
+    async fn surface(&self, hash: &ContentHash) -> Result<Option<Surface>, StoreError> {
         let mut guard = self.exec.lock().await;
-        let row = SurfaceRow::filter_by_revision_and_surface(revision.as_str(), id.as_str())
+        let row = SurfaceRow::filter_by_hash(hash.to_string())
             .first()
             .exec(&mut **guard)
             .await
             .map_err(backend)?;
         row.map(|r| decode_surface(&r.body)).transpose()
-    }
-
-    async fn surfaces(&self, revision: &RevisionId) -> Result<Vec<Surface>, StoreError> {
-        let mut guard = self.exec.lock().await;
-        let rows = SurfaceRow::filter_by_revision(revision.as_str())
-            .order_by(SurfaceRow::fields().surface().asc())
-            .exec(&mut **guard)
-            .await
-            .map_err(backend)?;
-        rows.iter().map(|r| decode_surface(&r.body)).collect()
     }
 }
 
@@ -214,6 +218,13 @@ fn decode_schema(revision: &str, bytes: &[u8]) -> Result<Schema, StoreError> {
     varve_wire::schema_from_bytes(bytes).map_err(|e| {
         StoreError::Corrupt(format!("stored schema of '{revision}' is unreadable: {e}"))
     })
+}
+
+fn decode_publication(bytes: &[u8]) -> Result<Publication, StoreError> {
+    let value = varve_wire::canonical_from_bytes(bytes)
+        .map_err(|e| StoreError::Corrupt(format!("stored publication is unreadable: {e}")))?;
+    varve_revision::publication_from(&value)
+        .map_err(|e| StoreError::Corrupt(format!("stored publication is unreadable: {e}")))
 }
 
 fn decode_surface(bytes: &[u8]) -> Result<Surface, StoreError> {

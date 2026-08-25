@@ -1,12 +1,13 @@
 //! The kernel tables, as `pub(crate)` models: publication events by
 //! `(lineage, index)`, content-addressed revision objects, surfaces
-//! by `(revision, surface)`. Append-only or upsert per the trait
+//! by content hash (§2.13 decision 9). Append-only per the trait
 //! contracts; no timestamps — kernel time is an input, and these
 //! rows carry none (§2.13). The platform's own audit of *when* lives
 //! in its event log, not here.
 
-/// One publication event (§2.1): which object became current in a
-/// lineage, following which revisions.
+/// One publication event (§2.1, §2.13 decision 9): which object
+/// became current in a lineage, with which surfaces, following which
+/// publications.
 #[derive(Debug, toasty::Model)]
 #[table = "publications"]
 #[key(partition = lineage, local = index)]
@@ -15,10 +16,12 @@ pub(crate) struct PublicationRow {
     pub(crate) lineage: String,
     /// 0-based event index: the append order and the conflict guard.
     pub(crate) index: u64,
-    /// The published revision's content address.
+    /// The published revision's content address — also inside `body`;
+    /// this column exists for the FK to `revisions`.
     pub(crate) revision: String,
-    /// Parent revision ids at this event.
-    pub(crate) parents: Vec<String>,
+    /// JCS bytes of `varve_revision::publication_canonical` — the
+    /// event's full content (parents, surfaces): its id's preimage.
+    pub(crate) body: Vec<u8>,
 }
 
 /// One content-addressed revision object (§2.13), shared across
@@ -33,18 +36,19 @@ pub(crate) struct RevisionRow {
     pub(crate) schema: Vec<u8>,
 }
 
-/// One surface (§2.6), keyed by the revision it compiles against and
-/// its own id.
+/// One surface (§2.6), content-addressed and immutable (§2.13
+/// decision 9): keyed by `Surface::content_hash`, never replaced —
+/// publications' surface maps are what name these rows.
 #[derive(Debug, toasty::Model)]
 #[table = "surfaces"]
-#[key(partition = revision, local = surface)]
 pub(crate) struct SurfaceRow {
-    /// The revision this surface compiles against.
+    /// The content address — `hash_plain` of `body`.
+    #[key]
+    pub(crate) hash: String,
+    /// The revision this surface compiles against — also inside
+    /// `body`; this column exists for the FK to `revisions`.
     pub(crate) revision: String,
-    /// The surface id (the platform's fixed pair: `applicant`,
-    /// `reviewer` — P.4).
-    pub(crate) surface: String,
     /// JCS bytes of `varve_surface::canon::surface_canonical` — the
-    /// `surface`-line body (§5).
+    /// `surface`-line body (§5) and the hash's preimage.
     pub(crate) body: Vec<u8>,
 }

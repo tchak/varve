@@ -59,3 +59,8 @@ snapshot_name = "0010_snapshot.toml"
 id = 8467112390215540417
 name = "0011_drop_draft_discarded.sql"
 snapshot_name = "0011_snapshot.toml"
+
+[[migrations]]
+id = 405139410760520940
+name = "0012_latest_publication.sql"
+snapshot_name = "0012_snapshot.toml"

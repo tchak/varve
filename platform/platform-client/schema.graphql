@@ -789,9 +789,9 @@ type ProcedurePublishedEvent implements ProcedureEvent {
 	"""
 	createdAt: DateTime!
 	"""
-	The published revision's content address.
+	The publication's content address (§2.13 decision 9).
 	"""
-	revision: ID!
+	publication: ID!
 	"""
 	The fork point this publication was authored against; `null`
 	on a first publication.
@@ -979,9 +979,10 @@ which.
 """
 type RevisionDraft {
 	"""
-	The published revision this draft forks from (or would fork
-	from — the head, until touched); `null` until the procedure
-	has one.
+	The publication this draft forks from (or would fork from —
+	the head, until touched; §2.13 decision 9: a publication id,
+	so surface-only publications anchor forks too); `null` until
+	the procedure has one.
 	"""
 	base: ID
 	"""

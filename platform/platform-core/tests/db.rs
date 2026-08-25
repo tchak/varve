@@ -1254,7 +1254,10 @@ async fn publish_walks_the_whole_lifecycle() {
         .await
         .expect("publish");
     let PublishProcedureOutcome::Published {
-        revision, report, ..
+        publication,
+        revision,
+        report,
+        ..
     } = outcome
     else {
         panic!("first publication must not gate");
@@ -1262,18 +1265,33 @@ async fn publish_walks_the_whole_lifecycle() {
     assert_eq!(report.worst(), varve_impact::ChangeClass::Safe);
     assert_eq!(published.state, ProcedureStateValue::Published);
     assert_eq!(
-        published.latest_revision.as_deref(),
-        Some(revision.as_str())
+        published.latest_publication.as_deref(),
+        Some(publication.as_str())
     );
     assert_eq!(published.revision_draft.get(), &None);
 
-    // The kernel store holds the pair, compiled against the revision.
-    use varve_store::SurfaceStore;
-    let surfaces = store.surfaces(&revision).await.expect("surfaces");
+    // The kernel store holds the pair, committed to by the
+    // publication's surface map (§2.13 decision 9), each hash
+    // resolving to a surface compiled against the revision.
+    use varve_store::{RevisionStore, SurfaceStore};
+    let lineage = varve_store::LineageId::new(procedure.id.to_string());
+    let publications = store.publications(&lineage).await.expect("publications");
+    let (event, _) = publications
+        .iter()
+        .find(|(p, _)| p.id() == publication)
+        .expect("stored publication");
     assert_eq!(
-        surfaces.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        event
+            .surfaces
+            .keys()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>(),
         ["applicant", "reviewer"]
     );
+    for hash in event.surfaces.values() {
+        let stored = store.surface(hash).await.expect("get").expect("stored");
+        assert_eq!(stored.revision, revision);
+    }
 
     // The event carries its facts.
     let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
@@ -1287,7 +1305,7 @@ async fn publish_walks_the_whole_lifecycle() {
         .expect("facts")
         .decode()
         .expect("decode");
-    assert_eq!(facts.revision, revision.as_str());
+    assert_eq!(facts.publication, publication.as_str());
     assert_eq!(facts.base, None);
 
     // The next draft forks from the head.
@@ -1311,7 +1329,7 @@ async fn publish_walks_the_whole_lifecycle() {
         .expect("draft")
         .base
         .clone();
-    assert_eq!(draft_base.as_deref(), Some(revision.as_str()));
+    assert_eq!(draft_base.as_deref(), Some(publication.as_str()));
 
     // Adding a column is free: publishes without confirmation, facts
     // carry the base, and `since` is untouched (the procedure never
@@ -1320,10 +1338,13 @@ async fn publish_walks_the_whole_lifecycle() {
     let (outcome, republished) = publish(&mut db, &store, procedure.id, admin.id, false)
         .await
         .expect("second publish");
-    let PublishProcedureOutcome::Published { revision: r2, .. } = outcome else {
+    let PublishProcedureOutcome::Published {
+        publication: p2, ..
+    } = outcome
+    else {
         panic!("a free change publishes");
     };
-    assert_ne!(r2, revision);
+    assert_ne!(p2, publication);
     assert_eq!(republished.state_since, opened_since);
     let events = list_procedure_events(&mut db, procedure.id).await.unwrap();
     let last_facts = events
@@ -1336,7 +1357,7 @@ async fn publish_walks_the_whole_lifecycle() {
         .unwrap()
         .decode()
         .unwrap();
-    assert_eq!(last_facts.base.as_deref(), Some(revision.as_str()));
+    assert_eq!(last_facts.base.as_deref(), Some(publication.as_str()));
 
     // Close, draft a change while closed, publish: the reopen.
     let mut row = find_procedure(&mut db, procedure.id)

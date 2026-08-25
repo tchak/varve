@@ -86,10 +86,11 @@ fn surface(id: &str, schema: &Schema) -> Surface {
     }
 }
 
-fn publication(schema: &Schema, parents: &[&RevisionId]) -> Publication {
+fn publication(schema: &Schema, parents: &[&Publication]) -> Publication {
     Publication {
         revision: revision_id(schema),
-        parents: parents.iter().map(|p| (*p).clone()).collect(),
+        parents: parents.iter().map(|p| p.id()).collect(),
+        surfaces: std::collections::BTreeMap::new(),
     }
 }
 
@@ -107,12 +108,14 @@ async fn publications_append_load_and_verify() {
     let v2 = schema(&["a", "b"]);
     let r1 = revision_id(&v1);
 
+    let p1 = publication(&v1, &[]);
+    let p2 = publication(&v2, &[&p1]);
     store
-        .append_publication(&line, 0, &publication(&v1, &[]), &v1)
+        .append_publication(&line, 0, &p1, &v1)
         .await
         .expect("first");
     store
-        .append_publication(&line, 1, &publication(&v2, &[&r1]), &v2)
+        .append_publication(&line, 1, &p2, &v2)
         .await
         .expect("second");
 
@@ -120,7 +123,7 @@ async fn publications_append_load_and_verify() {
     // recomputes every content address.
     let dag = load_dag(&store, &line).await.expect("load");
     assert_eq!(dag.publications().len(), 2);
-    assert_eq!(dag.latest(), Some(&revision_id(&v2)));
+    assert_eq!(dag.latest(), Some(&p2.id()));
 
     // Point lookup serves the reading lens.
     let fetched = store.schema(&r1).await.expect("schema");
@@ -209,33 +212,40 @@ async fn revision_objects_converge_on_the_content_address() {
     let line_a = lineage("conv-a");
     let line_b = lineage("conv-b");
     let v1 = schema(&["same"]);
-    let r1 = revision_id(&v1);
 
+    let p1 = publication(&v1, &[]);
     store
-        .append_publication(&line_a, 0, &publication(&v1, &[]), &v1)
+        .append_publication(&line_a, 0, &p1, &v1)
         .await
         .expect("a");
     store
-        .append_publication(&line_b, 0, &publication(&v1, &[]), &v1)
+        .append_publication(&line_b, 0, &p1, &v1)
         .await
         .expect("b");
     let v2 = schema(&["same", "more"]);
+    let p2 = publication(&v2, &[&p1]);
     store
-        .append_publication(&line_a, 1, &publication(&v2, &[&r1]), &v2)
+        .append_publication(&line_a, 1, &p2, &v2)
         .await
         .expect("a v2");
+    // A revert: the same object again, a fresh event (§2.13 dec. 9).
+    let p3 = publication(&v1, &[&p2]);
     store
-        .append_publication(&line_a, 2, &publication(&v1, &[&revision_id(&v2)]), &v1)
+        .append_publication(&line_a, 2, &p3, &v1)
         .await
         .expect("revert");
 
     let dag = load_dag(&store, &line_a).await.expect("load");
     assert_eq!(dag.publications().len(), 3);
-    assert_eq!(dag.latest(), Some(&r1));
+    assert_eq!(dag.latest(), Some(&p3.id()));
+    assert_eq!(
+        dag.publication(&p3.id()).expect("event").revision,
+        revision_id(&v1)
+    );
 }
 
 #[tokio::test]
-async fn surfaces_round_trip_upsert_and_order() {
+async fn surfaces_are_content_addressed_and_immutable() {
     let Some(mut db) = test_db().await else {
         return;
     };
@@ -251,33 +261,28 @@ async fn surfaces_round_trip_upsert_and_order() {
         .await
         .expect("publish");
 
+    // §2.13 decision 9: keyed by content hash, idempotent, and a
+    // re-authored surface lands beside — never over — the stored one.
     let reviewer = surface("reviewer", &v1);
-    let applicant = surface("applicant", &v1);
-    store.put_surface(&reviewer).await.expect("reviewer");
-    store.put_surface(&applicant).await.expect("applicant");
+    let h1 = store.put_surface(&reviewer).await.expect("reviewer");
+    assert_eq!(h1, reviewer.content_hash());
+    assert_eq!(store.put_surface(&reviewer).await.expect("again"), h1);
 
-    let revision = revision_id(&v1);
-    let listed = store.surfaces(&revision).await.expect("list");
-    // Ascending by surface id: applicant before reviewer.
-    assert_eq!(
-        listed.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-        ["applicant", "reviewer"]
-    );
-    assert_eq!(listed[0], applicant);
-
-    // Upsert: re-authoring replaces in place.
     let mut reauthored = reviewer.clone();
     reauthored.nodes.clear();
-    store.put_surface(&reauthored).await.expect("upsert");
-    let fetched = store
-        .surface(&revision, &SurfaceId::new("reviewer"))
-        .await
-        .expect("get")
-        .expect("present");
-    assert_eq!(fetched, reauthored);
+    let h2 = store.put_surface(&reauthored).await.expect("reauthored");
+    assert_ne!(h2, h1);
+    assert_eq!(
+        store.surface(&h1).await.expect("get").expect("kept"),
+        reviewer
+    );
+    assert_eq!(
+        store.surface(&h2).await.expect("get").expect("stored"),
+        reauthored
+    );
     assert_eq!(
         store
-            .surface(&revision, &SurfaceId::new("absent"))
+            .surface(&surface("applicant", &v1).content_hash())
             .await
             .expect("none"),
         None

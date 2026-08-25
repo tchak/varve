@@ -52,14 +52,17 @@ pub struct ProcedureEvent {
     pub created_at: jiff::Timestamp,
 }
 
-/// The `published` event's facts (P.4 *Event logs*): which revision,
-/// forked from which base — the platform mirror of the kernel
-/// publication event, timestamped by the row.
+/// The `published` event's facts (P.4 *Event logs*): which
+/// publication, forked from which base — publication content
+/// addresses (§2.13 decision 9: the id commits to the revision *and*
+/// the surface set, so two surface-only publications stay distinct)
+/// — the platform mirror of the kernel event, timestamped by the row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedFacts {
-    /// The published revision's content address.
-    pub revision: String,
-    /// The draft's fork point; `None` on a first publication.
+    /// The publication's content address.
+    pub publication: String,
+    /// The draft's fork point — the parent publication; `None` on a
+    /// first publication.
     pub base: Option<String>,
 }
 
@@ -74,7 +77,7 @@ impl FactsBytes {
     fn encode(facts: &PublishedFacts) -> Self {
         Self(
             serde_json::to_vec(&serde_json::json!({
-                "revision": facts.revision,
+                "publication": facts.publication,
                 "base": facts.base,
             }))
             .expect("json! values serialize"),
@@ -85,16 +88,16 @@ impl FactsBytes {
     pub fn decode(&self) -> Result<PublishedFacts, String> {
         let value: serde_json::Value =
             serde_json::from_slice(&self.0).map_err(|e| e.to_string())?;
-        let revision = value["revision"]
+        let publication = value["publication"]
             .as_str()
-            .ok_or("'revision' must be a string")?
+            .ok_or("'publication' must be a string")?
             .to_owned();
         let base = match &value["base"] {
             serde_json::Value::Null => None,
             serde_json::Value::String(s) => Some(s.clone()),
             _ => return Err("'base' must be a string or null".into()),
         };
-        Ok(PublishedFacts { revision, base })
+        Ok(PublishedFacts { publication, base })
     }
 }
 

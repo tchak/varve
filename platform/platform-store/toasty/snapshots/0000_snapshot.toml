@@ -30,17 +30,17 @@ primary_key = true
 [[schema.tables]]
 id = 1
 name = "surfaces"
-primary_key = { columns = [{ table = 1, index = 0 }, { table = 1, index = 1 }], index = { table = 1, index = 0 } }
+primary_key = { columns = [{ table = 1, index = 0 }], index = { table = 1, index = 0 } }
 
 [[schema.tables.columns]]
 id = { table = 1, index = 0 }
-name = "revision"
+name = "hash"
 ty = "String"
 storage_ty = "Text"
 
 [[schema.tables.columns]]
 id = { table = 1, index = 1 }
-name = "surface"
+name = "revision"
 ty = "String"
 storage_ty = "Text"
 
@@ -52,9 +52,9 @@ storage_ty = "Blob"
 
 [[schema.tables.indices]]
 id = { table = 1, index = 0 }
-name = "index_surfaces_by_revision_and_surface"
+name = "index_surfaces_by_hash"
 on = 1
-columns = [{ column = { table = 1, index = 0 }, op = "Eq", scope = "Partition" }, { column = { table = 1, index = 1 }, op = "Eq", scope = "Local" }]
+columns = [{ column = { table = 1, index = 0 }, op = "Eq", scope = "Partition" }]
 unique = true
 primary_key = true
 
@@ -83,9 +83,9 @@ storage_ty = "Text"
 
 [[schema.tables.columns]]
 id = { table = 2, index = 3 }
-name = "parents"
-ty = { List = "String" }
-storage_ty = { List = "Text" }
+name = "body"
+ty = "Bytes"
+storage_ty = "Blob"
 
 [[schema.tables.indices]]
 id = { table = 2, index = 0 }

@@ -281,15 +281,17 @@ pub struct EventRow {
     pub created_at: jiff::Timestamp,
 }
 
-/// A publication, with its facts (G.11.2): which revision, forked
-/// from which base (`None` on a first publication).
+/// A publication, with its facts (G.11.2): which publication (§2.13
+/// decision 9 — its content address commits to the revision *and*
+/// the surface set), forked from which base (`None` on a first
+/// publication).
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
 #[cynic(graphql_type = "ProcedurePublishedEvent")]
 pub struct PublishedEvent {
     pub id: cynic::Id,
     pub actor: Option<Actor>,
     pub created_at: jiff::Timestamp,
-    pub revision: cynic::Id,
+    pub publication: cynic::Id,
     pub base: Option<cynic::Id>,
 }
 

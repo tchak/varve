@@ -3,9 +3,11 @@
 //! publication log is history (§2.1 — every event counts, `latest` is the
 //! last one), and nomenclature versions are append-only (§2.11).
 
+use std::collections::BTreeMap;
+
 use proptest::prelude::*;
 use varve_core::{ColumnId, NomenclatureId, OptionId};
-use varve_revision::{NomenclatureRegistry, PublishNomenclatureError, RevisionDag};
+use varve_revision::{NomenclatureRegistry, PublishError, PublishNomenclatureError, RevisionDag};
 use varve_schema::{Arity, Column, Element, OptionRow, ScalarType, Schema, revision_id};
 
 fn column(id: &str, ty: ScalarType) -> Element {
@@ -43,64 +45,83 @@ fn row(id: &str, label: &str) -> OptionRow {
 }
 
 proptest! {
-    /// Publishing a sequence of schemas: ids are the content hashes; the
-    /// object store holds one object per distinct schema; the log holds
-    /// one event per publication; `latest` is the last event; every
-    /// event's parents were known when it was published.
+    /// Publishing a sequence of schemas: revisions are content hashes,
+    /// publications are content-addressed events (§2.13 decision 9);
+    /// the object store holds one object per distinct schema; the log
+    /// holds one event per accepted publication; `latest` is the last
+    /// event; a publication identical to the head (same revision, same
+    /// — here empty — surface set) refuses; publication ids never
+    /// collide (their content includes their parents).
     #[test]
     fn publication_is_content_addressed_and_the_log_is_history(
         schemas in proptest::collection::vec(schema(), 1..8),
     ) {
         let mut dag = RevisionDag::new();
-        let mut distinct = std::collections::BTreeSet::new();
-        let mut previous = None;
-        for (i, s) in schemas.iter().enumerate() {
+        let mut objects = std::collections::BTreeSet::new();
+        let mut event_ids = std::collections::BTreeSet::new();
+        let mut previous: Option<varve_core::PublicationId> = None;
+        let mut accepted = 0usize;
+        for s in schemas.iter() {
             let parents: Vec<_> = previous.iter().cloned().collect();
-            let id = dag.publish(s.clone(), parents.clone()).unwrap();
-            prop_assert_eq!(&id, &revision_id(s));
-            distinct.insert(id.clone());
-            // The object: same schema, parents from its *first*
-            // publication.
-            prop_assert_eq!(&dag.get(&id).unwrap().schema, s);
+            let revision = revision_id(s);
+            let head_revision = dag.head().map(|(_, p)| p.revision.clone());
+            let result = dag.publish(s.clone(), BTreeMap::new(), parents.clone());
+            if head_revision.as_ref() == Some(&revision) {
+                // §2.13 decision 9: identical to the head is a no-op.
+                prop_assert_eq!(result, Err(PublishError::IdenticalToHead));
+                continue;
+            }
+            let id = result.unwrap();
+            accepted += 1;
+            objects.insert(revision.clone());
+            prop_assert!(event_ids.insert(id.clone()));
+            // The object: same schema.
+            prop_assert_eq!(&dag.get(&revision).unwrap().schema, s);
             // The event: exactly as published.
-            let events = dag.publications();
-            prop_assert_eq!(events.len(), i + 1);
-            prop_assert_eq!(&events[i].revision, &id);
-            prop_assert_eq!(&events[i].parents, &parents);
+            let (event_id, event) = dag.publications().last().unwrap();
+            prop_assert_eq!(dag.publications().len(), accepted);
+            prop_assert_eq!(event_id, &id);
+            prop_assert_eq!(&event.revision, &revision);
+            prop_assert_eq!(&event.parents, &parents);
             prop_assert_eq!(dag.latest(), Some(&id));
             previous = Some(id);
         }
-        // One object per distinct schema; one history entry per event,
-        // in order.
+        // One object per distinct accepted schema; one history entry
+        // per event, in order, each naming its object.
         let history: Vec<_> = dag.history().map(|(id, _)| id.clone()).collect();
-        prop_assert_eq!(history.len(), schemas.len());
-        prop_assert_eq!(
-            history.iter().collect::<std::collections::BTreeSet<_>>().len(),
-            distinct.len()
-        );
+        prop_assert_eq!(history.len(), accepted);
         for (id, s) in dag.history() {
-            prop_assert!(distinct.contains(id));
+            prop_assert!(objects.contains(id));
             prop_assert_eq!(revision_id(s), id.clone());
         }
     }
 
-    /// Republishing the current schema is idempotent on objects and on
-    /// `latest`, and is still an event.
+    /// An identical republish refuses (§2.13 decision 9); a revert —
+    /// the same schema again *after* something else — is a new event
+    /// converging on the old object, under a fresh publication id.
     #[test]
-    fn republishing_the_same_schema_adds_no_object(s in schema(), times in 1usize..4) {
+    fn identical_refuses_and_a_revert_converges(
+        (s, t) in (schema(), schema())
+            .prop_filter("distinct schemas", |(s, t)| revision_id(s) != revision_id(t)),
+    ) {
         let mut dag = RevisionDag::new();
-        let first = dag.publish(s.clone(), vec![]).unwrap();
-        for _ in 0..times {
-            let again = dag.publish(s.clone(), vec![first.clone()]).unwrap();
-            prop_assert_eq!(&again, &first);
-            prop_assert_eq!(dag.latest(), Some(&first));
-        }
-        prop_assert_eq!(dag.publications().len(), times + 1);
-        // The object keeps its first parents (none), not the revert's.
-        prop_assert!(dag.get(&first).unwrap().parents.is_empty());
-        // The aggregate over the lineage is over the one object.
+        let p1 = dag.publish(s.clone(), BTreeMap::new(), vec![]).unwrap();
+        prop_assert_eq!(
+            dag.publish(s.clone(), BTreeMap::new(), vec![p1.clone()]),
+            Err(PublishError::IdenticalToHead)
+        );
+        let p2 = dag.publish(t.clone(), BTreeMap::new(), vec![p1.clone()]).unwrap();
+        let p3 = dag.publish(s.clone(), BTreeMap::new(), vec![p2]).unwrap();
+        // A new event, not the first one again — its parents differ.
+        prop_assert_ne!(&p3, &p1);
+        prop_assert_eq!(dag.latest(), Some(&p3));
+        prop_assert_eq!(dag.publications().len(), 3);
+        // No new object, and the object keeps its first parents.
+        prop_assert_eq!(&dag.publication(&p3).unwrap().revision, &revision_id(&s));
+        prop_assert!(dag.get(&revision_id(&s)).unwrap().parents.is_empty());
+        // The aggregate over the lineage is over the two objects.
         let (agg, _) = dag.aggregate(&Default::default()).unwrap();
-        prop_assert_eq!(agg.columns.len(), s.root.len());
+        prop_assert!(agg.columns.len() <= s.root.len() + t.root.len());
     }
 
     /// Nomenclature versions are append-only (§2.11): a next version is

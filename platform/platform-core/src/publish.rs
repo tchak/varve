@@ -1,6 +1,6 @@
 //! The publication use case (P.4 *Publication*): the one place the
 //! `varve-service` operation composes with its platform side effects
-//! — the lifecycle transition, the draft consumed, `latest_revision`
+//! — the lifecycle transition, the draft consumed, `latest_publication`
 //! maintained, the `published` event with its facts — all against
 //! one transaction. Generic over the `varve-store` traits: tests run
 //! it over `MemoryStore`, production scopes `platform-store` over
@@ -15,7 +15,7 @@
 
 use toasty::Executor;
 use tokio::sync::Mutex;
-use varve_core::{ColumnId, RevisionId};
+use varve_core::{ColumnId, PublicationId, RevisionId};
 use varve_impact::ImpactReport;
 use varve_schema::{NomenclatureRef, ScalarType, revision_id};
 use varve_service::{PublishOutcome, PublishRevision, PublishRevisionError};
@@ -42,6 +42,7 @@ pub enum PublishProcedureOutcome {
     /// are on the caller's transaction — commit it. The procedure row
     /// is updated in place.
     Published {
+        publication: PublicationId,
         revision: RevisionId,
         report: ImpactReport,
         labels: ColumnLabels,
@@ -101,11 +102,16 @@ pub enum PublishProcedureError {
     /// publication (G.7).
     #[error("column '{0}' is a choice with no options")]
     EmptyEnum(ColumnId),
-    /// The draft forked from a revision that is no longer the lineage
-    /// head: another administrator published since. Discard or rebase
-    /// the draft.
+    /// The draft forked from a publication that is no longer the
+    /// lineage head: another administrator published since — a schema
+    /// change or a surface-only one alike (§2.13 decision 9). Discard
+    /// or rebase the draft.
     #[error("the draft's base is no longer the published head")]
     StaleDraft,
+    /// The draft changes nothing — same schema, same surfaces as the
+    /// head (§2.13 decision 9's refused no-op).
+    #[error("the draft changes nothing — nothing to publish")]
+    NothingToPublish,
     /// The stored draft no longer decodes (see
     /// [`crate::procedure::RevisionDraftError::Corrupt`]).
     #[error("stored draft is unreadable: {0}")]
@@ -129,7 +135,7 @@ pub enum PublishProcedureError {
 /// the authored tree, compile the surface pair, run the impact-gated
 /// kernel operation, and — when it publishes — transition the
 /// lifecycle (`Published` from any state; from `Closed` this is the
-/// reopen), consume the draft, set `latest_revision`, and log the
+/// reopen), consume the draft, set `latest_publication`, and log the
 /// `published` event with its facts. The procedure must come from
 /// `find_procedure_with_revision_draft`; on success it is updated in
 /// place.
@@ -152,12 +158,20 @@ where
     let schema = tree.schema();
     let revision = revision_id(&schema);
     let surfaces = compile_surfaces(&tree, &revision);
+    let lineage = LineageId::new(procedure.id.to_string());
 
+    // The base *schema*, for naming report entries: publications
+    // carry their schema, and the base is a publication id (§2.13
+    // decision 9). An unknown base falls through — the kernel's
+    // stale-fork check answers it.
     let base_schema = match &base {
         Some(id) => store
-            .schema(&RevisionId::new(id))
+            .publications(&lineage)
             .await
-            .map_err(|error| PublishProcedureError::Kernel(error.into()))?,
+            .map_err(|error| PublishProcedureError::Kernel(error.into()))?
+            .into_iter()
+            .find(|(publication, _)| publication.id().as_str() == id)
+            .map(|(_, schema)| schema),
         None => None,
     };
     let labels = ColumnLabels::resolve(base_schema.as_ref(), &schema);
@@ -165,8 +179,8 @@ where
     let outcome = varve_service::publish_revision(
         store,
         PublishRevision {
-            lineage: LineageId::new(procedure.id.to_string()),
-            base: base.as_deref().map(RevisionId::new),
+            lineage,
+            base: base.as_deref().map(PublicationId::new),
             schema,
             surfaces: surfaces.into_vec(),
             confirm,
@@ -175,21 +189,26 @@ where
     .await
     .map_err(|error| match error {
         PublishRevisionError::StaleBase { .. } => PublishProcedureError::StaleDraft,
+        PublishRevisionError::NothingToPublish => PublishProcedureError::NothingToPublish,
         other => PublishProcedureError::Kernel(other),
     })?;
 
-    let report = match outcome {
+    let (publication, report) = match outcome {
         PublishOutcome::RequiresConfirmation { report } => {
             return Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels });
         }
-        PublishOutcome::Published { report, .. } => report,
+        PublishOutcome::Published {
+            publication,
+            report,
+            ..
+        } => (publication, report),
     };
 
     let state = ProcedureState::from_columns(procedure.state, procedure.state_since)?
         .publish(crate::procedure::stored_now());
     let (value, since) = state.columns();
     let facts = PublishedFacts {
-        revision: revision.as_str().to_owned(),
+        publication: publication.as_str().to_owned(),
         base,
     };
     let mut guard = exec.lock().await;
@@ -197,7 +216,7 @@ where
         .update()
         .state(value)
         .state_since(since)
-        .latest_revision(Some(revision.as_str().to_owned()))
+        .latest_publication(Some(publication.as_str().to_owned()))
         .revision_draft(None)
         .published_tree(Some(crate::procedure::TreeBytes::encode(&tree)))
         .exec(&mut **guard)
@@ -211,6 +230,7 @@ where
     )
     .await?;
     Ok(PublishProcedureOutcome::Published {
+        publication,
         revision,
         report,
         labels,

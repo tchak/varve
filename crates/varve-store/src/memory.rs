@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::sync::Mutex;
 
-use varve_core::{BlockId, NomenclatureId, RecordId, RevisionId, SurfaceId};
+use varve_core::canonical::ContentHash;
+use varve_core::{BlockId, NomenclatureId, RecordId, RevisionId};
 use varve_record::Entry;
 use varve_revision::Publication;
 use varve_schema::{Block, OptionRow, Schema};
@@ -33,7 +34,8 @@ struct Inner {
     blocks: BTreeMap<BlockId, Vec<Block>>,
     block_defaults: BTreeMap<(BlockId, u32), BlockDefaults>,
     nomenclatures: BTreeMap<NomenclatureId, Vec<Vec<OptionRow>>>,
-    surfaces: BTreeMap<(RevisionId, SurfaceId), Surface>,
+    /// Content-addressed, immutable (§2.13 decision 9).
+    surfaces: BTreeMap<ContentHash, Surface>,
 }
 
 impl MemoryStore {
@@ -248,31 +250,21 @@ impl NomenclatureStore for MemoryStore {
 }
 
 impl SurfaceStore for MemoryStore {
-    async fn put_surface(&self, surface: &Surface) -> Result<(), StoreError> {
+    async fn put_surface(&self, surface: &Surface) -> Result<ContentHash, StoreError> {
+        let hash = surface.content_hash();
         let mut inner = self.lock();
-        inner.surfaces.insert(
-            (surface.revision.clone(), surface.id.clone()),
-            surface.clone(),
-        );
-        Ok(())
+        match inner.surfaces.get(&hash) {
+            None => {
+                inner.surfaces.insert(hash, surface.clone());
+            }
+            Some(stored) if stored == surface => {}
+            Some(_) => return Err(StoreError::SurfaceMismatch { hash }),
+        }
+        Ok(hash)
     }
 
-    async fn surface(
-        &self,
-        revision: &RevisionId,
-        id: &SurfaceId,
-    ) -> Result<Option<Surface>, StoreError> {
+    async fn surface(&self, hash: &ContentHash) -> Result<Option<Surface>, StoreError> {
         let inner = self.lock();
-        Ok(inner.surfaces.get(&(revision.clone(), id.clone())).cloned())
-    }
-
-    async fn surfaces(&self, revision: &RevisionId) -> Result<Vec<Surface>, StoreError> {
-        let inner = self.lock();
-        Ok(inner
-            .surfaces
-            .range((revision.clone(), SurfaceId::new(""))..)
-            .take_while(|((rev, _), _)| rev == revision)
-            .map(|(_, s)| s.clone())
-            .collect())
+        Ok(inner.surfaces.get(hash).cloned())
     }
 }

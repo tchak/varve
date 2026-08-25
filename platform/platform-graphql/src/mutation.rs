@@ -328,6 +328,7 @@ fn publish_error(error: PublishProcedureError) -> async_graphql::Error {
         PublishProcedureError::NoDraft | PublishProcedureError::EmptyEnum(_) => {
             coded(Code::InvalidDraft, error.to_string())
         }
+        PublishProcedureError::NothingToPublish => coded(Code::InvalidDraft, error.to_string()),
         PublishProcedureError::StaleDraft => coded(
             Code::Conflict,
             "the draft's base is no longer the published head; discard or rebase the draft",

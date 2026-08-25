@@ -1,6 +1,6 @@
 //! `ProcedureEvent`: the audit trail (platform P.4 *Event logs*,
 //! G.9), an **interface** since G.11 — the schema's first — so the
-//! `published` event can carry its facts (`revision`, `base`) and
+//! `published` event can carry its facts (`publication`, `base`) and
 //! answer `report`, the diff that publication made, recomputed at
 //! read time from the content-addressed schemas. The actor resolves
 //! to an [`AccountRef`] — `null` for a system event or an account
@@ -95,7 +95,8 @@ bare_event! {
 }
 
 /// A revision was published. The only member with facts (G.10.4):
-/// which revision, forked from which base.
+/// which publication (§2.13 decision 9: its id commits to the
+/// revision *and* the surface set), forked from which base.
 pub struct ProcedurePublishedEvent {
     row: EventRow,
     facts: platform_core::PublishedFacts,
@@ -124,9 +125,9 @@ impl ProcedurePublishedEvent {
         self.row.event.created_at
     }
 
-    /// The published revision's content address.
-    async fn revision(&self) -> ID {
-        ID::from(self.facts.revision.as_str())
+    /// The publication's content address (§2.13 decision 9).
+    async fn publication(&self) -> ID {
+        ID::from(self.facts.publication.as_str())
     }
 
     /// The fork point this publication was authored against; `null`
@@ -149,21 +150,25 @@ impl ProcedurePublishedEvent {
         let shared: platform_core::SharedExecutor =
             tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
         let store = platform_store::PlatformStore::new(&shared);
+        // Publication ids resolve through the lineage's event log
+        // (§2.13 decision 9) — each publication arrives with its
+        // schema.
+        let lineage = varve_store::LineageId::new(self.row.event.procedure_id.to_string());
+        let publications = store.publications(&lineage).await.map_err(internal)?;
+        let schema_of = |id: &str| {
+            publications
+                .iter()
+                .find(|(publication, _)| publication.id().as_str() == id)
+                .map(|(_, schema)| schema.clone())
+        };
         let base = match &self.facts.base {
             Some(id) => Some(
-                store
-                    .schema(&varve_core::RevisionId::new(id))
-                    .await
-                    .map_err(internal)?
-                    .ok_or_else(|| internal("publication's base revision is not in the store"))?,
+                schema_of(id).ok_or_else(|| internal("publication's base is not in the store"))?,
             ),
             None => None,
         };
-        let next = store
-            .schema(&varve_core::RevisionId::new(&self.facts.revision))
-            .await
-            .map_err(internal)?
-            .ok_or_else(|| internal("published revision is not in the store"))?;
+        let next = schema_of(&self.facts.publication)
+            .ok_or_else(|| internal("published event's publication is not in the store"))?;
         let report = platform_core::draft_report(base.as_ref(), &next).map_err(internal)?;
         let labels = platform_core::ColumnLabels::resolve(base.as_ref(), &next);
         Ok(crate::impact::ImpactReport::labeled(&report, &labels))

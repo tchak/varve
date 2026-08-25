@@ -1661,7 +1661,7 @@ const HISTORY: &str = "query($id: ID!) {
     procedure(id: $id) {
         events {
             id kind actor { name } createdAt
-            ... on ProcedurePublishedEvent { revision base }
+            ... on ProcedurePublishedEvent { publication base }
         }
     }
 }";
@@ -1671,7 +1671,7 @@ const EVENT_DIFF: &str = "query($id: ID!, $event: ID!) {
         event(id: $event) {
             kind
             ... on ProcedurePublishedEvent {
-                revision
+                publication
                 base
                 report { worst columns { columnId label class change } }
             }
@@ -1731,11 +1731,11 @@ async fn history_reads_each_publication_and_its_diff() {
     let published: Vec<&Value> = events.iter().filter(|e| e["kind"] == "PUBLISHED").collect();
     assert_eq!(published.len(), 2, "{history}");
     assert!(published[0]["base"].is_null(), "{history}");
-    assert!(!published[0]["revision"].is_null(), "{history}");
-    assert_eq!(published[1]["base"], published[0]["revision"]);
+    assert!(!published[0]["publication"].is_null(), "{history}");
+    assert_eq!(published[1]["base"], published[0]["publication"]);
     assert_eq!(published[0]["actor"]["name"], "alice");
     // A bare row carries no facts fields.
-    assert!(events[0]["revision"].is_null(), "{history}");
+    assert!(events[0]["publication"].is_null(), "{history}");
 
     // The first publication's diff is the initial column list.
     let first = api
