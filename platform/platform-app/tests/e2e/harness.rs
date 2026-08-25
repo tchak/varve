@@ -138,6 +138,12 @@ pub async fn e2e() -> Option<(Playwright, Vec<(&'static str, Browser)>, App)> {
 /// content-hashed asset ids match without a CI step. Bundled once
 /// per process under `CARGO_TARGET_TMPDIR`, then loaded per test.
 ///
+/// The bundle and cache directories carry the process id: under a
+/// process-per-test runner (nextest, as CI runs) every test process
+/// bundles concurrently, and `Bundler::bundle` load-syncs-saves the
+/// out_dir's `manifest.toml` with no cross-process locking — a
+/// shared directory tears (a reader meets a half-written manifest).
+///
 /// Styled pages are a precondition, not a nicety: the `a11y` subject
 /// runs axe over contrast and target size, and unstyled markup would
 /// pass or fail those rules meaninglessly. Hence the hard check that
@@ -147,8 +153,9 @@ async fn assets() -> AssetBundle {
     let dir = BUNDLE_DIR
         .get_or_init(|| async {
             let tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
-            let out_dir = tmp.join("e2e-assets");
-            let cache_dir = tmp.join("e2e-asset-cache");
+            let pid = std::process::id();
+            let out_dir = tmp.join(format!("e2e-assets-{pid}"));
+            let cache_dir = tmp.join(format!("e2e-asset-cache-{pid}"));
             let out = out_dir.clone();
             tokio::task::spawn_blocking(move || {
                 let exe = std::env::current_exe().expect("current executable");
