@@ -8,7 +8,10 @@
 //! group), removing, discarding behind its confirmation, sections
 //! and notes with inherited audiences (the reviewer badge, the
 //! refused widening), the preview tab (the draft rendered as a
-//! read-only form, its gate, French), and French.
+//! read-only form, its gate, French), publishing (the two-phase
+//! `publishRevision`: free first publication, the confirmation
+//! carrying the impact report for a checked cast, the refused
+//! draftless publish), and French.
 //! Every response passes the static accessibility baseline through
 //! `body_text`.
 
@@ -194,7 +197,7 @@ async fn strangers_and_absent_procedures_are_404_on_get_and_post() {
         let response = router.handle(get(path, &[("cookie", who)])).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
         assert!(body_text(response).await.contains("Page not found."));
-        for action in ["add", "discard"] {
+        for action in ["add", "discard", "publish"] {
             let response = router
                 .handle(post(
                     &format!("{path}/{action}"),
@@ -662,6 +665,139 @@ async fn the_editing_journey() {
     assert!(html.contains("The draft has been discarded."), "{html}");
     assert!(html.contains("data-schema-empty"), "{html}");
     assert!(html.contains("No draft yet"), "{html}");
+}
+
+#[tokio::test]
+async fn publish_journey() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "schema-publish").await;
+    let organization = create_organization(&router, &cookie, "Préfecture").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Permis").await;
+
+    // No draft: publication is refused, as an alert with the
+    // server's reason (`INVALID_DRAFT`).
+    let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("role=\"alert\""), "{html}");
+    assert!(html.contains("Publication was refused:"), "{html}");
+
+    // A draft with one text column; the header offers publication.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Nom")],
+    )
+    .await;
+    let nom = selected_of(&to.to);
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Publish the revision"), "{html}");
+
+    // The confirmation state is a URL; a first draft classifies
+    // against the empty schema, so its report is all additions.
+    let html = page(&router, &cookie, &format!("{editor}?publish=confirm")).await;
+    assert!(html.contains("role=\"alertdialog\""), "{html}");
+    assert!(html.contains("data-impact-report"), "{html}");
+    assert!(
+        html.contains("\u{201c}Nom\u{201d} is added \u{2014} no impact on existing answers."),
+        "{html}"
+    );
+    assert!(html.contains("Confirm and publish"), "{html}");
+
+    // First publication: every column `ADDED`, free — it publishes
+    // without a confirmation (G.10) and consumes the draft.
+    let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
+    assert!(!to.to.contains("publish=confirm"), "{}", to.to);
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("The revision has been published."), "{html}");
+    assert!(html.contains("No draft yet"), "{html}");
+    assert!(!html.contains("Publish the revision"), "{html}");
+
+    // The next draft forks from the head (adding an element starts
+    // it, seeded with the published tree — "Nom" keeps its id), and
+    // text → integer on the published column is a `CHECKED` cast: an
+    // unconfirmed publish writes nothing and lands on the
+    // confirmation, which shows the read-time report.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Ville")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("data-element-id"), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{nom}/update"),
+        &[("kind", "INTEGER")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Saved your changes."), "{html}");
+    let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
+    assert!(to.to.contains("publish=confirm"), "{}", to.to);
+    assert!(to.notice.is_none());
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("role=\"alertdialog\""), "{html}");
+    assert!(
+        html.contains(
+            "\u{201c}Nom\u{201d} changes type \u{2014} \
+             existing answers will be checked against the new type."
+        ),
+        "{html}"
+    );
+    assert!(
+        html.contains("\u{201c}Ville\u{201d} is added \u{2014} no impact on existing answers."),
+        "{html}"
+    );
+    // The confirmation replaces the header's actions.
+    assert!(!html.contains("Publish the revision"), "{html}");
+    assert!(!html.contains("Discard the draft"), "{html}");
+    assert!(html.contains("Keep editing"), "{html}");
+
+    // Confirmed: the checked cast publishes and the draft is gone.
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/publish"),
+        &[("confirm", "true")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("The revision has been published."), "{html}");
+    assert!(html.contains("No draft yet"), "{html}");
+}
+
+#[tokio::test]
+async fn publishes_in_french() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = french_member(&router, "schema-publish-fr").await;
+    let organization = create_organization(&router, &cookie, "Mairie").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Aide").await;
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Nom")],
+    )
+    .await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("Publier la révision"), "{html}");
+    let html = page(&router, &cookie, &format!("{editor}?publish=confirm")).await;
+    assert!(
+        html.contains("«\u{a0}Nom\u{a0}» est ajoutée \u{2014} sans impact"),
+        "{html}"
+    );
+    assert!(html.contains("Confirmer et publier"), "{html}");
+    let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
+    let html = landed(&router, &cookie, &to).await;
+    assert!(html.contains("La révision a été publiée."), "{html}");
 }
 
 #[tokio::test]

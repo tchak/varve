@@ -160,6 +160,72 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("schema.discard.confirm", "Discard"),
     ("schema.discard.keep", "Keep editing"),
+    ("schema.publish", "Publish the revision"),
+    (
+        "schema.publish.question",
+        "Publish this revision? Review what the changes do to existing case files.",
+    ),
+    ("schema.publish.confirm", "Confirm and publish"),
+    ("schema.publish.keep", "Keep editing"),
+    (
+        "schema.impact.none",
+        "No changes against the published revision.",
+    ),
+    (
+        "schema.impact.added",
+        "\u{201c}{$label}\u{201d} is added \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.cast",
+        "\u{201c}{$label}\u{201d} changes type \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.scope-moved",
+        "\u{201c}{$label}\u{201d} moves to a different repetition scope \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.forbidden",
+        "\u{201c}{$label}\u{201d} changes to an incompatible type \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.removed",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         one {{{$n} column of the published revision is no longer in the schema \u{2014} its stored answers are kept.}}\n\
+         * {{{$n} columns of the published revision are no longer in the schema \u{2014} their stored answers are kept.}}",
+    ),
+    (
+        "schema.impact.options-removed",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         one {{{$n} choice option is removed.}}\n\
+         * {{{$n} choice options are removed.}}",
+    ),
+    ("schema.impact.class.safe", "no impact on existing answers"),
+    (
+        "schema.impact.class.lossy",
+        "existing answers may lose detail",
+    ),
+    (
+        "schema.impact.class.checked",
+        "existing answers will be checked against the new type",
+    ),
+    (
+        "schema.impact.class.breaking",
+        "existing answers stop being readable",
+    ),
+    (
+        "schema.notice.published",
+        "The revision has been published.",
+    ),
+    (
+        "schema.publish.error.conflict",
+        "Another revision was published in the meantime. Discard the draft and start again from it.",
+    ),
+    (
+        "schema.publish.error.refused",
+        "Publication was refused: {$reason}",
+    ),
     ("schema.structure.title", "Structure"),
     (
         "schema.structure.empty",
@@ -504,6 +570,72 @@ pub const FR: &[(&str, &str)] = &[
     ),
     ("schema.discard.confirm", "Abandonner"),
     ("schema.discard.keep", "Continuer l'édition"),
+    ("schema.publish", "Publier la révision"),
+    (
+        "schema.publish.question",
+        "Publier cette révision\u{a0}? Vérifiez l'effet des modifications sur les dossiers existants.",
+    ),
+    ("schema.publish.confirm", "Confirmer et publier"),
+    ("schema.publish.keep", "Continuer l'édition"),
+    (
+        "schema.impact.none",
+        "Aucun changement par rapport à la révision publiée.",
+    ),
+    (
+        "schema.impact.added",
+        "«\u{a0}{$label}\u{a0}» est ajoutée \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.cast",
+        "«\u{a0}{$label}\u{a0}» change de type \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.scope-moved",
+        "«\u{a0}{$label}\u{a0}» change de portée de répétition \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.forbidden",
+        "«\u{a0}{$label}\u{a0}» passe à un type incompatible \u{2014} {$class}.",
+    ),
+    (
+        "schema.impact.removed",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         one {{{$n} colonne de la révision publiée ne figure plus dans le schéma \u{2014} les réponses enregistrées sont conservées.}}\n\
+         * {{{$n} colonnes de la révision publiée ne figurent plus dans le schéma \u{2014} les réponses enregistrées sont conservées.}}",
+    ),
+    (
+        "schema.impact.options-removed",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         one {{{$n} option de choix est supprimée.}}\n\
+         * {{{$n} options de choix sont supprimées.}}",
+    ),
+    (
+        "schema.impact.class.safe",
+        "sans impact sur les réponses existantes",
+    ),
+    (
+        "schema.impact.class.lossy",
+        "des réponses existantes peuvent perdre en précision",
+    ),
+    (
+        "schema.impact.class.checked",
+        "les réponses existantes seront vérifiées contre le nouveau type",
+    ),
+    (
+        "schema.impact.class.breaking",
+        "des réponses existantes cesseront d'être lisibles",
+    ),
+    ("schema.notice.published", "La révision a été publiée."),
+    (
+        "schema.publish.error.conflict",
+        "Une autre révision a été publiée entre-temps. Abandonnez le brouillon et repartez de celle-ci.",
+    ),
+    (
+        "schema.publish.error.refused",
+        "La publication a été refusée\u{a0}: {$reason}",
+    ),
     ("schema.structure.title", "Structure"),
     (
         "schema.structure.empty",

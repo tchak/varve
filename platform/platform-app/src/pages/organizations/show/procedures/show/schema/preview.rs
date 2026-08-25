@@ -101,6 +101,7 @@ async fn preview_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
                 procedure: procedure.clone(),
                 tab: header::Tab::Preview,
                 offer_discard: false,
+                offer_publish: false,
                 revision: revision
             )
             <h2 class="sr-only">(panel_heading)</h2>

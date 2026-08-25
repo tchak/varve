@@ -51,6 +51,11 @@ pub struct RevisionDraft {
     /// The authored tree, document order; each element names its
     /// parent (a group or a section).
     pub elements: Vec<Element>,
+    /// The report `publishRevision` would return, computed at read
+    /// time against the draft's base (G.10 *RevisionDraft.report*):
+    /// impact is visible while editing, and the publish confirmation
+    /// shows it without attempting a publication.
+    pub report: crate::procedure::ImpactReport,
 }
 
 #[derive(cynic::InlineFragments, Debug, Clone, PartialEq, Eq)]
@@ -766,6 +771,10 @@ mod tests {
         assert!(query.contains("... on Note"), "{query}");
         assert!(query.contains("... on IntegerType"), "{query}");
         assert!(query.contains("audience"), "{query}");
+        // The read-time impact report rides with every draft read
+        // (G.10 *RevisionDraft.report*).
+        assert!(query.contains("report"), "{query}");
+        assert!(query.contains("worst"), "{query}");
 
         let add = AddColumn::build(AddColumnVariables {
             input: AddColumnInput {

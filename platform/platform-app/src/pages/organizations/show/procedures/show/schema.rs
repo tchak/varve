@@ -42,6 +42,8 @@
 //! - [`controls`] — the vendored controls' look, for the plain
 //!   elements that carry runtime handlers.
 //! - [`preview`] — the read-only second tab.
+//! - [`publish`] — the publish POST (two-phase `publishRevision`,
+//!   G.10) and the confirmation that carries the impact report.
 //!
 //! **Signals are the seam.** A `signal` declaration lowers to an
 //! ordinary `&Signal<T>` binding and a runtime expression captures it
@@ -66,6 +68,7 @@ pub(super) mod element;
 pub(super) mod elements;
 pub(super) mod header;
 pub(super) mod preview;
+pub(super) mod publish;
 pub(super) mod structure;
 
 use cynic::MutationBuilder;
@@ -102,11 +105,12 @@ use add_form::AddFacts;
 use element::{effectively_reviewer, id_of, parent_of};
 
 /// The editor's query: the selected element, and the pending
-/// discard confirmation.
+/// discard or publish confirmation.
 #[query_params(error = redirect("?"))]
 pub(super) struct EditorQuery {
     selected: Option<String>,
     discard: Option<String>,
+    publish: Option<String>,
 }
 
 /// The one-shot notice a POST leaves for the next GET.
@@ -137,6 +141,7 @@ pub async fn page(cx: &Cx) -> Result {
             procedure: procedure,
             selected: query.selected.clone(),
             confirm_discard: query.discard.as_deref() == Some("confirm"),
+            confirm_publish: query.publish.as_deref() == Some("confirm"),
             notice: notice
         )
     }
@@ -412,6 +417,7 @@ async fn editor_page(
     procedure: ProcedureRevisionDraft,
     selected: Option<String>,
     confirm_discard: bool,
+    confirm_publish: bool,
     notice: Option<Notice>,
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
@@ -421,6 +427,11 @@ async fn editor_page(
         .as_ref()
         .map(|d| d.elements.clone())
         .unwrap_or_default();
+    // The read-time report the publish confirmation shows (G.10
+    // *RevisionDraft.report*); `None` doubles as "nothing to
+    // publish", so `?publish=confirm` on a draftless editor shows
+    // nothing rather than an empty confirmation.
+    let report = procedure.revision_draft.as_ref().map(|d| d.report.clone());
     let discard_question = t(cx, "schema.discard.question").await?;
     let discard_confirm = t(cx, "schema.discard.confirm").await?;
     let discard_keep = t(cx, "schema.discard.keep").await?;
@@ -468,9 +479,22 @@ async fn editor_page(
             header::header(
                 procedure: procedure.clone(),
                 tab: header::Tab::Editor,
-                offer_discard: !confirm_discard,
+                // Either confirmation replaces both header actions:
+                // one pending decision at a time.
+                offer_discard: !confirm_discard && !confirm_publish,
+                offer_publish: !confirm_publish && !confirm_discard,
                 revision: revision
             )
+            if confirm_publish {
+                if let Some(report) = &report {
+                    publish::confirmation(
+                        organization_id: organization_id,
+                        procedure_id: procedure_id,
+                        elements: elements.clone(),
+                        report: report.clone()
+                    )
+                }
+            }
             if confirm_discard {
                 alert(
                     variant: AlertVariant::Destructive,

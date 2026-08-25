@@ -32,7 +32,7 @@ use crate::{
     client,
     components::{
         badge::{BadgeVariant, badge},
-        button::{ButtonSize, ButtonVariant, button_variants},
+        button::{ButtonSize, ButtonVariant, button, button_variants},
         page_title::page_title,
         tabs::{tabs, tabs_list, tabs_trigger},
     },
@@ -45,7 +45,7 @@ use platform_client::revision_draft::ProcedureRevisionDraft;
 use super::super::super::super::OrganizationId;
 use super::super::{ProcedureId, counts};
 use super::autosave::draft_of;
-use super::{page, preview};
+use super::{page, preview, publish};
 
 /// Which tab is showing.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -54,9 +54,11 @@ pub(in crate::pages) enum Tab {
     Preview,
 }
 
-/// The header. `offer_discard` is the editor's discard link — absent
-/// on the preview, and absent on the editor while the confirmation
-/// is open (the confirmation replaces it).
+/// The header. `offer_discard` (the discard link) and
+/// `offer_publish` (the publish button, posting the free phase of
+/// `publishRevision` — [`publish::submit`]) are the editor's actions
+/// — absent on the preview, and absent on the editor while a
+/// confirmation is open (the confirmation replaces them).
 ///
 /// Boxed: the editor page's `view!` is deep enough that an unboxed
 /// header frame overflows the stack in debug builds, the same reason
@@ -67,6 +69,7 @@ pub(in crate::pages) async fn header(
     procedure: ProcedureRevisionDraft,
     tab: Tab,
     offer_discard: bool,
+    offer_publish: bool,
     revision: &Signal<f64>,
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
@@ -80,6 +83,7 @@ pub(in crate::pages) async fn header(
     let back = t(cx, "schema.back").await?;
     let draft_badge = t(cx, "procedure.draft.badge").await?;
     let discard_label = t(cx, "schema.discard").await?;
+    let publish_label = t(cx, "schema.publish").await?;
     let tab_editor = t(cx, "schema.tab.editor").await?;
     let tab_preview = t(cx, "schema.tab.preview").await?;
     let has_draft = procedure.revision_draft.is_some();
@@ -105,6 +109,11 @@ pub(in crate::pages) async fn header(
         ProcedureId(procedure_id)
     )
     .query(&[("discard", "confirm")]);
+    let publish_href = href!(
+        publish::submit,
+        OrganizationId(organization_id),
+        ProcedureId(procedure_id)
+    );
     view! {
         signal pid = procedure_id_string.clone();
 
@@ -125,6 +134,16 @@ pub(in crate::pages) async fn header(
                     badge(variant: BadgeVariant::Secondary, (draft_badge))
                 }
                 state(procedure_id: $(pid.get()), revision: $(revision.get()))
+                if has_draft && offer_publish {
+                    <form method="post" action=(publish_href)>
+                        button(
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Sm,
+                            attrs: attributes! { type="submit" },
+                            (publish_label)
+                        )
+                    </form>
+                }
                 if has_draft && offer_discard {
                     <a
                         href=(discard_href)

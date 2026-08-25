@@ -387,6 +387,19 @@ async fn axe_scenario(
         "/organizations/{id}/procedures/{pid}/schema (refused edit)",
     )
     .await?;
+    // The publish confirmation: the impact report over the draft (a
+    // first draft classifies against the empty schema — all
+    // additions), the re-send form, the way back.
+    page.goto(&format!("{editor_url}&publish=confirm"), None)
+        .await?;
+    expect(page.locator(locator!("[data-impact-report]")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema (publish confirmation)",
+    )
+    .await?;
     page.goto(&editor_url, None).await?;
     page.get_by_role(
         AriaRole::Link,
