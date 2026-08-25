@@ -674,4 +674,236 @@ mod tests {
         }
         assert!(varve_schema::validate(&schema, Default::default()).is_empty());
     }
+
+    /// Every arm of the type/unit/format mapping tables, byte
+    /// round-tripped: one column per shape.
+    #[test]
+    fn every_type_unit_and_format_rides() {
+        let units = [
+            Unit::Millimetre,
+            Unit::Centimetre,
+            Unit::Metre,
+            Unit::Kilometre,
+            Unit::Gram,
+            Unit::Kilogram,
+            Unit::Tonne,
+            Unit::Minute,
+            Unit::Hour,
+            Unit::Day,
+            Unit::Week,
+            Unit::Month,
+            Unit::Year,
+            Unit::SquareMetre,
+            Unit::Hectare,
+            Unit::SquareKilometre,
+            Unit::Litre,
+            Unit::CubicMetre,
+            Unit::Percent,
+        ];
+        let mut shapes: Vec<(ScalarType, Option<Format>, Arity)> = vec![
+            (ScalarType::Text, Some(Format::Phone), Arity::One),
+            (ScalarType::Text, Some(Format::Iban), Arity::One),
+            (ScalarType::Boolean, None, Arity::One),
+            (ScalarType::Integer(None), None, Arity::One),
+            (ScalarType::Decimal(None), None, Arity::One),
+            (ScalarType::Date, None, Arity::One),
+            (ScalarType::Datetime, None, Arity::One),
+            (ScalarType::Geometry, None, Arity::Many),
+            (
+                ScalarType::Enum(NomenclatureRef::Inline(vec![OptionRow {
+                    id: OptionId::new("o1"),
+                    label: "Un".into(),
+                    // Rows with extra fields activate the resolver
+                    // aspect (§2.12) — they must ride too.
+                    fields: vec![("code".into(), "01".into())],
+                }])),
+                None,
+                Arity::One,
+            ),
+            (
+                ScalarType::Enum(NomenclatureRef::Published {
+                    id: varve_core::NomenclatureId::new("insee-cog"),
+                    version: 3,
+                }),
+                None,
+                Arity::Many,
+            ),
+            (
+                ScalarType::Attachment(AttachmentConstraints {
+                    accept: vec![],
+                    max_bytes: None,
+                }),
+                None,
+                Arity::One,
+            ),
+        ];
+        shapes.extend(
+            units
+                .iter()
+                .map(|u| (ScalarType::Integer(Some(*u)), None, Arity::One)),
+        );
+        shapes.push((ScalarType::Decimal(Some(Unit::Percent)), None, Arity::One));
+        let tree = Tree {
+            elements: shapes
+                .into_iter()
+                .enumerate()
+                .map(|(i, (ty, format, arity))| {
+                    TreeElement::Column(TreeColumn {
+                        id: ColumnId::new(format!("c{i}")),
+                        label: format!("C{i}"),
+                        ty,
+                        arity,
+                        required: i % 2 == 0,
+                        format,
+                        audience: if i % 3 == 0 {
+                            Audience::Reviewer
+                        } else {
+                            Audience::All
+                        },
+                    })
+                })
+                .collect(),
+        };
+        assert_eq!(Tree::from_bytes(&tree.to_bytes()).unwrap(), tree);
+    }
+
+    /// Each decode refusal names its reason: corruption surfaces,
+    /// never silently repairs (the error type's charter).
+    #[test]
+    fn malformed_trees_are_refused_with_the_reason() {
+        fn refused(doc: &str) -> String {
+            Tree::from_bytes(doc.as_bytes()).unwrap_err().0
+        }
+        fn col(ty: &str) -> String {
+            format!(
+                r#"{{"elements":[{{"kind":"column","id":"c","label":"C","audience":"all","type":{ty}}}]}}"#
+            )
+        }
+        // The envelope.
+        assert_eq!(refused("[]"), "expected an object");
+        assert_eq!(refused("{}"), "missing 'elements'");
+        assert_eq!(
+            refused(r#"{"elements":1}"#),
+            "'elements'/'children' must be an array"
+        );
+        assert_eq!(refused(r#"{"elements":[1]}"#), "expected an object");
+        // Elements.
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "missing 'label'"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":1,"audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "'label' must be a string"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":"C","audience":"staff","type":{"kind":"text"}}]}"#
+            ),
+            "unknown audience 'staff'"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":"C","required":1,"audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "'required' must be a boolean"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":"C","format":"telepathy","audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "unknown format 'telepathy'"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":"C","format":7,"audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "'format' must be a name, an object or null"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"column","id":"c","label":"C","format":{"pattern":"x"},"audience":"all","type":{"kind":"text"}}]}"#
+            ),
+            "missing 'regex'"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"group","id":"g","label":"G","cardinality":"few","audience":"all","children":[]}]}"#
+            ),
+            "unknown cardinality 'few'"
+        );
+        assert_eq!(
+            refused(
+                r#"{"elements":[{"kind":"section","id":"s","title":"T","help":7,"audience":"all","children":[]}]}"#
+            ),
+            "'help' must be a string or null"
+        );
+        assert_eq!(
+            refused(r#"{"elements":[{"kind":"note","id":"n","title":null,"audience":"all"}]}"#),
+            "missing 'body'"
+        );
+        // Types.
+        assert_eq!(
+            refused(&col(r#"{"kind":"blob"}"#)),
+            "unknown type kind 'blob'"
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"text","multiple":7}"#)),
+            "'multiple' must be a boolean"
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"integer","unit":"furlong"}"#)),
+            "unknown unit 'furlong'"
+        );
+        assert_eq!(
+            refused(&col(
+                r#"{"kind":"enum","published":{"id":"x","version":"3"},"multiple":false}"#
+            )),
+            "'version' must be a number"
+        );
+        assert_eq!(
+            refused(&col(
+                r#"{"kind":"enum","published":{"id":"x","version":-1},"multiple":false}"#
+            )),
+            "bad nomenclature version"
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"enum","multiple":false}"#)),
+            "missing 'options'"
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"enum","options":7,"multiple":false}"#)),
+            "'options' must be an array"
+        );
+        assert!(
+            refused(&col(
+                r#"{"kind":"enum","options":[{"id":"o","label":"O","fields":7}],"multiple":false}"#
+            ))
+            .starts_with("bad option fields")
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"attachment","accept":7,"max_bytes":null}"#)),
+            "'accept' must be an array"
+        );
+        assert_eq!(
+            refused(&col(
+                r#"{"kind":"attachment","accept":[7],"max_bytes":null}"#
+            )),
+            "'accept' entries must be strings"
+        );
+        assert_eq!(
+            refused(&col(
+                r#"{"kind":"attachment","accept":[],"max_bytes":"big"}"#
+            )),
+            "'max_bytes' must be a number or null"
+        );
+        assert_eq!(
+            refused(&col(r#"{"kind":"attachment","accept":[],"max_bytes":-1}"#)),
+            "bad max_bytes"
+        );
+    }
 }
