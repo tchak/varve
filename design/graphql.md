@@ -383,6 +383,34 @@ four kinds — not the kernel's `varve_schema::Element` (columns and
 groups only), a distinction the API never has to draw because no
 schema-element type is exposed.
 
+**The virtual draft amendment (settled 2026-08-25).**
+`Procedure.revisionDraft` becomes **non-nullable** and answers the
+tree the next edit would operate on — *head until touched*: the
+stored working buffer when one exists; otherwise the published
+head's authored tree with `base` naming the head; otherwise (never
+published, nothing in progress) the empty tree with `base: null`.
+Nothing is stored for the two virtual cases — this is a read-time
+projection, the same move as `report` (G.10.5) and derived
+reachability (DESIGN §2.4): platform-core already forks lazily on
+the first edit (any edit, an update of a head element included —
+P.4 *Publication*), and the read model now shows the fork-on-write
+semantics instead of hiding the head behind `null` (which left the
+first integrator's editor blank after every publication, with head
+elements unreachable through element-addressed routes). The halfway
+shape — non-null only when a head exists — was rejected: it keeps a
+`null` case whose meaning differs from the old one, worse than
+either endpoint. A new field **`RevisionDraft.inProgress: Boolean!`**
+carries the one fact the projection would otherwise erase: whether a
+stored working buffer exists. It cannot be inferred from an empty
+`report` — a draft whose edits never touch the derived schema (a
+label rename, a note, a section) is a real stored draft with an
+empty impact report — and clients need it (draft badge, discard
+offer, publish gating, "saved on" lines). **Writers keep talking
+about the stored buffer**: `publishRevision` on a pristine draft
+stays `INVALID_DRAFT` ("nothing to publish" is true, and an
+identical republication would mint the same content-hash revision
+id — pure churn); `discardRevisionDraft` on pristine is a no-op.
+
 ## G.8 One tree, viewer-scoped (settled 2026-08-24)
 
 How revisions expose their structure, settled ahead of the published
