@@ -73,6 +73,7 @@ fn manifest(mode: Mode, intent: Intent, records: u64) -> Manifest {
         mode,
         intent,
         revisions: vec![revision_id(&schema())],
+        surfaces: vec![],
         record_count: records,
         blobs_bundled: false,
     }
@@ -958,6 +959,19 @@ fn surface_body(id: &str, revision: &RevisionId) -> varve_core::canonical::Canon
     )
 }
 
+/// A `surface` line over [`surface_body`], its hash the body's plain
+/// hash (§2.13 decision 9); `body_id` may disagree with `id` to build
+/// an envelope/body mismatch.
+fn surface_line(id: &str, body_id: &str, revision: &RevisionId) -> Line {
+    let body = surface_body(body_id, revision);
+    Line::Surface {
+        id: varve_core::SurfaceId::new(id),
+        revision: revision.clone(),
+        hash: varve_core::canonical::hash_plain(&body).unwrap(),
+        body,
+    }
+}
+
 #[test]
 fn q14_lines_round_trip_byte_stably() {
     use varve_core::canonical::{CanonicalValue as V, hash_plain};
@@ -974,17 +988,14 @@ fn q14_lines_round_trip_byte_stably() {
     );
     let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
     m.blobs_bundled = true;
+    m.surfaces = vec![hash_plain(&surface_body("form", &lens)).unwrap()];
     let lines = vec![
         Line::Header(m),
         Line::Revision {
             id: lens.clone(),
             schema: schema(),
         },
-        Line::Surface {
-            id: varve_core::SurfaceId::new("form"),
-            revision: lens.clone(),
-            body: surface_body("form", &lens),
-        },
+        surface_line("form", "form", &lens),
         Line::BlockDefaults {
             block: varve_core::BlockId::new("rib"),
             version: 2,
@@ -1041,28 +1052,23 @@ fn q14_lines_are_strictly_validated() {
     };
 
     // A surface body whose id/revision disagree with the envelope.
+    malformed(write_one(surface_line("form", "other", &lens)));
+    // A surface whose hash is not its body's (§2.13 decision 9).
     malformed(write_one(Line::Surface {
         id: varve_core::SurfaceId::new("form"),
         revision: lens.clone(),
-        body: surface_body("other", &lens),
+        hash: hash_plain(&V::String("other".into())).unwrap(),
+        body: surface_body("form", &lens),
     }));
     // A surface naming a revision the stream does not carry.
     let elsewhere = RevisionId::new("rev-elsewhere");
-    let bytes = write_one(Line::Surface {
-        id: varve_core::SurfaceId::new("form"),
-        revision: elsewhere.clone(),
-        body: surface_body("form", &elsewhere),
-    });
+    let bytes = write_one(surface_line("form", "form", &elsewhere));
     assert_eq!(
         read_stream(&bytes),
         Err(ReadError::RevisionNotCarried(elsewhere))
     );
     // Duplicate surface for one (id, revision).
-    let surface = Line::Surface {
-        id: varve_core::SurfaceId::new("form"),
-        revision: lens.clone(),
-        body: surface_body("form", &lens),
-    };
+    let surface = surface_line("form", "form", &lens);
     malformed(
         write_lines(&[
             Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
@@ -1106,4 +1112,54 @@ fn q14_lines_are_strictly_validated() {
         ])
         .unwrap(),
     );
+}
+
+/// §2.13 decision 9: the manifest's surface hashes are exactly the
+/// stream's `surface` lines — undeclared, undelivered, non-canonical
+/// and duplicate declarations all refuse.
+#[test]
+fn q23_the_manifest_pins_surface_hashes() {
+    use varve_core::canonical::hash_plain;
+    let lens = revision_id(&schema());
+    let revision = Line::Revision {
+        id: lens.clone(),
+        schema: schema(),
+    };
+    // A surface line the manifest does not declare.
+    let bytes = write_lines(&[
+        Line::Header(manifest(Mode::Snapshot, Intent::Upsert, 0)),
+        revision.clone(),
+        surface_line("form", "form", &lens),
+    ])
+    .unwrap();
+    assert_eq!(read_stream(&bytes), Err(ReadError::SurfacesMismatch));
+    // A declared hash with no surface line.
+    let hash = hash_plain(&surface_body("form", &lens)).unwrap();
+    let mut m = manifest(Mode::Snapshot, Intent::Upsert, 0);
+    m.surfaces = vec![hash];
+    let bytes = write_lines(&[Line::Header(m), revision.clone()]).unwrap();
+    assert_eq!(read_stream(&bytes), Err(ReadError::SurfacesMismatch));
+    // Raw headers, since the writer emits neither: an explicit empty
+    // list (absent is the one canonical form for "no surfaces") and a
+    // duplicate hash (it would collapse in the set comparison).
+    let raw_header = |surfaces: &str| {
+        format!(
+            concat!(
+                "{{\"k\":\"header\",\"format_version\":{},",
+                "\"source_instance\":\"i\",\"mode\":\"snapshot\",",
+                "\"intent\":\"upsert\",\"revisions\":[],",
+                "\"surfaces\":{},\"record_count\":0,\"blobs\":\"referenced\"}}\n"
+            ),
+            varve_wire::FORMAT_VERSION,
+            surfaces
+        )
+    };
+    assert!(matches!(
+        read_stream(raw_header("[]").as_bytes()),
+        Err(ReadError::Malformed { .. })
+    ));
+    assert!(matches!(
+        read_stream(raw_header(&format!("[\"{hash}\",\"{hash}\"]")).as_bytes()),
+        Err(ReadError::Malformed { .. })
+    ));
 }

@@ -82,6 +82,7 @@ pub fn surface_line(surface: &Surface) -> Line {
     Line::Surface {
         id: surface.id.clone(),
         revision: surface.revision.clone(),
+        hash: surface.content_hash(),
         body: surface_canonical(surface),
     }
 }

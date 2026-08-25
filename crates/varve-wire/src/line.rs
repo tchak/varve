@@ -37,6 +37,11 @@ pub struct Manifest {
     pub mode: Mode,
     pub intent: Intent,
     pub revisions: Vec<RevisionId>,
+    /// Content addresses of the stream's `surface` lines (§2.13
+    /// decision 9) — exactly the set carried, as `revisions` is for
+    /// `revision` lines. Omitted from the wire when empty (§2.13:
+    /// optionals omitted when absent — one canonical form).
+    pub surfaces: Vec<ContentHash>,
     pub record_count: u64,
     /// `referenced` (blobs by hash, not included) or `bundled` (a
     /// sidecar archive keyed by hash accompanies the stream — §2.15:
@@ -171,10 +176,13 @@ pub enum Line {
     /// A surface (§2.1/§2.6): the envelope is typed here; the body is
     /// canonical JSON this crate does not interpret — its codec is
     /// `varve_surface::canon` (§5, settled 2026-08-19), joined by a
-    /// Tier 5 exporter/importer.
+    /// Tier 5 exporter/importer. `hash` is `hash_plain(body)` — the
+    /// surface's content address (§2.13 decision 9) — verified on
+    /// read without interpreting the body, like `block_defaults`.
     Surface {
         id: SurfaceId,
         revision: RevisionId,
+        hash: ContentHash,
         body: CanonicalValue,
     },
     /// The surface-side half of a block (§2.1, Q13): same treatment as

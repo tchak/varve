@@ -16,7 +16,7 @@ use crate::line::{
 };
 
 pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
-    obj(vec![
+    let mut header = obj(vec![
         ("k", string("header")),
         (
             "format_version",
@@ -51,7 +51,16 @@ pub(crate) fn manifest_canonical(m: &Manifest) -> CanonicalValue {
                 "referenced"
             }),
         ),
-    ])
+    ]);
+    if let CanonicalValue::Object(map) = &mut header
+        && !m.surfaces.is_empty()
+    {
+        map.insert(
+            "surfaces".into(),
+            CanonicalValue::Array(m.surfaces.iter().map(string).collect()),
+        );
+    }
+    header
 }
 
 fn cells_canonical(cells: &BTreeMap<ColumnId, CellState>) -> CanonicalValue {
@@ -140,10 +149,16 @@ pub fn line_canonical(line: &Line) -> CanonicalValue {
             ("byte_size", CanonicalValue::Int(*byte_size as i64)),
             ("content_type", string(content_type)),
         ]),
-        Line::Surface { id, revision, body } => obj(vec![
+        Line::Surface {
+            id,
+            revision,
+            hash,
+            body,
+        } => obj(vec![
             ("k", string("surface")),
             ("id", string(id)),
             ("revision", string(revision)),
+            ("hash", string(hash)),
             ("surface", body.clone()),
         ]),
         Line::BlockDefaults {

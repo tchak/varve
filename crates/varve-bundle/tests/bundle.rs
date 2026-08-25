@@ -162,6 +162,7 @@ async fn export_bundle(source: &impl BlobStore) -> (Vec<u8>, Vec<u8>, Stream) {
             mode: Mode::History,
             intent: Intent::CreateOnly,
             revisions: vec![revision.clone()],
+            surfaces: vec![sample_surface(&revision).content_hash()],
             record_count: 1,
             blobs_bundled: true,
         }),

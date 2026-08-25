@@ -88,6 +88,7 @@ fn surfaces_ride_the_wire_as_opaque_bodies() {
             mode: Mode::Snapshot,
             intent: Intent::Upsert,
             revisions: vec![revision.clone()],
+            surfaces: vec![surface.content_hash()],
             record_count: 0,
             blobs_bundled: false,
         }),
@@ -98,6 +99,7 @@ fn surfaces_ride_the_wire_as_opaque_bodies() {
         Line::Surface {
             id: surface.id.clone(),
             revision: revision.clone(),
+            hash: surface.content_hash(),
             body: surface_canonical(&surface),
         },
         Line::BlockDefaults {
@@ -116,9 +118,15 @@ fn surfaces_ride_the_wire_as_opaque_bodies() {
     let mut all_defaults = Vec::new();
     for line in &stream.lines {
         match line {
-            Line::Surface { id, revision, body } => {
+            Line::Surface {
+                id,
+                revision,
+                hash,
+                body,
+            } => {
                 let decoded = surface_from(body).unwrap();
                 assert_eq!((&decoded.id, &decoded.revision), (id, revision));
+                assert_eq!(decoded.content_hash(), *hash);
                 surfaces.push(decoded);
             }
             Line::BlockDefaults { hash, body, .. } => {

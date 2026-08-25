@@ -358,6 +358,7 @@ mod tests {
                 mode: Mode::History,
                 intent: Intent::CreateOnly,
                 revisions: vec![],
+                surfaces: vec![],
                 record_count: 0,
                 blobs_bundled: true,
             },

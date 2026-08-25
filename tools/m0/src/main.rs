@@ -570,6 +570,7 @@ fn wire_round_trip(schemas: &[Schema]) {
             mode: Mode::History,
             intent: Intent::CreateOnly,
             revisions: ids.clone(),
+            surfaces: vec![],
             record_count: 0,
             blobs_bundled: false,
         }),

@@ -340,6 +340,7 @@ pub fn manifest(mode: Mode, intent: Intent, record_count: u64) -> Manifest {
         mode,
         intent,
         revisions: vec![lens()],
+        surfaces: vec![],
         record_count,
         blobs_bundled: false,
     }

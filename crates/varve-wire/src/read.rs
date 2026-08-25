@@ -43,6 +43,11 @@ pub enum ReadError {
     /// disagree (§5: line 1 declares what the stream carries).
     #[error("the manifest's revision ids do not match the stream's revision lines")]
     RevisionsMismatch,
+    /// The manifest's surface hashes and the stream's `surface` lines
+    /// disagree (§2.13 decision 9: the manifest pins the surface
+    /// hashes it carries).
+    #[error("the manifest's surface hashes do not match the stream's surface lines")]
+    SurfacesMismatch,
     /// A record's lens or an entry's authored-against revision is not
     /// carried in the stream — the data would arrive without its schema.
     #[error("revision '{0}' is named by a record or entry but not carried in the stream")]
@@ -118,6 +123,7 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     // second version (§5's duplicate-record rule, same reasoning).
     let mut blobs_described: std::collections::BTreeSet<ContentHash> = Default::default();
     let mut surfaces_seen: std::collections::BTreeSet<(SurfaceId, RevisionId)> = Default::default();
+    let mut surface_hashes_seen: std::collections::BTreeSet<ContentHash> = Default::default();
     let mut defaults_seen: std::collections::BTreeSet<(BlockId, u32)> = Default::default();
 
     for (index, raw) in text.lines().enumerate() {
@@ -174,7 +180,7 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
             "nomenclature" => &["k", "id", "version", "rows"],
             "block" => &["k", "id", "version", "group", "resolvers"],
             "attachment" | "snapshot" => &["k", "hash", "byte_size", "content_type"],
-            "surface" => &["k", "id", "revision", "surface"],
+            "surface" => &["k", "id", "revision", "hash", "surface"],
             "block_defaults" => &["k", "block", "version", "hash", "defaults"],
             "record" => &["k", "id", "lens", "cells"],
             "item" => &["k", "record", "group", "parent", "id", "ord", "cells"],
@@ -246,7 +252,19 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                 // body's own — the two travel together and must agree.
                 let id = get_str(map, "id").map_err(malformed)?;
                 let revision = get_str(map, "revision").map_err(malformed)?;
+                // §2.13 decision 9: the line's hash is the body's
+                // plain hash — the surface's content address, verified
+                // without interpreting the body (as block_defaults').
+                let hash = get_str(map, "hash")
+                    .map_err(malformed)?
+                    .parse::<ContentHash>()
+                    .map_err(|_| malformed("bad hash".into()))?;
                 let body = get(map, "surface").map_err(malformed)?.clone();
+                let actual = hash_plain(&body)
+                    .map_err(|_| malformed("surface body is not hashable".into()))?;
+                if actual != hash {
+                    return Err(malformed("surface hash does not match its body".into()));
+                }
                 let inner = match &body {
                     CanonicalValue::Object(b) => b,
                     _ => return Err(malformed("surface body must be an object".into())),
@@ -268,7 +286,13 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
                     )));
                 }
                 revisions_named.insert(revision.clone());
-                Line::Surface { id, revision, body }
+                surface_hashes_seen.insert(hash);
+                Line::Surface {
+                    id,
+                    revision,
+                    hash,
+                    body,
+                }
             }
             "block_defaults" => {
                 // §5: the line's hash is the body's plain hash — the
@@ -415,6 +439,13 @@ pub fn read_stream(bytes: &[u8]) -> Result<Stream, ReadError> {
     if let Some(missing) = revisions_named.difference(&declared).next() {
         return Err(ReadError::RevisionNotCarried(missing.clone()));
     }
+    // §2.13 decision 9: same rule for surfaces — the manifest's hash
+    // list is exactly the stream's `surface` lines.
+    let declared_surfaces: std::collections::BTreeSet<ContentHash> =
+        manifest.surfaces.iter().cloned().collect();
+    if declared_surfaces != surface_hashes_seen {
+        return Err(ReadError::SurfacesMismatch);
+    }
     Ok(Stream { manifest, lines })
 }
 
@@ -551,6 +582,27 @@ fn manifest_from(m: &Obj) -> Result<Manifest, String> {
     if unique.len() != revisions.len() {
         return Err("duplicate revision id in the manifest".into());
     }
+    // §2.13 decision 9. Absent = no surfaces — the one canonical form
+    // for the empty set, so a present-but-empty list is refused.
+    let surfaces: Vec<ContentHash> = match m.get("surfaces") {
+        None => Vec::new(),
+        Some(v) => as_arr(v)?
+            .iter()
+            .map(|h| match h {
+                CanonicalValue::String(s) => s
+                    .parse::<ContentHash>()
+                    .map_err(|_| "bad surface hash".to_string()),
+                _ => Err("surface hashes must be strings".to_string()),
+            })
+            .collect::<Result<_, _>>()?,
+    };
+    if m.contains_key("surfaces") && surfaces.is_empty() {
+        return Err("an empty surfaces list must be omitted".into());
+    }
+    let unique_surfaces: std::collections::BTreeSet<&ContentHash> = surfaces.iter().collect();
+    if unique_surfaces.len() != surfaces.len() {
+        return Err("duplicate surface hash in the manifest".into());
+    }
     Ok(Manifest {
         format_version: get_u32(m, "format_version")?,
         source_instance: get_str(m, "source_instance")?,
@@ -566,6 +618,7 @@ fn manifest_from(m: &Obj) -> Result<Manifest, String> {
             other => return Err(format!("unknown intent '{other}'")),
         },
         revisions,
+        surfaces,
         record_count: get_u64(m, "record_count")?,
         blobs_bundled: match get_str(m, "blobs")?.as_str() {
             "bundled" => true,

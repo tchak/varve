@@ -162,6 +162,17 @@ impl BlockDefaults {
     }
 }
 
+impl Surface {
+    /// Content address of the surface (plain regime, §2.13 decision 9):
+    /// `hash_plain(surface_canonical)`. The preimage is the `surface`
+    /// wire line's body, so the wire verifies the line's `hash` without
+    /// interpreting the body — and a publication commits to its surface
+    /// set as `surface id → content hash`.
+    pub fn content_hash(&self) -> ContentHash {
+        hash_plain(&surface_canonical(self)).expect("surfaces carry no floats")
+    }
+}
+
 // ------------------------------------------------------------ decoders
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
