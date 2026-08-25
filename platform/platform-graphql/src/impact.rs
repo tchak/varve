@@ -13,6 +13,16 @@ pub struct ImpactReport {
     pub worst: ChangeClass,
     /// Per-column changes, unchanged columns omitted.
     pub columns: Vec<ColumnImpactEntry>,
+    /// Groups whose labels changed (§3.1): safe, reported.
+    pub relabeled_groups: Vec<GroupRelabelEntry>,
+}
+
+/// A renamed group (§3.1).
+#[derive(async_graphql::SimpleObject, Debug, Clone, PartialEq, Eq)]
+pub struct GroupRelabelEntry {
+    pub group_id: ID,
+    pub from: String,
+    pub to: String,
 }
 
 /// §3's vocabulary, generated from the kernel enum.
@@ -38,6 +48,9 @@ pub struct ColumnImpactEntry {
     /// For choice transitions that drop options (§2.11): exactly
     /// which ids.
     pub removed_options: Vec<ID>,
+    /// For a `RELABELED` change (§3.1): the base schema's label —
+    /// `label` above is already the new one.
+    pub renamed_from: Option<String>,
 }
 
 /// The change's shape (§3); the cast detail stays kernel-side for
@@ -49,6 +62,10 @@ pub enum ColumnChangeKind {
     Cast,
     ScopeMoved,
     Forbidden,
+    /// §3.1: only the label changed — safe, reported (this used to
+    /// classify as unchanged, and a rename published as "no
+    /// changes").
+    Relabeled,
 }
 
 impl ImpactReport {
@@ -65,6 +82,7 @@ impl ImpactReport {
                 .columns
                 .iter()
                 .filter_map(|(id, impact)| {
+                    let mut renamed_from = None;
                     let change = match &impact.change {
                         varve_impact::ColumnChange::Identical => return None,
                         varve_impact::ColumnChange::Added => ColumnChangeKind::Added,
@@ -72,6 +90,10 @@ impl ImpactReport {
                         varve_impact::ColumnChange::Cast { .. } => ColumnChangeKind::Cast,
                         varve_impact::ColumnChange::ScopeMoved => ColumnChangeKind::ScopeMoved,
                         varve_impact::ColumnChange::Forbidden => ColumnChangeKind::Forbidden,
+                        varve_impact::ColumnChange::Relabeled { from, .. } => {
+                            renamed_from = Some(from.clone());
+                            ColumnChangeKind::Relabeled
+                        }
                     };
                     Some(ColumnImpactEntry {
                         column_id: ID::from(id.as_str()),
@@ -83,7 +105,17 @@ impl ImpactReport {
                             .iter()
                             .map(|o| ID::from(o.as_str()))
                             .collect(),
+                        renamed_from,
                     })
+                })
+                .collect(),
+            relabeled_groups: report
+                .relabeled_groups
+                .iter()
+                .map(|g| GroupRelabelEntry {
+                    group_id: ID::from(g.group.as_str()),
+                    from: g.from.clone(),
+                    to: g.to.clone(),
                 })
                 .collect(),
         }

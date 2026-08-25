@@ -10,6 +10,7 @@ varve-core = { path = "../varve-core" }
 varve-schema = { path = "../varve-schema" }
 varve-logic = { path = "../varve-logic" }
 varve-value = { path = "../varve-value" }
+varve-impact = { path = "../varve-impact" }
 thiserror.workspace = true
 regex.workspace = true
 

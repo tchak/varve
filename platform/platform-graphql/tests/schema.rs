@@ -1721,7 +1721,24 @@ async fn history_reads_each_publication_and_its_diff() {
         json!({ "procedureId": pid, "id": nom_id }),
     )
     .await;
-    api.data(&alice, PUBLISH, input.clone()).await;
+    // §3.1: the added column is required (the public default), so
+    // the *surface* half of the report tightens admissibility while
+    // the schema half stays SAFE — the publication gates, and
+    // confirms.
+    let gated = api.data(&alice, PUBLISH, input.clone()).await;
+    assert_eq!(gated["publishRevision"]["published"], false, "{gated}");
+    assert_eq!(gated["publishRevision"]["report"]["worst"], "SAFE");
+    let confirmed = api
+        .data(
+            &alice,
+            PUBLISH,
+            json!({ "input": { "procedureId": pid, "confirm": true } }),
+        )
+        .await;
+    assert_eq!(
+        confirmed["publishRevision"]["published"], true,
+        "{confirmed}"
+    );
 
     // The trail carries the publication facts through the interface.
     let history = api

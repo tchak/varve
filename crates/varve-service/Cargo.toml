@@ -20,3 +20,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+varve-logic = { path = "../varve-logic" }

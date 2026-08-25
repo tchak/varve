@@ -28,7 +28,7 @@ use varve_revision::Publication;
 use varve_schema::{DepthPolicy, NomenclatureTable, Schema, SchemaError, revision_id};
 use varve_store::load::{LoadError, load_dag};
 use varve_store::{LineageId, RevisionStore, StoreError, SurfaceStore};
-use varve_surface::{Surface, SurfaceError};
+use varve_surface::{Surface, SurfaceError, SurfaceReport};
 
 /// A publication request: the schema and its compiled surfaces, both
 /// already carrying the revision id the caller computed
@@ -57,7 +57,9 @@ pub struct PublishRevision {
     pub confirm: bool,
 }
 
-/// What a publication answered.
+/// What a publication answered. Both arms carry both halves of the
+/// impact story (§3.1): the schema report and the surface report,
+/// composed here — the gate takes the worst class of the pair.
 #[derive(Debug)]
 pub enum PublishOutcome {
     /// The event is appended and the surfaces stored.
@@ -67,10 +69,14 @@ pub enum PublishOutcome {
         publication: PublicationId,
         revision: RevisionId,
         report: ImpactReport,
+        surface_report: SurfaceReport,
     },
-    /// The report exceeds `Safe` and the request did not confirm:
-    /// nothing was written.
-    RequiresConfirmation { report: ImpactReport },
+    /// The worst class of the pair exceeds `Safe` and the request did
+    /// not confirm: nothing was written.
+    RequiresConfirmation {
+        report: ImpactReport,
+        surface_report: SurfaceReport,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -168,8 +174,31 @@ where
         .map(|published| &published.schema)
         .unwrap_or(&empty);
     let report = varve_impact::classify(from, &request.schema, &nomenclatures)?;
-    if report.worst() > ChangeClass::Safe && !request.confirm {
-        return Ok(PublishOutcome::RequiresConfirmation { report });
+
+    // The surface half (§3.1): the head publication's surface set,
+    // resolved by content hash, against the request's. A hash the
+    // store does not hold is corruption, surfaced.
+    let mut base_surfaces = Vec::new();
+    if let Some((_, head_publication)) = dag.head() {
+        for hash in head_publication.surfaces.values() {
+            let stored = store.surface(hash).await?.ok_or_else(|| {
+                StoreError::Corrupt(format!(
+                    "the head publication names surface '{hash}', which the store does not hold"
+                ))
+            })?;
+            base_surfaces.push(stored);
+        }
+    }
+    let surface_report = varve_surface::diff_sets(&base_surfaces, &request.surfaces);
+
+    // The gate takes the worst class of the pair (§3.1): a
+    // requiredness tightening requires the same confirmation a lossy
+    // cast does.
+    if report.worst().max(surface_report.worst()) > ChangeClass::Safe && !request.confirm {
+        return Ok(PublishOutcome::RequiresConfirmation {
+            report,
+            surface_report,
+        });
     }
 
     // The publication first — its append writes the revision object
@@ -195,5 +224,6 @@ where
         publication: id,
         revision,
         report,
+        surface_report,
     })
 }

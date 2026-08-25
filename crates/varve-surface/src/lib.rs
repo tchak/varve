@@ -13,6 +13,7 @@
 mod admissibility;
 mod block;
 pub mod canon;
+mod diff;
 mod format;
 mod reach;
 mod validate;
@@ -23,6 +24,7 @@ pub use canon::{
     SurfaceDecodeError, block_defaults_canonical, block_defaults_from, format_canonical,
     format_from, node_canonical, node_from, surface_canonical, surface_from,
 };
+pub use diff::{SurfaceChange, SurfaceChangeKind, SurfaceReport, diff, diff_sets};
 pub use format::{CompiledFormat, Format};
 pub use reach::{Reachability, reachability};
 pub use validate::{SurfaceError, validate};

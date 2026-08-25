@@ -85,10 +85,21 @@ async fn first_publication_is_free_and_stores_the_pair() {
         publication,
         revision,
         report,
+        surface_report,
     } = outcome
     else {
         panic!("first publication must not require confirmation");
     };
+    // One code path (§3.1 like §3): against the empty set, the first
+    // publication's surface report is the initial surface list.
+    assert_eq!(surface_report.worst(), ChangeClass::Safe);
+    assert_eq!(surface_report.changes.len(), 2);
+    assert!(
+        surface_report
+            .changes
+            .iter()
+            .all(|c| matches!(c.kind, varve_surface::SurfaceChangeKind::SurfaceAdded))
+    );
     assert_eq!(revision, revision_id(&v1));
     assert_eq!(report.worst(), ChangeClass::Safe);
 
@@ -128,7 +139,7 @@ async fn a_breaking_change_gates_on_confirmation() {
     )
     .await
     .expect("gate");
-    let PublishOutcome::RequiresConfirmation { report } = outcome else {
+    let PublishOutcome::RequiresConfirmation { report, .. } = outcome else {
         panic!("a retype with no cast must gate");
     };
     assert_eq!(report.worst(), ChangeClass::Breaking);
@@ -143,6 +154,7 @@ async fn a_breaking_change_gates_on_confirmation() {
         publication,
         revision,
         report,
+        ..
     } = outcome
     else {
         panic!("confirmed publication must publish");
@@ -296,11 +308,23 @@ async fn a_surface_only_change_publishes() {
     let PublishOutcome::Published {
         publication,
         revision,
-        ..
+        report,
+        surface_report,
     } = outcome
     else {
         panic!("a surface-only change publishes");
     };
+    // §3.1: the schema half is empty, the surface half carries the
+    // prompt change — safe, so no confirmation was demanded.
+    assert_eq!(report.worst(), ChangeClass::Safe);
+    assert_eq!(surface_report.worst(), ChangeClass::Safe);
+    assert!(
+        surface_report.changes.iter().any(|c| matches!(
+            &c.kind,
+            varve_surface::SurfaceChangeKind::PromptChanged { column } if column.as_str() == "a"
+        )),
+        "{surface_report:?}"
+    );
     assert_ne!(publication, p1);
     assert_eq!(revision, revision_id(&v1));
     let dag = load_dag(&store, &lineage).await.expect("load");
@@ -345,4 +369,57 @@ async fn a_surface_for_the_wrong_revision_is_a_host_bug() {
         .await
         .expect_err("refused");
     assert!(matches!(err, PublishRevisionError::Surface(_)), "{err}");
+}
+
+/// §3.1: the gate takes the worst class of the report pair — a
+/// requiredness tightening (schema untouched, all-`Identical`)
+/// demands the same confirmation a lossy cast does.
+#[tokio::test]
+async fn a_requiredness_tightening_gates_on_confirmation() {
+    let store = MemoryStore::default();
+    let lineage = LineageId::new("proc-9");
+    let v1 = schema(vec![column("a", ScalarType::Text)]);
+
+    let p1 = match publish_revision(&store, request(&lineage, None, v1.clone(), false))
+        .await
+        .expect("v1")
+    {
+        PublishOutcome::Published { publication, .. } => publication,
+        other => panic!("unexpected: {other:?}"),
+    };
+
+    let tighten = |base: Option<PublicationId>, confirm: bool| {
+        let mut req = request(&lineage, base, v1.clone(), confirm);
+        for surface in &mut req.surfaces {
+            let Node::Column(node) = &mut surface.nodes[0] else {
+                panic!("column node");
+            };
+            node.required = Some(varve_logic::Expr::And(vec![]));
+        }
+        req
+    };
+
+    // Without confirm: the pair comes back, nothing is written.
+    let outcome = publish_revision(&store, tighten(Some(p1.clone()), false))
+        .await
+        .expect("gate");
+    let PublishOutcome::RequiresConfirmation {
+        report,
+        surface_report,
+    } = outcome
+    else {
+        panic!("a tightening must gate");
+    };
+    assert_eq!(report.worst(), ChangeClass::Safe);
+    assert_eq!(surface_report.worst(), ChangeClass::Checked);
+    let dag = load_dag(&store, &lineage).await.expect("load");
+    assert_eq!(dag.publications().len(), 1);
+
+    // With confirm: published.
+    let outcome = publish_revision(&store, tighten(Some(p1), true))
+        .await
+        .expect("confirmed");
+    assert!(matches!(outcome, PublishOutcome::Published { .. }));
+    let dag = load_dag(&store, &lineage).await.expect("load");
+    assert_eq!(dag.publications().len(), 2);
 }

@@ -387,6 +387,15 @@ pub struct PublishRevisionResult {
 pub struct ImpactReport {
     pub worst: ChangeClass,
     pub columns: Vec<ColumnImpactEntry>,
+    pub relabeled_groups: Vec<GroupRelabelEntry>,
+}
+
+/// A renamed group (§3.1): safe, reported.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "GroupRelabelEntry")]
+pub struct GroupRelabelEntry {
+    pub from: String,
+    pub to: String,
 }
 
 /// One changed column of the report, named by its label (G.11.5 —
@@ -399,6 +408,7 @@ pub struct ColumnImpactEntry {
     pub class: ChangeClass,
     pub change: ColumnChangeKind,
     pub removed_options: Vec<cynic::Id>,
+    pub renamed_from: Option<String>,
 }
 
 /// §3's vocabulary.
@@ -420,6 +430,7 @@ pub enum ColumnChangeKind {
     Cast,
     ScopeMoved,
     Forbidden,
+    Relabeled,
 }
 
 /// `mutation($input: ReopenProcedureInput!) { reopenProcedure(input: $input) { … } }`.

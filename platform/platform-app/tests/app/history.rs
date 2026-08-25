@@ -184,11 +184,24 @@ async fn the_history_lists_events_and_each_publication_answers_its_diff() {
         &[],
     )
     .await;
+    // §3.1: the new column is required (the public default), so the
+    // surface half gates — the plain POST lands on the confirmation
+    // state, and the re-send with `confirm` publishes.
+    let response = router
+        .handle(post(
+            &format!("{procedure}/schema/publish"),
+            &[("cookie", &cookie)],
+            form_body(&[]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers()[header::LOCATION].to_str().unwrap();
+    assert!(location.contains("publish=confirm"), "{location}");
     act(
         &router,
         &cookie,
         &format!("{procedure}/schema/publish"),
-        &[],
+        &[("confirm", "true")],
     )
     .await;
     let html = page(&router, &cookie, &procedure).await;

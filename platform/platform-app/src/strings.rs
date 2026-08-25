@@ -222,6 +222,14 @@ pub const EN: &[(&str, &str)] = &[
         "\u{201c}{$label}\u{201d} is removed \u{2014} its stored answers are kept.",
     ),
     (
+        "schema.impact.relabeled",
+        "\u{201c}{$from}\u{201d} is renamed \u{201c}{$label}\u{201d} \u{2014} answers are untouched.",
+    ),
+    (
+        "schema.impact.group-relabeled",
+        "The \u{201c}{$from}\u{201d} group is renamed \u{201c}{$to}\u{201d} \u{2014} answers are untouched.",
+    ),
+    (
         "schema.impact.options-removed",
         ".input {$n :integer}\n\
          .match $n\n\
@@ -657,6 +665,14 @@ pub const FR: &[(&str, &str)] = &[
     (
         "schema.impact.removed",
         "«\u{a0}{$label}\u{a0}» est supprimée \u{2014} ses réponses enregistrées sont conservées.",
+    ),
+    (
+        "schema.impact.relabeled",
+        "«\u{a0}{$from}\u{a0}» est renommée «\u{a0}{$label}\u{a0}» \u{2014} les réponses sont inchangées.",
+    ),
+    (
+        "schema.impact.group-relabeled",
+        "Le groupe «\u{a0}{$from}\u{a0}» est renommé «\u{a0}{$to}\u{a0}» \u{2014} les réponses sont inchangées.",
     ),
     (
         "schema.impact.options-removed",

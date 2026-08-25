@@ -1331,18 +1331,32 @@ async fn publish_walks_the_whole_lifecycle() {
         .clone();
     assert_eq!(draft_base.as_deref(), Some(publication.as_str()));
 
-    // Adding a column is free: publishes without confirmation, facts
-    // carry the base, and `since` is untouched (the procedure never
-    // closed).
+    // Adding a *required* column is free for the schema but tightens
+    // admissibility (§3.1): the surface half of the report gates, and
+    // the confirmed publish carries the base in its facts with
+    // `since` untouched (the procedure never closed).
     let opened_since = published.state_since;
-    let (outcome, republished) = publish(&mut db, &store, procedure.id, admin.id, false)
+    let (outcome, _) = publish(&mut db, &store, procedure.id, admin.id, false)
+        .await
+        .expect("gate");
+    let PublishProcedureOutcome::RequiresConfirmation {
+        report,
+        surface_report,
+        ..
+    } = outcome
+    else {
+        panic!("a required addition must gate on its surface half");
+    };
+    assert_eq!(report.worst(), varve_impact::ChangeClass::Safe);
+    assert_eq!(surface_report.worst(), varve_impact::ChangeClass::Checked);
+    let (outcome, republished) = publish(&mut db, &store, procedure.id, admin.id, true)
         .await
         .expect("second publish");
     let PublishProcedureOutcome::Published {
         publication: p2, ..
     } = outcome
     else {
-        panic!("a free change publishes");
+        panic!("a confirmed publication publishes");
     };
     assert_ne!(p2, publication);
     assert_eq!(republished.state_since, opened_since);
@@ -1380,7 +1394,7 @@ async fn publish_walks_the_whole_lifecycle() {
     })
     .await
     .expect("closed draft");
-    let (outcome, reopened) = publish(&mut db, &store, procedure.id, admin.id, false)
+    let (outcome, reopened) = publish(&mut db, &store, procedure.id, admin.id, true)
         .await
         .expect("publish from closed");
     assert!(matches!(outcome, PublishProcedureOutcome::Published { .. }));

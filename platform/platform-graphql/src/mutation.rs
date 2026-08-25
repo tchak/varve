@@ -513,7 +513,9 @@ impl Mutation {
                 })
             }
             // Nothing was written; the dropped transaction rolls back.
-            Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels }) => {
+            // The surface report reaches the API with G.11's §3.1
+            // section (platform step 4); the gate already composed it.
+            Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels, .. }) => {
                 Ok(crate::PublishRevisionResult {
                     report: ImpactReport::labeled(&report, &labels),
                     published: false,

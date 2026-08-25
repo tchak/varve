@@ -49,6 +49,11 @@ pub enum ColumnChange {
     /// Same type, arity, and scope. Moves *within* a scope are this —
     /// order is presentation, not addressing.
     Identical,
+    /// Same type, arity, and scope — only the label changed (§3.1).
+    /// Identity-bearing (§2.13 decision 7: a relabel is a new
+    /// revision), safe, and *reported*: before §3.1 this classified
+    /// as `Identical` and a rename published as "no changes".
+    Relabeled { from: String, to: String },
     /// The column's type, arity, unit, options or constraints changed
     /// — anything with a non-identity cast; the cast tells the story,
     /// `unit_change` / `removed_options` / `constraint_change` name it.
@@ -236,9 +241,20 @@ pub enum BlockChange {
     Attached { group: GroupId, now: BlockRef },
 }
 
+/// A group whose label changed (§3.1): safe, reported — group labels
+/// are identity-bearing (§2.13 decision 7) but cast-invisible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRelabel {
+    pub group: GroupId,
+    pub from: String,
+    pub to: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImpactReport {
     pub columns: BTreeMap<ColumnId, ColumnImpact>,
+    /// Groups whose labels changed (§3.1): safe, reported.
+    pub relabeled_groups: Vec<GroupRelabel>,
     pub resolvers: Vec<ResolverChange>,
     /// Block inclusions that changed between the revisions.
     pub blocks: Vec<BlockChange>,
@@ -323,7 +339,7 @@ pub fn classify_with_rules(
     Ok(report)
 }
 
-/// Static classification of the transition `from → to` (§3).
+/// Static classification of the transition `from → to` (§3, §3.1).
 pub fn classify(
     from: &Schema,
     to: &Schema,
@@ -331,6 +347,8 @@ pub fn classify(
 ) -> Result<ImpactReport, CastError> {
     let from_index = SchemaIndex::build(from);
     let to_index = SchemaIndex::build(to);
+    let (from_labels, from_group_labels) = labels(from);
+    let (to_labels, to_group_labels) = labels(to);
     let mut columns = BTreeMap::new();
 
     for (id, finfo) in &from_index.columns {
@@ -360,7 +378,13 @@ pub fn classify(
                 let constraint_change = constraint_change(&finfo.ty, &tinfo.ty);
                 match cast.class() {
                     CastClass::Identity => ColumnImpact {
-                        change: ColumnChange::Identical,
+                        change: match (from_labels.get(id), to_labels.get(id)) {
+                            (Some(f), Some(t)) if f != t => ColumnChange::Relabeled {
+                                from: (*f).to_owned(),
+                                to: (*t).to_owned(),
+                            },
+                            _ => ColumnChange::Identical,
+                        },
                         class: ChangeClass::Safe,
                         removed_options,
                         unit_change,
@@ -414,13 +438,54 @@ pub fn classify(
         }
     }
 
+    let relabeled_groups = from_group_labels
+        .iter()
+        .filter_map(|(id, f)| match to_group_labels.get(id) {
+            Some(t) if t != f => Some(GroupRelabel {
+                group: (*id).clone(),
+                from: (*f).to_owned(),
+                to: (*t).to_owned(),
+            }),
+            _ => None,
+        })
+        .collect();
+
     Ok(ImpactReport {
         columns,
+        relabeled_groups,
         resolvers: resolver_changes(from, to, &to_index),
         blocks: block_changes(from, to, &from_index, &to_index),
         rules: Vec::new(),
         records: None,
     })
+}
+
+/// Column and group labels by id — the §3.1 relabel comparison; the
+/// index deliberately omits labels (they are presentation to
+/// projection), so they are walked here.
+#[allow(clippy::type_complexity)]
+fn labels(schema: &Schema) -> (BTreeMap<&ColumnId, &str>, BTreeMap<&GroupId, &str>) {
+    fn walk<'a>(
+        elements: &'a [varve_schema::Element],
+        columns: &mut BTreeMap<&'a ColumnId, &'a str>,
+        groups: &mut BTreeMap<&'a GroupId, &'a str>,
+    ) {
+        for element in elements {
+            match element {
+                varve_schema::Element::Column(c) => {
+                    columns.insert(&c.id, &c.label);
+                }
+                varve_schema::Element::Group(g) => {
+                    groups.insert(&g.id, &g.label);
+                    walk(&g.children, columns, groups);
+                }
+            }
+        }
+    }
+    let mut columns = BTreeMap::new();
+    let mut groups = BTreeMap::new();
+    walk(&schema.root, &mut columns, &mut groups);
+    (columns, groups)
 }
 
 /// Full impact: static classification, the §4.1 broken-rule section,

@@ -201,6 +201,12 @@ enum ColumnChangeKind {
 	CAST
 	SCOPE_MOVED
 	FORBIDDEN
+	"""
+	§3.1: only the label changed — safe, reported (this used to
+	classify as unchanged, and a rename published as "no
+	changes").
+	"""
+	RELABELED
 }
 
 """
@@ -221,6 +227,11 @@ type ColumnImpactEntry {
 	which ids.
 	"""
 	removedOptions: [ID!]!
+	"""
+	For a `RELABELED` change (§3.1): the base schema's label —
+	`label` above is already the new one.
+	"""
+	renamedFrom: String
 }
 
 """
@@ -412,6 +423,15 @@ type Group {
 	audience: Audience!
 }
 
+"""
+A renamed group (§3.1).
+"""
+type GroupRelabelEntry {
+	groupId: ID!
+	from: String!
+	to: String!
+}
+
 type IbanFormat {
 	kind: TextFormatKind!
 }
@@ -428,6 +448,10 @@ type ImpactReport {
 	Per-column changes, unchanged columns omitted.
 	"""
 	columns: [ColumnImpactEntry!]!
+	"""
+	Groups whose labels changed (§3.1): safe, reported.
+	"""
+	relabeledGroups: [GroupRelabelEntry!]!
 }
 
 type IntegerType {

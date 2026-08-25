@@ -24,13 +24,26 @@ pub(crate) async fn report_lines(cx: &Cx, report: &ImpactReport) -> Result<Vec<S
                 )
                 .await?
             }
+            // §3.1: a rename is safe and *reported* — this line is
+            // what an empty diff used to swallow.
+            ColumnChangeKind::Relabeled => {
+                let from = entry.renamed_from.clone().unwrap_or_default();
+                t_args(
+                    cx,
+                    "schema.impact.relabeled",
+                    &args([("from", from.into()), ("label", entry.label.clone().into())]),
+                )
+                .await?
+            }
             change => {
                 let message = match change {
                     ColumnChangeKind::Added => "schema.impact.added",
                     ColumnChangeKind::Cast => "schema.impact.cast",
                     ColumnChangeKind::ScopeMoved => "schema.impact.scope-moved",
                     ColumnChangeKind::Forbidden => "schema.impact.forbidden",
-                    ColumnChangeKind::Removed => unreachable!("matched above"),
+                    ColumnChangeKind::Removed | ColumnChangeKind::Relabeled => {
+                        unreachable!("matched above")
+                    }
                 };
                 let class = t(cx, class_id(entry.class)).await?;
                 t_args(
@@ -55,6 +68,19 @@ pub(crate) async fn report_lines(cx: &Cx, report: &ImpactReport) -> Result<Vec<S
             line.push_str(&suffix);
         }
         lines.push(line);
+    }
+    for group in &report.relabeled_groups {
+        lines.push(
+            t_args(
+                cx,
+                "schema.impact.group-relabeled",
+                &args([
+                    ("from", group.from.clone().into()),
+                    ("to", group.to.clone().into()),
+                ]),
+            )
+            .await?,
+        );
     }
     Ok(lines)
 }

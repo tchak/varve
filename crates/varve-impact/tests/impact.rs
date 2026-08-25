@@ -609,3 +609,64 @@ fn assessment_counts_uncastable_cells_and_pending_on_removed_resolvers() {
     );
     assert_eq!(report.worst(), ChangeClass::Breaking);
 }
+
+/// §3.1: a relabel — identity-bearing (§2.13 decision 7) yet
+/// cast-invisible — reports as `Relabeled`, safe, instead of
+/// vanishing as `Identical`; a retype keeps telling the cast story;
+/// group relabels get their own section.
+#[test]
+fn relabels_are_safe_and_reported() {
+    let noms = Default::default();
+    let mut from = schema(vec![column("name", ScalarType::Text, Arity::One)]);
+    from.root.push(Element::Group(Group {
+        id: GroupId::new("addr"),
+        label: "Adresse".into(),
+        cardinality: Cardinality::One,
+        children: vec![],
+        included_from: None,
+    }));
+    let mut to = from.clone();
+    let Element::Column(c) = &mut to.root[0] else {
+        unreachable!()
+    };
+    c.label = "Nom complet".into();
+    let Element::Group(g) = &mut to.root[1] else {
+        unreachable!()
+    };
+    g.label = "Votre adresse".into();
+
+    let report = classify(&from, &to, &noms).unwrap();
+    assert_eq!(report.worst(), ChangeClass::Safe);
+    assert_eq!(
+        report.columns[&ColumnId::new("name")].change,
+        ColumnChange::Relabeled {
+            from: "name".into(),
+            to: "Nom complet".into(),
+        }
+    );
+    assert_eq!(report.relabeled_groups.len(), 1);
+    assert_eq!(report.relabeled_groups[0].group, GroupId::new("addr"));
+    assert_eq!(report.relabeled_groups[0].from, "Adresse");
+    assert_eq!(report.relabeled_groups[0].to, "Votre adresse");
+
+    // A relabel *plus* a retype: the cast is the story, the new
+    // label rides through the report's labels, not the change kind.
+    let mut retyped = to.clone();
+    let Element::Column(c) = &mut retyped.root[0] else {
+        unreachable!()
+    };
+    c.ty = ScalarType::Integer(None);
+    let report = classify(&from, &retyped, &noms).unwrap();
+    assert!(matches!(
+        report.columns[&ColumnId::new("name")].change,
+        ColumnChange::Cast { .. }
+    ));
+
+    // Unchanged labels keep classifying as Identical.
+    let report = classify(&from, &from, &noms).unwrap();
+    assert!(matches!(
+        report.columns[&ColumnId::new("name")].change,
+        ColumnChange::Identical
+    ));
+    assert!(report.relabeled_groups.is_empty());
+}

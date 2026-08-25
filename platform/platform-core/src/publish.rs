@@ -20,6 +20,7 @@ use varve_impact::ImpactReport;
 use varve_schema::{NomenclatureRef, ScalarType, revision_id};
 use varve_service::{PublishOutcome, PublishRevision, PublishRevisionError};
 use varve_store::{LineageId, RevisionStore, SurfaceStore};
+use varve_surface::SurfaceReport;
 
 use crate::procedure::Procedure;
 use crate::procedure_event::{ProcedureEventKind, PublishedFacts, append_procedure_event};
@@ -33,9 +34,10 @@ use crate::tree::{Tree, TreeDecodeError, TreeElement};
 /// this crate depends on traits only).
 pub type SharedExecutor<'t> = Mutex<&'t mut dyn Executor>;
 
-/// What publication answered. Both answers carry the report *and*
-/// the labels naming its entries (G.11.5): the use case is the one
-/// place both schemas are in hand.
+/// What publication answered. Both answers carry both halves of the
+/// impact story (§3.1) — the schema report with the labels naming
+/// its entries (G.11.5), and the surface report — the use case being
+/// the one place schemas and surfaces are all in hand.
 #[derive(Debug)]
 pub enum PublishProcedureOutcome {
     /// Published: the kernel writes and every platform side effect
@@ -45,12 +47,14 @@ pub enum PublishProcedureOutcome {
         publication: PublicationId,
         revision: RevisionId,
         report: ImpactReport,
+        surface_report: SurfaceReport,
         labels: ColumnLabels,
     },
-    /// The report exceeds `Safe` and the request did not confirm:
-    /// nothing was written anywhere.
+    /// The worst class of the report pair exceeds `Safe` and the
+    /// request did not confirm: nothing was written anywhere.
     RequiresConfirmation {
         report: ImpactReport,
+        surface_report: SurfaceReport,
         labels: ColumnLabels,
     },
 }
@@ -193,15 +197,23 @@ where
         other => PublishProcedureError::Kernel(other),
     })?;
 
-    let (publication, report) = match outcome {
-        PublishOutcome::RequiresConfirmation { report } => {
-            return Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels });
+    let (publication, report, surface_report) = match outcome {
+        PublishOutcome::RequiresConfirmation {
+            report,
+            surface_report,
+        } => {
+            return Ok(PublishProcedureOutcome::RequiresConfirmation {
+                report,
+                surface_report,
+                labels,
+            });
         }
         PublishOutcome::Published {
             publication,
             report,
+            surface_report,
             ..
-        } => (publication, report),
+        } => (publication, report, surface_report),
     };
 
     let state = ProcedureState::from_columns(procedure.state, procedure.state_since)?
@@ -233,6 +245,7 @@ where
         publication,
         revision,
         report,
+        surface_report,
         labels,
     })
 }
