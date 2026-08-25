@@ -127,6 +127,35 @@ pub const EN: &[(&str, &str)] = &[
          * * {{{$columns} columns and {$groups} groups, saved {$date :date style=long}.}}",
     ),
     ("procedure.draft.edit", "Edit the schema"),
+    ("procedure.history.title", "History"),
+    ("procedure.history.actor.system", "the system"),
+    (
+        "procedure.history.created",
+        "Created by {$actor} on {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.published",
+        "Revision published by {$actor} on {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.closed",
+        "Closed by {$actor} on {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.reopened",
+        "Reopened by {$actor} on {$date :date style=long}.",
+    ),
+    ("procedure.history.diff", "View the changes"),
+    (
+        "procedure.history.diff.label",
+        "View the changes published on {$date :date style=long}",
+    ),
+    ("history.title", "Publication of {$date :date style=long}"),
+    (
+        "history.first",
+        "First publication \u{2014} the initial schema.",
+    ),
+    ("history.back", "Back to the procedure"),
     ("schema.title", "Schema of {$procedure}"),
     ("schema.back", "Back to the procedure"),
     ("schema.tab.editor", "Editor"),
@@ -193,10 +222,7 @@ pub const EN: &[(&str, &str)] = &[
     ),
     (
         "schema.impact.removed",
-        ".input {$n :integer}\n\
-         .match $n\n\
-         one {{{$n} column of the published revision is no longer in the schema \u{2014} its stored answers are kept.}}\n\
-         * {{{$n} columns of the published revision are no longer in the schema \u{2014} their stored answers are kept.}}",
+        "\u{201c}{$label}\u{201d} is removed \u{2014} its stored answers are kept.",
     ),
     (
         "schema.impact.options-removed",
@@ -541,6 +567,35 @@ pub const FR: &[(&str, &str)] = &[
          * * {{{$columns} colonnes et {$groups} groupes, enregistré le {$date :date style=long}.}}",
     ),
     ("procedure.draft.edit", "Modifier le schéma"),
+    ("procedure.history.title", "Historique"),
+    ("procedure.history.actor.system", "le système"),
+    (
+        "procedure.history.created",
+        "Créée par {$actor} le {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.published",
+        "Révision publiée par {$actor} le {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.closed",
+        "Clôturée par {$actor} le {$date :date style=long}.",
+    ),
+    (
+        "procedure.history.reopened",
+        "Rouverte par {$actor} le {$date :date style=long}.",
+    ),
+    ("procedure.history.diff", "Voir les modifications"),
+    (
+        "procedure.history.diff.label",
+        "Voir les modifications publiées le {$date :date style=long}",
+    ),
+    ("history.title", "Publication du {$date :date style=long}"),
+    (
+        "history.first",
+        "Première publication \u{2014} le schéma initial.",
+    ),
+    ("history.back", "Retour à la procédure"),
     ("schema.title", "Schéma de {$procedure}"),
     ("schema.back", "Retour à la procédure"),
     ("schema.tab.editor", "Édition"),
@@ -607,10 +662,7 @@ pub const FR: &[(&str, &str)] = &[
     ),
     (
         "schema.impact.removed",
-        ".input {$n :integer}\n\
-         .match $n\n\
-         one {{{$n} colonne de la révision publiée ne figure plus dans le schéma \u{2014} les réponses enregistrées sont conservées.}}\n\
-         * {{{$n} colonnes de la révision publiée ne figurent plus dans le schéma \u{2014} les réponses enregistrées sont conservées.}}",
+        "«\u{a0}{$label}\u{a0}» est supprimée \u{2014} ses réponses enregistrées sont conservées.",
     ),
     (
         "schema.impact.options-removed",

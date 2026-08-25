@@ -4,9 +4,14 @@
 //! (`path_param!`); absent, invisible, and malformed are one 404, as
 //! for the organization above it.
 
+pub(super) mod history;
+pub(super) mod impact;
 pub(super) mod schema;
 
 use cynic::QueryBuilder;
+use platform_client::procedure::{
+    ProcedureEvent, ProcedureLifecycleQuery, ProcedureLifecycleVariables,
+};
 use platform_client::revision_draft::{
     Element, ProcedureRevisionDraft, ProcedureRevisionDraftQuery, ProcedureRevisionDraftVariables,
 };
@@ -59,17 +64,39 @@ pub(super) fn counts(elements: &[Element]) -> (usize, usize) {
     })
 }
 
+/// The procedure's audit trail through the client — the history
+/// section's read (G.11: the events list is the history).
+async fn procedure_events(cx: &Cx) -> Result<Vec<ProcedureEvent>> {
+    let id = path_param::<ProcedureId>(cx)?;
+    let client = client(cx).await?;
+    Ok(platform_client::run(
+        &client,
+        ProcedureLifecycleQuery::build(ProcedureLifecycleVariables {
+            id: cynic::Id::new(id.to_string()),
+        }),
+    )
+    .await?
+    .procedure
+    .ok_or_not_found()?
+    .events)
+}
+
 #[page]
 pub async fn page(cx: &Cx) -> Result {
     let procedure = procedure_draft(cx).await?;
-    view! { procedure_page(procedure: procedure) }
+    let events = procedure_events(cx).await?;
+    view! { procedure_page(procedure: procedure, events: events) }
 }
 
 /// Title and description, the organization link, and the draft card:
 /// "no draft yet" or the element counts with the last-saved date,
 /// and the link into the editor either way.
 #[component]
-async fn procedure_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
+async fn procedure_page(
+    cx: &Cx,
+    procedure: ProcedureRevisionDraft,
+    events: Vec<ProcedureEvent>,
+) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
     let lead = t(cx, "procedure.lead").await?;
@@ -146,6 +173,11 @@ async fn procedure_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
                         </p>
                     </div>
                 )
+            )
+            history::section(
+                organization_id: organization_id,
+                procedure_id: procedure_id,
+                events: events
             )
         </div>
     }

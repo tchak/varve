@@ -1419,11 +1419,8 @@ async fn the_typed_client_walks_the_lifecycle() {
     .procedure
     .expect("visible to its administrator");
     assert!(matches!(lifecycle.state, ProcedureState::Draft(_)));
-    assert_eq!(lifecycle.events[0].kind, ProcedureEventKind::Created);
-    assert_eq!(
-        lifecycle.events[0].actor.as_ref().expect("actor").name,
-        "alice"
-    );
+    assert_eq!(lifecycle.events[0].kind(), ProcedureEventKind::Created);
+    assert_eq!(lifecycle.events[0].actor().expect("actor").name, "alice");
 
     // A refused transition arrives as the typed code.
     let refused = platform_client::run(
@@ -1475,7 +1472,7 @@ async fn the_typed_client_walks_the_lifecycle() {
     };
     assert!(published.since >= closed_state.since);
     assert_eq!(
-        reopened.events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+        reopened.events.iter().map(|e| e.kind()).collect::<Vec<_>>(),
         [
             ProcedureEventKind::Created,
             ProcedureEventKind::Closed,
@@ -1654,7 +1651,7 @@ async fn a_breaking_publication_gates_through_the_api() {
             .procedure
             .events
             .iter()
-            .filter(|e| e.kind == ProcedureEventKind::Published)
+            .filter(|e| e.kind() == ProcedureEventKind::Published)
             .count(),
         2
     );
@@ -1731,10 +1728,7 @@ async fn history_reads_each_publication_and_its_diff() {
         .data(&alice, HISTORY, json!({ "id": pid.clone() }))
         .await;
     let events = history["procedure"]["events"].as_array().unwrap();
-    let published: Vec<&Value> = events
-        .iter()
-        .filter(|e| e["kind"] == "PUBLISHED")
-        .collect();
+    let published: Vec<&Value> = events.iter().filter(|e| e["kind"] == "PUBLISHED").collect();
     assert_eq!(published.len(), 2, "{history}");
     assert!(published[0]["base"].is_null(), "{history}");
     assert!(!published[0]["revision"].is_null(), "{history}");
@@ -1771,12 +1765,7 @@ async fn history_reads_each_publication_and_its_diff() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|c| {
-            (
-                c["label"].as_str().unwrap(),
-                c["change"].as_str().unwrap(),
-            )
-        })
+        .map(|c| (c["label"].as_str().unwrap(), c["change"].as_str().unwrap()))
         .collect();
     named.sort();
     assert_eq!(named, [("Nom", "REMOVED"), ("Ville", "ADDED")]);

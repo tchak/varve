@@ -479,7 +479,6 @@ async fn editor_page(
                 publish::confirmation(
                     organization_id: organization_id,
                     procedure_id: procedure_id,
-                    elements: elements.clone(),
                     report: report.clone()
                 )
             }

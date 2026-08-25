@@ -32,6 +32,7 @@
 mod api;
 mod auth;
 mod harness;
+mod history;
 mod i18n;
 mod organizations;
 mod procedures;

@@ -420,6 +420,51 @@ async fn axe_scenario(
     )
     .await?;
 
+    // Publish, then the history: the procedure page's trail gains a
+    // linked publication (the diff link is named per row by its
+    // aria-label), and the diff page shows the report.
+    page.goto(&editor_url, None).await?;
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Publish the revision")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("[role='status']")))
+        .to_have_text("The revision has been published.")
+        .await?;
+    let procedure_url = editor_url
+        .split("/schema")
+        .next()
+        .expect("the editor URL contains /schema")
+        .to_owned();
+    page.goto(&procedure_url, None).await?;
+    expect(page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("View the changes published on")),
+    ))
+    .to_be_visible()
+    .await?;
+    check_axe(&page, "/organizations/{id}/procedures/{pid} (history)").await?;
+    page.get_by_role(
+        AriaRole::Link,
+        Some(GetByRoleOptions::default().name("View the changes published on")),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("[data-impact-report]")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/history/{event}",
+    )
+    .await?;
+
     page.goto(&app.url("/organizations"), None).await?;
     check_axe(&page, "/organizations (populated)").await?;
     Ok(())

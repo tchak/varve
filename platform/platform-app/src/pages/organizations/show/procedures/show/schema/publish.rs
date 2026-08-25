@@ -17,10 +17,8 @@
 
 use cynic::MutationBuilder;
 use platform_client::procedure::{
-    ChangeClass, ColumnChangeKind, ImpactReport, PublishRevision, PublishRevisionInput,
-    PublishRevisionVariables,
+    ChangeClass, ImpactReport, PublishRevision, PublishRevisionInput, PublishRevisionVariables,
 };
-use platform_client::revision_draft::Element;
 use platform_client::{Code, Error};
 use serde::Deserialize;
 use topcoat::{
@@ -37,12 +35,13 @@ use crate::{
         button::{ButtonSize, ButtonVariant, button, button_variants},
     },
     i18n::{t, t_args},
-    pages::{args, one_arg},
+    pages::one_arg,
 };
+
+use crate::pages::organizations::show::procedures::show::impact::report_lines;
 
 use super::super::super::super::OrganizationId;
 use super::super::ProcedureId;
-use super::element::{id_of, label_of};
 use super::{Notice, NoticeKind, back_to_editor, done};
 
 /// What the publish forms post: the header's button sends nothing,
@@ -125,14 +124,13 @@ pub(super) async fn confirmation(
     cx: &Cx,
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
-    elements: Vec<Element>,
     report: ImpactReport,
 ) -> Result {
     let question = t(cx, "schema.publish.question").await?;
     let confirm_label = t(cx, "schema.publish.confirm").await?;
     let keep = t(cx, "schema.publish.keep").await?;
     let no_changes = t(cx, "schema.impact.none").await?;
-    let lines = report_lines(cx, &elements, &report).await?;
+    let lines = report_lines(cx, &report).await?;
     let publish_href = href!(
         submit,
         OrganizationId(organization_id),
@@ -184,71 +182,5 @@ pub(super) async fn confirmation(
                 </div>
             )
         )
-    }
-}
-
-/// The report, localized: one line per changed column — named
-/// through the draft's elements — with what the change does to
-/// existing answers. Removals are aggregated into one count line:
-/// a removed column is no longer in the draft, so it has no label
-/// to name it by (and removal is `SAFE` — hidden never deletes).
-async fn report_lines(cx: &Cx, elements: &[Element], report: &ImpactReport) -> Result<Vec<String>> {
-    let mut lines = Vec::new();
-    let mut removed: i64 = 0;
-    for entry in &report.columns {
-        let message = match entry.change {
-            ColumnChangeKind::Removed => {
-                removed += 1;
-                continue;
-            }
-            ColumnChangeKind::Added => "schema.impact.added",
-            ColumnChangeKind::Cast => "schema.impact.cast",
-            ColumnChangeKind::ScopeMoved => "schema.impact.scope-moved",
-            ColumnChangeKind::Forbidden => "schema.impact.forbidden",
-        };
-        let label = label_for(elements, entry.column_id.inner());
-        let class = t(cx, class_id(entry.class)).await?;
-        let mut line = t_args(
-            cx,
-            message,
-            &args([("label", label.into()), ("class", class.into())]),
-        )
-        .await?;
-        if !entry.removed_options.is_empty() {
-            let suffix = t_args(
-                cx,
-                "schema.impact.options-removed",
-                &one_arg("n", entry.removed_options.len() as i64),
-            )
-            .await?;
-            line.push(' ');
-            line.push_str(&suffix);
-        }
-        lines.push(line);
-    }
-    if removed > 0 {
-        lines.push(t_args(cx, "schema.impact.removed", &one_arg("n", removed)).await?);
-    }
-    Ok(lines)
-}
-
-/// The column's label in the draft; the raw id only if the server
-/// reports a change on a column the draft does not hold (total,
-/// like every `element` helper).
-fn label_for(elements: &[Element], id: &str) -> String {
-    elements
-        .iter()
-        .find(|e| id_of(e) == id)
-        .map(|e| label_of(e).to_owned())
-        .unwrap_or_else(|| id.to_owned())
-}
-
-/// What the class does to existing answers, as a message id.
-fn class_id(class: ChangeClass) -> &'static str {
-    match class {
-        ChangeClass::Safe => "schema.impact.class.safe",
-        ChangeClass::Lossy => "schema.impact.class.lossy",
-        ChangeClass::Checked => "schema.impact.class.checked",
-        ChangeClass::Breaking => "schema.impact.class.breaking",
     }
 }

@@ -38,7 +38,11 @@ struct EventRow {
         ty = "Option<AccountRef<'_>>",
         desc = "Who acted; `null` for a system event — or an account since deleted."
     ),
-    field(name = "created_at", ty = "jiff::Timestamp", desc = "When it happened.")
+    field(
+        name = "created_at",
+        ty = "jiff::Timestamp",
+        desc = "When it happened."
+    )
 )]
 pub enum ProcedureEvent {
     Created(ProcedureCreatedEvent),

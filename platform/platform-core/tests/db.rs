@@ -1247,7 +1247,10 @@ async fn publish_walks_the_whole_lifecycle() {
     let (outcome, published) = publish(&mut db, &store, procedure.id, admin.id, false)
         .await
         .expect("publish");
-    let PublishProcedureOutcome::Published { revision, report, .. } = outcome else {
+    let PublishProcedureOutcome::Published {
+        revision, report, ..
+    } = outcome
+    else {
         panic!("first publication must not gate");
     };
     assert_eq!(report.worst(), varve_impact::ChangeClass::Safe);

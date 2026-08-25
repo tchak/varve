@@ -1,6 +1,7 @@
 //! Procedures of an organization: the procedures page's read and
 //! `createProcedure`.
 
+use crate::revision_draft::DraftOrganization;
 use crate::{Slug, schema};
 
 /// Variables of [`OrganizationProceduresQuery`].
@@ -225,17 +226,74 @@ pub struct ProcedureClosedState {
     pub since: jiff::Timestamp,
 }
 
-/// One audit-trail entry.
+/// One audit-trail entry (G.11): the published member with its
+/// facts, every other kind through the shared interface row.
+#[derive(cynic::InlineFragments, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "ProcedureEvent")]
+pub enum ProcedureEvent {
+    Published(PublishedEvent),
+    #[cynic(fallback)]
+    Other(EventRow),
+}
+
+impl ProcedureEvent {
+    /// Time-ordered (UUID v7): the log's sequence as well as its id.
+    pub fn id(&self) -> &cynic::Id {
+        match self {
+            Self::Published(e) => &e.id,
+            Self::Other(e) => &e.id,
+        }
+    }
+
+    /// What happened.
+    pub fn kind(&self) -> ProcedureEventKind {
+        match self {
+            Self::Published(_) => ProcedureEventKind::Published,
+            Self::Other(e) => e.kind,
+        }
+    }
+
+    /// Who acted; `None` for a system event or an account since
+    /// deleted.
+    pub fn actor(&self) -> Option<&Actor> {
+        match self {
+            Self::Published(e) => e.actor.as_ref(),
+            Self::Other(e) => e.actor.as_ref(),
+        }
+    }
+
+    /// When it happened.
+    pub fn created_at(&self) -> jiff::Timestamp {
+        match self {
+            Self::Published(e) => e.created_at,
+            Self::Other(e) => e.created_at,
+        }
+    }
+}
+
+/// The trail's shared shape (the G.11 interface fields).
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
 #[cynic(graphql_type = "ProcedureEvent")]
-pub struct ProcedureEvent {
+pub struct EventRow {
+    pub id: cynic::Id,
     pub kind: ProcedureEventKind,
     pub actor: Option<Actor>,
     pub created_at: jiff::Timestamp,
 }
 
-/// The event alphabet; `PUBLISHED` has no writer until the kernel
-/// edge lands.
+/// A publication, with its facts (G.11.2): which revision, forked
+/// from which base (`None` on a first publication).
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "ProcedurePublishedEvent")]
+pub struct PublishedEvent {
+    pub id: cynic::Id,
+    pub actor: Option<Actor>,
+    pub created_at: jiff::Timestamp,
+    pub revision: cynic::Id,
+    pub base: Option<cynic::Id>,
+}
+
+/// The event alphabet.
 #[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 #[cynic(graphql_type = "ProcedureEventKind")]
 pub enum ProcedureEventKind {
@@ -329,11 +387,13 @@ pub struct ImpactReport {
     pub columns: Vec<ColumnImpactEntry>,
 }
 
-/// One changed column of the report.
+/// One changed column of the report, named by its label (G.11.5 —
+/// the base schema names a removal).
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
 #[cynic(graphql_type = "ColumnImpactEntry")]
 pub struct ColumnImpactEntry {
     pub column_id: cynic::Id,
+    pub label: String,
     pub class: ChangeClass,
     pub change: ColumnChangeKind,
     pub removed_options: Vec<cynic::Id>,
@@ -368,4 +428,56 @@ pub enum ColumnChangeKind {
 pub struct ReopenProcedure {
     #[arguments(input: $input)]
     pub reopen_procedure: ProcedureLifecycle,
+}
+
+/// Variables of [`ProcedureEventDiffQuery`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct ProcedureEventDiffVariables {
+    pub id: cynic::Id,
+    pub event: cynic::Id,
+}
+
+/// `query($id: ID!, $event: ID!) { procedure(id: $id) { … event(id: $event) { … } } }`
+/// — the diff page's read (G.11.6): one trail entry, the report
+/// selected on the published member only. `None` procedure for an
+/// absent or invisible one; `None` event for an id that is not this
+/// procedure's.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "ProcedureEventDiffVariables")]
+pub struct ProcedureEventDiffQuery {
+    #[arguments(id: $id)]
+    pub procedure: Option<ProcedureEventDiff>,
+}
+
+/// The procedure naming the page, and the one entry.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Procedure", variables = "ProcedureEventDiffVariables")]
+pub struct ProcedureEventDiff {
+    pub id: cynic::Id,
+    pub title: String,
+    pub organization: DraftOrganization,
+    #[arguments(id: $event)]
+    pub event: Option<DiffEvent>,
+}
+
+/// The entry the diff page shows: only a publication carries a
+/// report; any other kind falls back to the shared row.
+#[derive(cynic::InlineFragments, Debug)]
+#[cynic(graphql_type = "ProcedureEvent")]
+pub enum DiffEvent {
+    Published(PublishedEventDiff),
+    #[cynic(fallback)]
+    Other(EventRow),
+}
+
+/// A publication with the diff it made (G.11.4): the report,
+/// recomputed at read time from the content-addressed schemas.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "ProcedurePublishedEvent")]
+pub struct PublishedEventDiff {
+    pub id: cynic::Id,
+    pub actor: Option<Actor>,
+    pub created_at: jiff::Timestamp,
+    pub base: Option<cynic::Id>,
+    pub report: ImpactReport,
 }
