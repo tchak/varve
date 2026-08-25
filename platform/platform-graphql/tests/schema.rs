@@ -421,6 +421,13 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "union ProcedureState = ProcedureDraftState | ProcedurePublishedState | ProcedureClosedState",
         "state: ProcedureStateValue!",
         "events: [ProcedureEvent!]!",
+        // G.11: the trail is an interface; the published member
+        // carries the facts and the read-time diff.
+        "interface ProcedureEvent",
+        "event(id: ID!): ProcedureEvent",
+        "type ProcedurePublishedEvent implements ProcedureEvent",
+        "report: ImpactReport!",
+        "label: String!",
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
     }
@@ -1651,6 +1658,138 @@ async fn a_breaking_publication_gates_through_the_api() {
             .count(),
         2
     );
+}
+
+const HISTORY: &str = "query($id: ID!) {
+    procedure(id: $id) {
+        events {
+            id kind actor { name } createdAt
+            ... on ProcedurePublishedEvent { revision base }
+        }
+    }
+}";
+
+const EVENT_DIFF: &str = "query($id: ID!, $event: ID!) {
+    procedure(id: $id) {
+        event(id: $event) {
+            kind
+            ... on ProcedurePublishedEvent {
+                revision
+                base
+                report { worst columns { columnId label class change } }
+            }
+        }
+    }
+}";
+
+#[tokio::test]
+async fn history_reads_each_publication_and_its_diff() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("history"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Aide").await);
+    let input = json!({ "input": { "procedureId": pid } });
+
+    // First publication: one column.
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+        )
+        .await;
+    let nom_id = p["revisionDraft"]["elements"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    api.data(&alice, PUBLISH, input.clone()).await;
+
+    // Second publication: one added, the first removed (SAFE —
+    // hidden never deletes).
+    api.edit(
+        &alice,
+        "addColumn",
+        "AddColumnInput",
+        json!({ "procedureId": pid, "label": "Ville", "type": { "text": {} } }),
+    )
+    .await;
+    api.edit(
+        &alice,
+        "removeElement",
+        "RemoveElementInput",
+        json!({ "procedureId": pid, "id": nom_id }),
+    )
+    .await;
+    api.data(&alice, PUBLISH, input.clone()).await;
+
+    // The trail carries the publication facts through the interface.
+    let history = api
+        .data(&alice, HISTORY, json!({ "id": pid.clone() }))
+        .await;
+    let events = history["procedure"]["events"].as_array().unwrap();
+    let published: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["kind"] == "PUBLISHED")
+        .collect();
+    assert_eq!(published.len(), 2, "{history}");
+    assert!(published[0]["base"].is_null(), "{history}");
+    assert!(!published[0]["revision"].is_null(), "{history}");
+    assert_eq!(published[1]["base"], published[0]["revision"]);
+    assert_eq!(published[0]["actor"]["name"], "alice");
+    // A bare row carries no facts fields.
+    assert!(events[0]["revision"].is_null(), "{history}");
+
+    // The first publication's diff is the initial column list.
+    let first = api
+        .data(
+            &alice,
+            EVENT_DIFF,
+            json!({ "id": pid.clone(), "event": published[0]["id"] }),
+        )
+        .await;
+    let report = &first["procedure"]["event"]["report"];
+    assert_eq!(report["worst"], "SAFE");
+    assert_eq!(report["columns"][0]["label"], "Nom");
+    assert_eq!(report["columns"][0]["change"], "ADDED");
+
+    // The second names both sides: the addition from the next
+    // schema, the removal by the base's label (G.11.5).
+    let second = api
+        .data(
+            &alice,
+            EVENT_DIFF,
+            json!({ "id": pid.clone(), "event": published[1]["id"] }),
+        )
+        .await;
+    let report = &second["procedure"]["event"]["report"];
+    assert_eq!(report["worst"], "SAFE");
+    let mut named: Vec<(&str, &str)> = report["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["label"].as_str().unwrap(),
+                c["change"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    named.sort();
+    assert_eq!(named, [("Nom", "REMOVED"), ("Ville", "ADDED")]);
+
+    // An id that is not this procedure's answers null.
+    let missing = api
+        .data(
+            &alice,
+            EVENT_DIFF,
+            json!({ "id": pid, "event": uuid::Uuid::now_v7().to_string() }),
+        )
+        .await;
+    assert!(missing["procedure"]["event"].is_null(), "{missing}");
 }
 
 #[tokio::test]

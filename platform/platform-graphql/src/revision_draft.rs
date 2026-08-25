@@ -88,9 +88,10 @@ impl RevisionDraft {
             }
             None => None,
         };
-        let report =
-            platform_core::draft_report(base.as_ref(), &self.tree.schema()).map_err(internal)?;
-        Ok(crate::impact::ImpactReport::from(&report))
+        let next = self.tree.schema();
+        let report = platform_core::draft_report(base.as_ref(), &next).map_err(internal)?;
+        let labels = platform_core::ColumnLabels::resolve(base.as_ref(), &next);
+        Ok(crate::impact::ImpactReport::labeled(&report, &labels))
     }
 }
 

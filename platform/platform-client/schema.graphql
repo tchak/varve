@@ -208,6 +208,12 @@ One changed column.
 """
 type ColumnImpactEntry {
 	columnId: ID!
+	"""
+	The column's label (G.11.5), resolved from the next schema —
+	the base schema for a `REMOVED` column. The raw id only if
+	neither names it (total, never a refusal).
+	"""
+	label: String!
 	class: ChangeClass!
 	change: ColumnChangeKind!
 	"""
@@ -651,6 +657,12 @@ type Procedure {
 	"""
 	events: [ProcedureEvent!]!
 	"""
+	One trail entry (G.11.6) — the diff page's point lookup, so
+	reading one publication's `report` never computes the others'.
+	`null` for an id that is not this procedure's.
+	"""
+	event(id: ID!): ProcedureEvent
+	"""
 	The owning organization.
 	"""
 	organization: OrganizationRef!
@@ -664,6 +676,27 @@ type Procedure {
 	revisionDraft: RevisionDraft!
 }
 
+type ProcedureClosedEvent implements ProcedureEvent {
+	"""
+	Time-ordered (UUID v7): the log's sequence as well as
+	its id.
+	"""
+	id: ID!
+	"""
+	What happened.
+	"""
+	kind: ProcedureEventKind!
+	"""
+	Who acted; `null` for a system event — or an account
+	since deleted.
+	"""
+	actor: AccountRef
+	"""
+	When it happened.
+	"""
+	createdAt: DateTime!
+}
+
 """
 Closed to new submissions.
 """
@@ -674,6 +707,27 @@ type ProcedureClosedState {
 	since: DateTime!
 }
 
+type ProcedureCreatedEvent implements ProcedureEvent {
+	"""
+	Time-ordered (UUID v7): the log's sequence as well as
+	its id.
+	"""
+	id: ID!
+	"""
+	What happened.
+	"""
+	kind: ProcedureEventKind!
+	"""
+	Who acted; `null` for a system event — or an account
+	since deleted.
+	"""
+	actor: AccountRef
+	"""
+	When it happened.
+	"""
+	createdAt: DateTime!
+}
+
 """
 Never published. Its only fact is the row's creation time.
 """
@@ -681,7 +735,42 @@ type ProcedureDraftState {
 	createdAt: DateTime!
 }
 
-type ProcedureEvent {
+"""
+One entry in a procedure's audit trail (G.11.2): the G.9 row as
+the shared shape, one member per kind — facts live where they are
+meaningful, so only the published event carries any.
+"""
+interface ProcedureEvent {
+	"""
+	Time-ordered (UUID v7): the log's sequence as well as its id.
+	"""
+	id: ID!
+	"""
+	What happened.
+	"""
+	kind: ProcedureEventKind!
+	"""
+	Who acted; `null` for a system event — or an account since deleted.
+	"""
+	actor: AccountRef
+	"""
+	When it happened.
+	"""
+	createdAt: DateTime!
+}
+
+"""
+The event alphabet (platform P.4), generated from the
+platform-core enum.
+"""
+enum ProcedureEventKind {
+	CREATED
+	PUBLISHED
+	CLOSED
+	REOPENED
+}
+
+type ProcedurePublishedEvent implements ProcedureEvent {
 	"""
 	Time-ordered (UUID v7): the log's sequence as well as its id.
 	"""
@@ -699,18 +788,23 @@ type ProcedureEvent {
 	When it happened.
 	"""
 	createdAt: DateTime!
-}
-
-"""
-The event alphabet (platform P.4), generated from the
-platform-core enum. `PUBLISHED` has no writer until the kernel
-edge lands.
-"""
-enum ProcedureEventKind {
-	CREATED
-	PUBLISHED
-	CLOSED
-	REOPENED
+	"""
+	The published revision's content address.
+	"""
+	revision: ID!
+	"""
+	The fork point this publication was authored against; `null`
+	on a first publication.
+	"""
+	base: ID
+	"""
+	The diff this publication made (G.11.4): the exact
+	classification `publishRevision` gated on, recomputed at read
+	time from the two content-addressed schemas. A `null` base
+	classifies against the empty schema — a first publication
+	reads as the initial column list, no special case.
+	"""
+	report: ImpactReport!
 }
 
 """
@@ -733,6 +827,27 @@ type ProcedureRef {
 	"""
 	state: ProcedureStateValue!
 	organization: OrganizationRef!
+}
+
+type ProcedureReopenedEvent implements ProcedureEvent {
+	"""
+	Time-ordered (UUID v7): the log's sequence as well as
+	its id.
+	"""
+	id: ID!
+	"""
+	What happened.
+	"""
+	kind: ProcedureEventKind!
+	"""
+	Who acted; `null` for a system event — or an account
+	since deleted.
+	"""
+	actor: AccountRef
+	"""
+	When it happened.
+	"""
+	createdAt: DateTime!
 }
 
 """

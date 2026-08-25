@@ -500,10 +500,10 @@ impl Mutation {
             .await
         };
         match outcome {
-            Ok(PublishProcedureOutcome::Published { report, .. }) => {
+            Ok(PublishProcedureOutcome::Published { report, labels, .. }) => {
                 tx.commit().await.map_err(internal)?;
                 Ok(crate::PublishRevisionResult {
-                    report: ImpactReport::from(&report),
+                    report: ImpactReport::labeled(&report, &labels),
                     published: true,
                     procedure: Procedure {
                         procedure,
@@ -512,9 +512,9 @@ impl Mutation {
                 })
             }
             // Nothing was written; the dropped transaction rolls back.
-            Ok(PublishProcedureOutcome::RequiresConfirmation { report }) => {
+            Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels }) => {
                 Ok(crate::PublishRevisionResult {
-                    report: ImpactReport::from(&report),
+                    report: ImpactReport::labeled(&report, &labels),
                     published: false,
                     procedure: Procedure {
                         procedure,

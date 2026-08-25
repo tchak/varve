@@ -29,6 +29,10 @@ pub enum ChangeClass {
 #[derive(SimpleObject)]
 pub struct ColumnImpactEntry {
     pub column_id: ID,
+    /// The column's label (G.11.5), resolved from the next schema —
+    /// the base schema for a `REMOVED` column. The raw id only if
+    /// neither names it (total, never a refusal).
+    pub label: String,
     pub class: ChangeClass,
     pub change: ColumnChangeKind,
     /// For choice transitions that drop options (§2.11): exactly
@@ -47,8 +51,14 @@ pub enum ColumnChangeKind {
     Forbidden,
 }
 
-impl From<&varve_impact::ImpactReport> for ImpactReport {
-    fn from(report: &varve_impact::ImpactReport) -> Self {
+impl ImpactReport {
+    /// The kernel report with its entries named (G.11.5): `labels`
+    /// comes from the two schemas of the classification
+    /// (`platform_core::ColumnLabels::resolve`).
+    pub fn labeled(
+        report: &varve_impact::ImpactReport,
+        labels: &platform_core::ColumnLabels,
+    ) -> Self {
         Self {
             worst: report.worst().into(),
             columns: report
@@ -65,6 +75,7 @@ impl From<&varve_impact::ImpactReport> for ImpactReport {
                     };
                     Some(ColumnImpactEntry {
                         column_id: ID::from(id.as_str()),
+                        label: labels.get(id).unwrap_or(id.as_str()).to_owned(),
                         class: impact.class.into(),
                         change,
                         removed_options: impact

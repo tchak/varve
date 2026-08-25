@@ -8,7 +8,7 @@ use async_graphql::{Context, ID, Object};
 
 use crate::error::internal;
 use crate::organization::OrganizationRef;
-use crate::procedure_event::{ProcedureEvent, procedure_events};
+use crate::procedure_event::{ProcedureEvent, procedure_event, procedure_events};
 use crate::revision_draft::RevisionDraft;
 use crate::session;
 
@@ -56,6 +56,19 @@ impl Procedure {
     async fn events(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ProcedureEvent>> {
         let (_, mut db) = session(ctx)?;
         procedure_events(&mut db, self.procedure.id).await
+    }
+
+    /// One trail entry (G.11.6) — the diff page's point lookup, so
+    /// reading one publication's `report` never computes the others'.
+    /// `null` for an id that is not this procedure's.
+    async fn event(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+    ) -> async_graphql::Result<Option<ProcedureEvent>> {
+        let id = crate::parse_id(&id)?;
+        let (_, mut db) = session(ctx)?;
+        procedure_event(&mut db, self.procedure.id, id).await
     }
 
     /// The owning organization.

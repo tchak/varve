@@ -33,7 +33,9 @@ use crate::tree::{Tree, TreeDecodeError, TreeElement};
 /// this crate depends on traits only).
 pub type SharedExecutor<'t> = Mutex<&'t mut dyn Executor>;
 
-/// What publication answered.
+/// What publication answered. Both answers carry the report *and*
+/// the labels naming its entries (G.11.5): the use case is the one
+/// place both schemas are in hand.
 #[derive(Debug)]
 pub enum PublishProcedureOutcome {
     /// Published: the kernel writes and every platform side effect
@@ -42,10 +44,52 @@ pub enum PublishProcedureOutcome {
     Published {
         revision: RevisionId,
         report: ImpactReport,
+        labels: ColumnLabels,
     },
     /// The report exceeds `Safe` and the request did not confirm:
     /// nothing was written anywhere.
-    RequiresConfirmation { report: ImpactReport },
+    RequiresConfirmation {
+        report: ImpactReport,
+        labels: ColumnLabels,
+    },
+}
+
+/// Column labels for naming report entries (G.11.5): the next
+/// schema's, the base schema filling in the columns the next no
+/// longer holds — a `Removed` entry is named by the schema it was
+/// removed *from*.
+#[derive(Debug, Default)]
+pub struct ColumnLabels(std::collections::HashMap<ColumnId, String>);
+
+impl ColumnLabels {
+    /// Resolves labels from the two sides of a classification; the
+    /// next schema wins where both hold a column.
+    pub fn resolve(base: Option<&varve_schema::Schema>, next: &varve_schema::Schema) -> Self {
+        fn collect(
+            elements: &[varve_schema::Element],
+            into: &mut std::collections::HashMap<ColumnId, String>,
+        ) {
+            for element in elements {
+                match element {
+                    varve_schema::Element::Column(c) => {
+                        into.insert(c.id.clone(), c.label.clone());
+                    }
+                    varve_schema::Element::Group(g) => collect(&g.children, into),
+                }
+            }
+        }
+        let mut labels = std::collections::HashMap::new();
+        if let Some(base) = base {
+            collect(&base.root, &mut labels);
+        }
+        collect(&next.root, &mut labels);
+        Self(labels)
+    }
+
+    /// The label for a column, if either schema held it.
+    pub fn get(&self, id: &ColumnId) -> Option<&str> {
+        self.0.get(id).map(String::as_str)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -109,6 +153,15 @@ where
     let revision = revision_id(&schema);
     let surfaces = compile_surfaces(&tree, &revision);
 
+    let base_schema = match &base {
+        Some(id) => store
+            .schema(&RevisionId::new(id))
+            .await
+            .map_err(|error| PublishProcedureError::Kernel(error.into()))?,
+        None => None,
+    };
+    let labels = ColumnLabels::resolve(base_schema.as_ref(), &schema);
+
     let outcome = varve_service::publish_revision(
         store,
         PublishRevision {
@@ -127,7 +180,7 @@ where
 
     let report = match outcome {
         PublishOutcome::RequiresConfirmation { report } => {
-            return Ok(PublishProcedureOutcome::RequiresConfirmation { report });
+            return Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels });
         }
         PublishOutcome::Published { report, .. } => report,
     };
@@ -157,7 +210,11 @@ where
         Some(&facts),
     )
     .await?;
-    Ok(PublishProcedureOutcome::Published { revision, report })
+    Ok(PublishProcedureOutcome::Published {
+        revision,
+        report,
+        labels,
+    })
 }
 
 /// The report `publish_procedure` would gate on, computable at any

@@ -1247,7 +1247,7 @@ async fn publish_walks_the_whole_lifecycle() {
     let (outcome, published) = publish(&mut db, &store, procedure.id, admin.id, false)
         .await
         .expect("publish");
-    let PublishProcedureOutcome::Published { revision, report } = outcome else {
+    let PublishProcedureOutcome::Published { revision, report, .. } = outcome else {
         panic!("first publication must not gate");
     };
     assert_eq!(report.worst(), varve_impact::ChangeClass::Safe);
@@ -1413,7 +1413,7 @@ async fn a_breaking_publication_gates_and_writes_nothing() {
     let (outcome, unchanged) = publish(&mut db, &store, procedure.id, admin.id, false)
         .await
         .expect("gate");
-    let PublishProcedureOutcome::RequiresConfirmation { report } = outcome else {
+    let PublishProcedureOutcome::RequiresConfirmation { report, .. } = outcome else {
         panic!("a breaking change must gate");
     };
     assert_eq!(report.worst(), varve_impact::ChangeClass::Breaking);
