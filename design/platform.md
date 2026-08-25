@@ -602,6 +602,23 @@ change away from them takes the arity back to one. Out of scope,
 deliberately: publishing, surface properties, blocks and published
 nomenclatures, undo.
 
+**Breadcrumb navigation (settled 2026-08-25).** Upward navigation is
+one mechanism, not per-page prose: a `breadcrumbs` component (`<nav
+aria-label>` around an `<ol>`, every ancestor a link, the current
+page a plain `aria-current="page"` item, separators `aria-hidden`)
+rendered directly above the page's `<h1>`. Trails are rooted at
+*Organizations* — the home and settings pages are the site header's
+job, and a one-item trail is noise — and only real pages appear as
+crumbs: the schema editor's crumb trail ends in *Schema* (editor and
+preview are tabs below it), the diff page's in its own title, and
+there is no *History* crumb because no history page exists (the
+trail lives on the procedure page). This replaces the first pass's
+ad-hoc affordances: the "Teams of / Procedures of / A procedure of
+{organization}" lead lines and the editor's and diff page's "Back to
+the procedure" links all retire — one navigation idiom, and the
+heading block gets quieter. Settings keeps its tab shell (a
+two-level area with its own switcher; a trail would duplicate it).
+
 **Procedure history (settled 2026-08-25).** The procedure page grows
 a *History* section: the event log (graphql.md G.11) rendered
 newest-first — presentation order only, the log stays oldest-first —
