@@ -64,10 +64,22 @@ pub use query::Query;
 /// The executable schema.
 pub type PlatformSchema = Schema<Query, Mutation, EmptySubscription>;
 
+/// The most a document may cost (G.1, platform P.9 Q5: limits from
+/// day one). Depth is already bounded structurally — the Ref DAG has
+/// no recursive type (G.2 rule 1) — so the remaining amplification is
+/// *aliases*: one request repeating an expensive field (`counts`,
+/// `report`, `events`) hundreds of times. Every field costs 1;
+/// generous for real clients (the editor's whole-draft read and the
+/// standard introspection query are well under half), a wall for
+/// flooding.
+pub const COMPLEXITY_LIMIT: usize = 1000;
+
 /// Builds the schema. One per process, registered as app context by
 /// `platform-app`.
 pub fn schema() -> PlatformSchema {
-    Schema::build(Query, Mutation, EmptySubscription).finish()
+    Schema::build(Query, Mutation, EmptySubscription)
+        .limit_complexity(COMPLEXITY_LIMIT)
+        .finish()
 }
 
 /// Executes `request` as `principal` over `db`. The one execution

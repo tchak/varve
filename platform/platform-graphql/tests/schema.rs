@@ -432,6 +432,31 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
     }
 }
 
+/// The executor's complexity cap (G.1, platform P.9 Q5): depth is
+/// bounded structurally, so the cap is aimed at *alias* amplification
+/// — one document repeating a costly field hundreds of times. No
+/// principal, no db: validation refuses the document before any
+/// resolver could ask for either.
+#[tokio::test]
+async fn a_document_past_the_complexity_limit_is_refused_before_execution() {
+    // Each alias selects two fields; one alias past the limit.
+    let fields: String = (0..=platform_graphql::COMPLEXITY_LIMIT / 2)
+        .map(|i| format!("v{i}: viewer {{ accountId }} "))
+        .collect();
+    let response = schema()
+        .execute(async_graphql::Request::new(format!("{{ {fields} }}")))
+        .await;
+    assert_eq!(response.data, async_graphql::Value::Null);
+    assert!(
+        response
+            .errors
+            .iter()
+            .any(|e| e.message.to_lowercase().contains("complex")),
+        "{:?}",
+        response.errors
+    );
+}
+
 /// The SDL `platform-client` builds against is this schema's, byte for
 /// byte (G.3, platform P.9 Q2). `VARVE_UPDATE_SDL=1` rewrites the
 /// artifact; cynic then recompiles every operation against it.
