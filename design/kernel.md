@@ -52,7 +52,9 @@ an administration before it publishes a revision.**
   schema whose object already exists (reverting to an earlier revision)
   creates no new revision — same content, same id — but is an event: it
   becomes `latest`, following the revisions it was published after.
-  Identity is content; history is the log.
+  Identity is content; history is the log — and the log's events are
+  themselves content-addressed: a publication commits to the revision
+  *and* the surface set published with it (§2.13 decision 9).
 - **Column** — a typed field. Has an **arity**: `one | many`.
 - **Group** — ordered container of columns. Has a **cardinality**: `one | many`.
 - **Block** — a published, reusable group definition with its own identity and
@@ -1009,7 +1011,7 @@ hierarchy), `registry` (promises mutability and a central authority).
 
 ## 2.13 Canonical bytes and content addresses
 
-Settled design for `varve-core::canonical`. Eight decisions:
+Settled design for `varve-core::canonical`. Nine decisions:
 
 1. **Two hashing regimes — and blobs.** Schema-side objects (revisions,
    blocks, nomenclatures, resolver declarations) hash **plain**: no
@@ -1072,8 +1074,9 @@ Settled design for `varve-core::canonical`. Eight decisions:
    §2.11), resolver declarations, and a group's block provenance
    (`included_from` — the same structure typed by hand is a different
    revision, as an inline enum differs from a published one). Not
-   identity-bearing: surfaces (separate objects), including block
-   defaults, which are surface fragments hashed plain on their own.
+   identity-bearing: surfaces (separate objects — though *publication*
+   identity commits to them, decision 9), including block defaults,
+   which are surface fragments hashed plain on their own.
    Schema-side blocks hash plain like nomenclatures. Canonical shapes
    (field names, optionals omitted when absent) live in code with test
    vectors.
@@ -1090,6 +1093,34 @@ Settled design for `varve-core::canonical`. Eight decisions:
    every envelope at once without touching a hash. A platform that
    writes direct identifiers into actor ids has broken the contract, and
    only whole-record erasure recovers it.
+9. **Publication identity (settled 2026-08-25, resolves Q23).** A
+   publication — one event of the §2.1 log — is a content-addressed
+   object hashing **plain**: it commits to the revision id, the surface
+   set published with it (`surface id → content hash`, surfaces hashing
+   plain on their own via `surface_canonical` — the block-defaults
+   treatment generalized), and its parent publication ids. Revision
+   identity is unchanged (decision 7: surfaces stay outside it, so
+   records never migrate over presentation); what gains identity is the
+   *event* — §2.1's own sentence, "identity is content; history is the
+   log", extended to the log's entries. Consequences, each mechanical:
+   the surface store is **immutable** — a put under an existing content
+   hash must match byte-for-byte, never replace; a draft's `base` and
+   the stale-fork check compare **publication ids**, not revision ids —
+   two surface-only publications forked from the same revision are
+   distinct nodes, and the second correctly reads as stale; a
+   publication identical to its head parent (same revision, same
+   surface set) is **refused as a no-op** — an append-only history has
+   no meaning for a node byte-identical to its parent. Found
+   (2026-08-25) through the platform history page: without this, a
+   surface-only publish reused its base's revision id, appended a
+   duplicate-id DAG node, and overwrote the stored surfaces under
+   `(revision, surface id)` — history uncomputable, not merely
+   unrendered (Q23 holds the full found-by). Wire: the `surface` line
+   gains a `hash` field verified as `hash_plain(body)` exactly as
+   `block_defaults` already is, and the manifest pins the surface
+   hashes it carries; the M3 corpus goldens repin (the Q17 precedent),
+   byte-stability holding after the repin. Residual — whether a
+   checkpoint pins its surface's content hash — split to Q25.
 
 ## 2.14 Units on numbers (settled from standing demand)
 
@@ -1316,6 +1347,41 @@ interpretation is revision-dependent.**
 Projection is therefore a no-op over the vast majority of any record, and the
 compatibility relation is a **per-column function** — i.e. exactly Avro's
 reader/writer schema resolution. Lift that model wholesale.
+
+## 3.1 Surface changes classify by their admissibility delta
+
+**Settled (was open question 24), 2026-08-25.** The table above
+classifies schema transitions; a publication also carries surfaces
+(§2.13 decision 9), and their changes classify by one rule — the
+**admissibility delta** (§2.6). Presentation-only changes — a section
+retitled, prompts, help, notes, ordering — are free, *reported*: the
+report is the history's diff, and free is not invisible.
+Admissibility **loosened** — a required rule dropped or narrowed, a
+format broadened, an ineligibility rule removed — is free.
+Admissibility **tightened** — a column newly required or its required
+rule broadened, a format narrowed, an ineligibility rule added or
+broadened — is **checked**: a record never becomes globally invalid
+(§2.6), but an in-flight record admissible yesterday can lapse today,
+and the exact count of lapsing records is the same projection-run
+number the cast rows above earn. Visibility changes classify through
+their effect on the admissible set (a required column newly reachable
+is a tightening); write-policy changes are free, reported — they
+constrain future writes, never stored data. Schema-side, the same
+resolution closes the rename hole: a column or group **relabel** is a
+new revision (§2.13 decision 7) that the classification read as
+`Identical` — it becomes `Relabeled`, safe, reported.
+
+Placement respects §7: `varve-impact` (Tier 2) cannot name surface
+types, so the surface diff lives in `varve-surface` — surface ×
+surface → `SurfaceReport`, reusing `impact`'s `ChangeClass` vocabulary
+(a Tier 3 → Tier 2 dependency, legal; "nothing depends on
+`varve-surface`" intact) — and whoever holds both reports
+(`varve-service`, the platform) composes them: the publication gate
+takes the worst class of the pair, so a requiredness tightening now
+requires the same confirmation a lossy cast does. Considered and
+rejected: widening `varve-impact` to take surfaces (points the
+dependency up the tier), and a platform-only tree diff (every embedder
+would inherit the blind spot).
 
 ## 4. Logic language
 
@@ -1602,7 +1668,7 @@ be **heterogeneous**, carrying schema, records, items, attachments and history
 in one file in dependency order.
 
 ```
-{"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, record count, blobs: referenced | bundled — §2.15)
+{"k":"header", ...}                 // format ver, source instance, mode, intent, manifest (revision ids, surface hashes, record count, blobs: referenced | bundled — §2.15, §2.13 decision 9)
 {"k":"revision", "id":"...", "schema":{...}}   // writer schema travels with the data (Avro property); resolver declarations ride inside it
 {"k":"block", "id":"...", "version":1, "group":{...}, "resolvers":[...]}   // schema-side block (§2.1); travels like a nomenclature. Its surface defaults travel as block_defaults lines
 {"k":"nomenclature", "id":"...", "version":1, "rows":[...]}   // versioned (id, label, ...fields) table (§2.12); travels like a block
@@ -1610,7 +1676,7 @@ in one file in dependency order.
 {"k":"item", "record":"...", "group":"...", "parent":[...], "id":"...", "ord":0, "cells":{...}}   // one item's cells; follows its record line
 {"k":"entry", "record":"...", "seq":0, "prev":"...", "ops":[...], ...}  // history mode: one log entry (§2.9)
 {"k":"attachment", "hash":"sha256:...", "byte_size":..., "content_type":"..."}   // describes a blob (§2.15); algorithm-tagged (§2.13)
-{"k":"surface", "id":"...", "revision":"...", "surface":{...}}   // surface-side object (§2.1/§2.6): envelope typed by the wire, body opaque canonical JSON typed by varve-surface (settled 2026-08-19, below)
+{"k":"surface", "id":"...", "revision":"...", "hash":"sha256:...", "surface":{...}}   // surface-side object (§2.1/§2.6): envelope typed by the wire, body opaque canonical JSON typed by varve-surface (settled 2026-08-19, below); hash = hash_plain(body), verified on read like block_defaults (§2.13 decision 9)
 {"k":"block_defaults", "block":"...", "version":1, "hash":"sha256:...", "defaults":{...}}   // the surface half of a block (§10 Q13); same treatment
 ```
 
@@ -2397,66 +2463,67 @@ Only then: `surface`, `store`, service.
     Decide when count bounds are first built; the choice is invisible
     to the wire until then.
 
-23. **What a publication commits to.** Found 2026-08-25 through the
-    platform's history page: a surface-only change (a section renamed,
-    a requiredness rule tightened) derives the same revision id as its
-    base — §2.13 decision 7, deliberate and not in question here — so
-    publication appends a DAG node whose revision equals its parent's
-    (a duplicate id in a DAG keyed by revision id) and stores its
-    surfaces under the same `(revision, surface id)` keys,
-    **overwriting the previous publication's surfaces in place**. The
-    old presentation is destroyed: `authored_against_revision` still
-    resolves, but the surface an actor was actually shown is gone, and
-    the history diff between the two publications is empty by
-    construction — not unrendered, uncomputable. For a kernel whose
-    thesis is history read back layer by layer, an overwrite on the
-    publish path is corruption, not a display gap. The candidate
-    shape: surfaces gain their own content addresses
-    (`surface_canonical` exists; block defaults already hash — §2.13
-    decision 7 calls surfaces "separate objects"), the surface store
-    becomes immutable under that address (put is idempotent or
-    refuses, never replaces), and `Publication` carries its surface
-    addresses beside the revision id — **publication identity =
-    revision + surface set**, while revision identity stays
-    schema-only so records never migrate over presentation.
-    Sub-questions: is a fully identical publication (same revision,
-    same surfaces) refused as a no-op or appended as a deliberate
-    re-publish; does the wire `surface` line grow a `hash` field and
-    the manifest pin surface addresses (§5 — Q14's completeness
-    argument says a bundle should verify them); and what the platform
-    event's facts carry (P.4) so the diff page can name both
-    endpoints. Blocks Q24 — a surface diff needs both surfaces kept.
+23. ~~What a publication commits to.~~ **Resolved (§2.13 decision 9,
+    2026-08-25): publication identity = revision + surface set +
+    parents, content-addressed and hashed plain; the surface store is
+    immutable; the stale-fork check compares publication ids; an
+    identical republish is refused as a no-op.** Found through the
+    platform history page: a surface-only publication (a section
+    renamed, a requiredness rule tightened) reused its base's revision
+    id — §2.13 decision 7, deliberate and untouched by this resolution
+    — so it appended a DAG node whose id duplicated its parent's and
+    stored its surfaces under the same `(revision, surface id)` keys,
+    overwriting the previous publication's surfaces in place: the old
+    presentation destroyed, the history diff uncomputable rather than
+    unrendered, and `authored_against_revision` still resolving while
+    the surface an actor was actually shown was gone. Settled by design
+    argument from §2.1's own sentence — "identity is content; history
+    is the log" — extended to the log's entries; a subtler bug decided
+    the base question: with `base` compared as a revision id, two
+    admins forking surface-only changes from one revision would both
+    pass the stale check, the second silently discarding the first's
+    work. Wire: the `surface` line gains a `hash` field verified like
+    `block_defaults`', and the manifest pins surface hashes; the M3
+    corpus goldens repin (the Q17 precedent), byte-stability holding
+    after the repin. The platform half — event facts carrying the
+    publication id, the diff page's endpoints — is P.4's to record.
+    Residual — checkpoint surface pinning — split to Q25.
 
-24. **Surface changes and relabels are invisible to the impact
-    report.** Found with Q23: `classify` is schema → schema, so every
-    surface fact is outside the report's vocabulary — and §2.6
-    deliberately made requiredness a surface property, so the change
-    most consequential for in-flight records (optional → required: a
-    record admissible yesterday is non-admissible today, with no entry
-    written) can neither appear in the report nor trigger the
-    confirmation gate, which fires only above `Safe`. Adjacent and
-    schema-side: labels are identity-bearing (§2.13 decision 7) but
-    the classification compares only type, arity and scope, so a
-    relabel publishes a genuinely new revision whose report reads "no
-    changes." Placement is constrained by §7: **nothing depends on
-    `varve-surface`**, and `varve-impact` (Tier 2) sits below it, so
-    `impact` cannot name surface types. Candidates: (a) a diff module
-    in `varve-surface` itself — surface × surface → its own report,
-    reusing `impact`'s `ChangeClass` vocabulary (a Tier 3 → Tier 2
-    dependency, legal), composed with the schema report by whoever
-    holds both (`varve-service`, the platform) — the same hand-down
-    pattern §7 already records for rules and pending resolutions;
-    (b) platform-side only, a diff over the two stored authoring
-    trees; (c) widening `varve-impact` to take surfaces — rejected on
-    sight, it points the dependency up the tier and breaks "nothing
-    depends on `varve-surface`". Sub-questions: does an
-    admissibility-tightening surface change deserve the confirm gate
-    the way `Lossy` does (records never break — §2.6, never globally
-    invalid — but they lapse, which is Q21's time-varying
-    admissibility in another costume); and does the schema-side report
-    grow a `Relabeled` change kind independently — it needs no surface
-    and no new dependency. Blocked by Q23: there is no surface diff
-    while only the latest surface survives.
+24. ~~Surface changes and relabels are invisible to the impact
+    report.~~ **Resolved (§3.1, 2026-08-25): surface changes classify
+    by their admissibility delta — presentation-only and loosening
+    changes are free but reported, tightening is `checked` with the
+    lapsing-record count from the same projection run as casts — and a
+    schema-side relabel becomes `Relabeled` (safe, reported) instead
+    of `Identical`.** Found with Q23: `classify` was schema → schema,
+    so every surface fact sat outside the report's vocabulary — and
+    §2.6 deliberately made requiredness a surface property, so the
+    change most consequential for in-flight records could neither
+    appear in the report nor trigger the confirmation gate. Placement
+    settled by the §7 invariant: the diff lives in `varve-surface`
+    (surface × surface → `SurfaceReport`, reusing `impact`'s
+    `ChangeClass` — Tier 3 → Tier 2, legal, "nothing depends on
+    `varve-surface`" intact), composed above by whoever holds both
+    reports; the publication gate takes the worst class of the pair.
+    Considered and rejected: widening `varve-impact` to take surfaces
+    (dependency up the tier) and a platform-only tree diff (every
+    embedder inherits the blind spot). Blocked on Q23's kept surfaces
+    — resolved together.
+
+25. **Does a checkpoint pin its surface's content hash?** Split from
+    Q23 at its resolution. The §2.8/Q12 surface-scoped freeze
+    evaluates "what the checkpointed surface could write"; once a
+    revision can carry successive surface sets (§2.13 decision 9), a
+    surface republish can change writability under an open checkpoint,
+    and a checkpoint naming only a surface *id* means different things
+    before and after. Candidate: checkpoints record the surface
+    content hash at checkpoint time, envelope-adjacent like
+    `authored_against_revision`. Today the freeze reads the live
+    surface — defensible while the kernel only reports and the
+    platform enforces (Q12), but undecided. Decide when a surface
+    republish first meets an open checkpoint in practice; the Q17
+    residual (checkpoint matching and anchors) rides the same
+    machinery and should be revisited in the same pass.
 
 ## 11. Prior art to consult
 
