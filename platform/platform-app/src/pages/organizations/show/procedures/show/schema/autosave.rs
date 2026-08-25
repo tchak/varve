@@ -91,8 +91,9 @@ type Saved = std::result::Result<String, String>;
 async fn saved(cx: &Cx, procedure: &ProcedureRevisionDraft, element_id: &str) -> Result<Saved> {
     let element = procedure
         .revision_draft
-        .as_ref()
-        .and_then(|draft| draft.elements.iter().find(|e| id_of(e) == element_id));
+        .elements
+        .iter()
+        .find(|e| id_of(e) == element_id);
     Ok(Ok(match element {
         Some(element) => detail::heading_for(cx, element).await?,
         None => String::new(),

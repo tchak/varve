@@ -201,24 +201,54 @@ pub async fn find_procedure_with_revision_draft(
         .await
 }
 
-/// The draft tree of a procedure loaded by
-/// [`find_procedure_with_revision_draft`]: `None` when no draft is in
-/// progress.
+/// The tree the next edit operates on — *head until touched* (G.7
+/// virtual draft): the stored working buffer when one is in
+/// progress; otherwise the published head's authored tree with the
+/// head as `base`; otherwise the empty tree. Nothing is stored for
+/// the two virtual cases; [`edit_revision_draft`] materializes the
+/// fork on the first edit from exactly this shape.
+pub struct WorkingTree {
+    pub tree: Tree,
+    /// The revision a fork records as its parent (the stale-fork
+    /// check's anchor): the stored draft's `base`, or the head.
+    pub base: Option<String>,
+    /// Whether a stored draft exists — the one fact the projection
+    /// would otherwise erase (an empty impact report cannot stand in
+    /// for it: edits that never touch the derived schema still store
+    /// a draft).
+    pub in_progress: bool,
+}
+
+/// The [`WorkingTree`] of a procedure loaded by
+/// [`find_procedure_with_revision_draft`].
 ///
 /// # Panics
 ///
 /// If the draft was not loaded (the catalog lookups defer it).
-pub fn revision_draft_tree(procedure: &Procedure) -> Result<Option<Tree>, RevisionDraftError> {
+pub fn working_tree(procedure: &Procedure) -> Result<WorkingTree, RevisionDraftError> {
     Ok(match procedure.revision_draft.get() {
-        Some(draft) => Some(draft.tree.decode()?),
-        None => None,
+        Some(draft) => WorkingTree {
+            tree: draft.tree.decode()?,
+            base: draft.base.clone(),
+            in_progress: true,
+        },
+        None => WorkingTree {
+            tree: match procedure.published_tree.get() {
+                Some(bytes) => bytes.decode()?,
+                None => Tree::default(),
+            },
+            base: procedure.latest_revision.clone(),
+            in_progress: false,
+        },
     })
 }
 
-/// Applies `edit` to the procedure's draft tree and stores the
-/// result, returning the tree as stored. With no draft in progress
-/// the edit starts one from the empty tree. The procedure must come
-/// from [`find_procedure_with_revision_draft`]; on success it is updated in
+/// Applies `edit` to the procedure's [`working_tree`] and stores the
+/// result, returning the tree as stored — with no draft in progress,
+/// this is the fork: the published head's tree (or the empty tree)
+/// becomes the working buffer, `base` recording the head (P.4
+/// *Publication*). The procedure must come from
+/// [`find_procedure_with_revision_draft`]; on success it is updated in
 /// place (draft, `version`, `updated_at`).
 ///
 /// Atomic: `edit` errors (a rejected operation) store nothing, and a
@@ -229,19 +259,7 @@ pub async fn edit_revision_draft(
     procedure: &mut Procedure,
     edit: impl FnOnce(&mut Tree) -> Result<(), EditError>,
 ) -> Result<Tree, RevisionDraftError> {
-    let (mut tree, base) = match procedure.revision_draft.get() {
-        Some(draft) => (draft.tree.decode()?, draft.base.clone()),
-        // A fresh draft forks from the published head (P.4
-        // *Publication*): the head's authored tree, and the head as
-        // `base` — the stale-fork check's anchor.
-        None => {
-            let tree = match procedure.published_tree.get() {
-                Some(bytes) => bytes.decode()?,
-                None => Tree::default(),
-            };
-            (tree, procedure.latest_revision.clone())
-        }
-    };
+    let WorkingTree { mut tree, base, .. } = working_tree(procedure)?;
     edit(&mut tree)?;
     procedure
         .update()

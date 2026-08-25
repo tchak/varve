@@ -20,29 +20,40 @@ use varve_surface::Format;
 
 use crate::error::{internal, invalid_input};
 
-/// The draft of a procedure's next revision.
+/// The draft of a procedure's next revision — *head until touched*
+/// (G.7 virtual draft): always the tree the next edit operates on,
+/// whether or not a working buffer is stored; `inProgress` tells
+/// which.
 #[derive(SimpleObject)]
 #[graphql(complex)]
 pub struct RevisionDraft {
-    /// The published revision this draft forks from; `null` until the
-    /// procedure has one.
+    /// The published revision this draft forks from (or would fork
+    /// from — the head, until touched); `null` until the procedure
+    /// has one.
     pub base: Option<ID>,
     /// Every element of the authored tree, **document order** (a
     /// container precedes its children; siblings in their order),
     /// each naming its parent.
     pub elements: Vec<Element>,
+    /// Whether a stored working buffer exists — unpublished work is
+    /// in progress. Not inferable from an empty `report`: edits that
+    /// never touch the derived schema (a label rename, a note) still
+    /// store a draft. `publishRevision` refuses a pristine draft
+    /// (`INVALID_DRAFT`); `discardRevisionDraft` on one is a no-op.
+    pub in_progress: bool,
     /// The draft's derived kernel schema, kept for [`Self::report`].
     #[graphql(skip)]
     schema: varve_schema::Schema,
 }
 
 impl RevisionDraft {
-    pub fn new(base: Option<&str>, tree: &Tree) -> Self {
+    pub fn new(base: Option<&str>, tree: &Tree, in_progress: bool) -> Self {
         let mut elements = Vec::new();
         push_elements(&mut elements, None, &tree.elements);
         Self {
             base: base.map(ID::from),
             elements,
+            in_progress,
             schema: tree.schema(),
         }
     }

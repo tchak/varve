@@ -63,22 +63,21 @@ impl Procedure {
         &self.organization
     }
 
-    /// The draft of the next revision; `null` when none is in
-    /// progress.
-    async fn revision_draft(&self) -> async_graphql::Result<Option<RevisionDraft>> {
+    /// The draft of the next revision — *head until touched* (G.7
+    /// virtual draft): the stored working buffer when one is in
+    /// progress, otherwise the published head's tree (`base` naming
+    /// the head), otherwise the empty tree. `inProgress` carries
+    /// which; the first edit forks exactly this shape.
+    async fn revision_draft(&self) -> async_graphql::Result<RevisionDraft> {
         if self.procedure.revision_draft.is_unloaded() {
             return Err(internal("procedure loaded without its revision draft"));
         }
-        let tree = platform_core::revision_draft_tree(&self.procedure).map_err(internal)?;
-        Ok(tree.map(|tree| {
-            let base = self
-                .procedure
-                .revision_draft
-                .get()
-                .as_ref()
-                .and_then(|draft| draft.base.as_deref());
-            RevisionDraft::new(base, &tree)
-        }))
+        let working = platform_core::working_tree(&self.procedure).map_err(internal)?;
+        Ok(RevisionDraft::new(
+            working.base.as_deref(),
+            &working.tree,
+            working.in_progress,
+        ))
     }
 }
 

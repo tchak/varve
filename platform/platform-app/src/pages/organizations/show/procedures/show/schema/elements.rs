@@ -90,11 +90,7 @@ pub(super) mod element {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
-            let elements = procedure
-                .revision_draft
-                .as_ref()
-                .map(|d| d.elements.as_slice())
-                .unwrap_or_default();
+            let elements = procedure.revision_draft.elements.as_slice();
             let moved_label = elements
                 .iter()
                 .find(|e| id_of(e) == element_id.as_str())
@@ -196,8 +192,9 @@ pub(super) mod element {
             let element_id = path_param::<ElementId>(cx).to_owned();
             let removed = procedure
                 .revision_draft
-                .as_ref()
-                .and_then(|d| d.elements.iter().find(|e| id_of(e) == element_id.as_str()));
+                .elements
+                .iter()
+                .find(|e| id_of(e) == element_id.as_str());
             let parent = removed.and_then(parent_of);
             let removed_label = removed.map(|e| label_of(e).to_owned()).unwrap_or_default();
             let result: std::result::Result<_, Error> = platform_client::run(

@@ -32,8 +32,9 @@ pub struct ProcedureRevisionDraft {
     pub description: String,
     pub updated_at: jiff::Timestamp,
     pub organization: DraftOrganization,
-    /// `None` when no draft is in progress.
-    pub revision_draft: Option<RevisionDraft>,
+    /// Always present — *head until touched* (G.7 virtual draft);
+    /// `in_progress` tells whether a working buffer is stored.
+    pub revision_draft: RevisionDraft,
 }
 
 /// The owning organization, as the editor names it.
@@ -51,6 +52,10 @@ pub struct RevisionDraft {
     /// The authored tree, document order; each element names its
     /// parent (a group or a section).
     pub elements: Vec<Element>,
+    /// Whether a stored working buffer exists (G.7 virtual draft):
+    /// `false` means these elements are the published head (or the
+    /// empty tree), verbatim, and an edit will fork them.
+    pub in_progress: bool,
     /// The report `publishRevision` would return, computed at read
     /// time against the draft's base (G.10 *RevisionDraft.report*):
     /// impact is visible while editing, and the publish confirmation

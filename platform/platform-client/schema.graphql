@@ -653,10 +653,13 @@ type Procedure {
 	"""
 	organization: OrganizationRef!
 	"""
-	The draft of the next revision; `null` when none is in
-	progress.
+	The draft of the next revision — *head until touched* (G.7
+	virtual draft): the stored working buffer when one is in
+	progress, otherwise the published head's tree (`base` naming
+	the head), otherwise the empty tree. `inProgress` carries
+	which; the first edit forks exactly this shape.
 	"""
-	revisionDraft: RevisionDraft
+	revisionDraft: RevisionDraft!
 }
 
 """
@@ -852,12 +855,16 @@ input ReopenProcedureInput {
 }
 
 """
-The draft of a procedure's next revision.
+The draft of a procedure's next revision — *head until touched*
+(G.7 virtual draft): always the tree the next edit operates on,
+whether or not a working buffer is stored; `inProgress` tells
+which.
 """
 type RevisionDraft {
 	"""
-	The published revision this draft forks from; `null` until the
-	procedure has one.
+	The published revision this draft forks from (or would fork
+	from — the head, until touched); `null` until the procedure
+	has one.
 	"""
 	base: ID
 	"""
@@ -866,6 +873,14 @@ type RevisionDraft {
 	each naming its parent.
 	"""
 	elements: [Element!]!
+	"""
+	Whether a stored working buffer exists — unpublished work is
+	in progress. Not inferable from an empty `report`: edits that
+	never touch the derived schema (a label rename, a note) still
+	store a draft. `publishRevision` refuses a pristine draft
+	(`INVALID_DRAFT`); `discardRevisionDraft` on one is a no-op.
+	"""
+	inProgress: Boolean!
 	"""
 	The report `publishRevision` would return, computed at read
 	time against the draft's base (G.10 *RevisionDraft.report*):

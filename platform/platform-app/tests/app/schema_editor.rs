@@ -707,28 +707,27 @@ async fn publish_journey() {
     assert!(html.contains("Confirm and publish"), "{html}");
 
     // First publication: every column `ADDED`, free — it publishes
-    // without a confirmation (G.10) and consumes the draft.
+    // without a confirmation (G.10) and consumes the draft. What
+    // remains is the pristine virtual draft (G.7): the published
+    // schema stays visible in the structure, the state line says so,
+    // and the draft-only actions are gone.
     let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
     assert!(!to.to.contains("publish=confirm"), "{}", to.to);
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("The revision has been published."), "{html}");
-    assert!(html.contains("No draft yet"), "{html}");
+    assert!(
+        html.contains("Published schema \u{2014} editing starts a new draft."),
+        "{html}"
+    );
+    assert_eq!(element_ids(&html), std::slice::from_ref(&nom));
     assert!(!html.contains("Publish the revision"), "{html}");
+    assert!(!html.contains("Discard the draft"), "{html}");
 
-    // The next draft forks from the head (adding an element starts
-    // it, seeded with the published tree — "Nom" keeps its id), and
-    // text → integer on the published column is a `CHECKED` cast: an
-    // unconfirmed publish writes nothing and lands on the
-    // confirmation, which shows the read-time report.
-    let to = act(
-        &router,
-        &cookie,
-        &format!("{editor}/add"),
-        &[("what", "column"), ("label", "Ville")],
-    )
-    .await;
-    let html = landed(&router, &cookie, &to).await;
-    assert!(html.contains("data-element-id"), "{html}");
+    // Editing the published column directly forks the next draft
+    // from the head ("Nom" keeps its id — no add needed first), and
+    // text → integer is a `CHECKED` cast: an unconfirmed publish
+    // writes nothing and lands on the confirmation, which shows the
+    // read-time report.
     let to = act(
         &router,
         &cookie,
@@ -738,6 +737,14 @@ async fn publish_journey() {
     .await;
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("Saved your changes."), "{html}");
+    let to = act(
+        &router,
+        &cookie,
+        &format!("{editor}/add"),
+        &[("what", "column"), ("label", "Ville")],
+    )
+    .await;
+    landed(&router, &cookie, &to).await;
     let to = act(&router, &cookie, &format!("{editor}/publish"), &[]).await;
     assert!(to.to.contains("publish=confirm"), "{}", to.to);
     assert!(to.notice.is_none());
@@ -769,7 +776,10 @@ async fn publish_journey() {
     .await;
     let html = landed(&router, &cookie, &to).await;
     assert!(html.contains("The revision has been published."), "{html}");
-    assert!(html.contains("No draft yet"), "{html}");
+    assert!(
+        html.contains("Published schema \u{2014} editing starts a new draft."),
+        "{html}"
+    );
 }
 
 #[tokio::test]

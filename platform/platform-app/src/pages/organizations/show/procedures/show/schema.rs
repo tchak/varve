@@ -322,12 +322,7 @@ pub(super) mod add {
         };
         match result {
             Ok(procedure) => {
-                let elements = procedure
-                    .revision_draft
-                    .as_ref()
-                    .map(|d| d.elements.as_slice())
-                    .unwrap_or_default();
-                let created = new_element_id(elements, parent, before);
+                let created = new_element_id(&procedure.revision_draft.elements, parent, before);
                 let notice = match input.what.as_str() {
                     "note" => done(cx, "schema.notice.note-added").await?,
                     what => {
@@ -422,16 +417,11 @@ async fn editor_page(
 ) -> Result {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
-    let elements = procedure
-        .revision_draft
-        .as_ref()
-        .map(|d| d.elements.clone())
-        .unwrap_or_default();
-    // The read-time report the publish confirmation shows (G.10
-    // *RevisionDraft.report*); `None` doubles as "nothing to
-    // publish", so `?publish=confirm` on a draftless editor shows
-    // nothing rather than an empty confirmation.
-    let report = procedure.revision_draft.as_ref().map(|d| d.report.clone());
+    let elements = procedure.revision_draft.elements.clone();
+    // Pristine (G.7 virtual draft) means nothing to publish, so
+    // `?publish=confirm` shows no confirmation on it.
+    let in_progress = procedure.revision_draft.in_progress;
+    let report = procedure.revision_draft.report.clone();
     let discard_question = t(cx, "schema.discard.question").await?;
     let discard_confirm = t(cx, "schema.discard.confirm").await?;
     let discard_keep = t(cx, "schema.discard.keep").await?;
@@ -485,15 +475,13 @@ async fn editor_page(
                 offer_publish: !confirm_publish && !confirm_discard,
                 revision: revision
             )
-            if confirm_publish {
-                if let Some(report) = &report {
-                    publish::confirmation(
-                        organization_id: organization_id,
-                        procedure_id: procedure_id,
-                        elements: elements.clone(),
-                        report: report.clone()
-                    )
-                }
+            if confirm_publish && in_progress {
+                publish::confirmation(
+                    organization_id: organization_id,
+                    procedure_id: procedure_id,
+                    elements: elements.clone(),
+                    report: report.clone()
+                )
             }
             if confirm_discard {
                 alert(

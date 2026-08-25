@@ -77,23 +77,22 @@ async fn procedure_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
     let draft_none = t(cx, "procedure.draft.none").await?;
     let draft_badge = t(cx, "procedure.draft.badge").await?;
     let edit_label = t(cx, "procedure.draft.edit").await?;
-    let summary = match &procedure.revision_draft {
-        Some(draft) => {
-            let (columns, groups) = counts(&draft.elements);
-            Some(
-                t_args(
-                    cx,
-                    "procedure.draft.summary",
-                    &args([
-                        ("columns", (columns as i64).into()),
-                        ("groups", (groups as i64).into()),
-                        ("date", utc_date_arg(procedure.updated_at)),
-                    ]),
-                )
-                .await?,
+    let summary = if procedure.revision_draft.in_progress {
+        let (columns, groups) = counts(&procedure.revision_draft.elements);
+        Some(
+            t_args(
+                cx,
+                "procedure.draft.summary",
+                &args([
+                    ("columns", (columns as i64).into()),
+                    ("groups", (groups as i64).into()),
+                    ("date", utc_date_arg(procedure.updated_at)),
+                ]),
             )
-        }
-        None => None,
+            .await?,
+        )
+    } else {
+        None
     };
     view! {
         <div class="flex flex-col gap-6">

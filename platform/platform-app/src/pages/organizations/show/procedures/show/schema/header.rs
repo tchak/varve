@@ -86,7 +86,7 @@ pub(in crate::pages) async fn header(
     let publish_label = t(cx, "schema.publish").await?;
     let tab_editor = t(cx, "schema.tab.editor").await?;
     let tab_preview = t(cx, "schema.tab.preview").await?;
-    let has_draft = procedure.revision_draft.is_some();
+    let in_progress = procedure.revision_draft.in_progress;
     let procedure_id_string = procedure_id.to_string();
     let editor_href = href!(
         page,
@@ -130,11 +130,11 @@ pub(in crate::pages) async fn header(
             <div
                 class="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
             >
-                if has_draft {
+                if in_progress {
                     badge(variant: BadgeVariant::Secondary, (draft_badge))
                 }
                 state(procedure_id: $(pid.get()), revision: $(revision.get()))
-                if has_draft && offer_publish {
+                if in_progress && offer_publish {
                     <form method="post" action=(publish_href)>
                         button(
                             variant: ButtonVariant::Primary,
@@ -144,7 +144,7 @@ pub(in crate::pages) async fn header(
                         )
                     </form>
                 }
-                if has_draft && offer_discard {
+                if in_progress && offer_discard {
                     <a
                         href=(discard_href)
                         class=(button_variants(
@@ -175,7 +175,8 @@ pub(in crate::pages) async fn header(
 }
 
 /// The draft-state line as a shard: how much the draft holds and
-/// when it was last saved, or that there is no draft yet.
+/// when it was last saved; with nothing in progress, the published
+/// schema (head until touched) or that there is no draft yet.
 /// Re-rendered when an autosave bumps `revision`, since the saved-on
 /// date it carries is *now* afterwards. Authorizes itself through
 /// the client; an unreadable procedure is the 404.
@@ -192,9 +193,16 @@ async fn state(cx: &Cx, procedure_id: String, revision: f64) -> Result {
 
 /// The draft-state line's text.
 async fn state_line(cx: &Cx, procedure: &ProcedureRevisionDraft) -> Result<String> {
-    let Some(draft) = procedure.revision_draft.as_ref() else {
-        return t(cx, "schema.state.none").await;
-    };
+    let draft = &procedure.revision_draft;
+    if !draft.in_progress {
+        // Pristine: the published head (base names it), or nothing
+        // at all on a never-published procedure.
+        return if draft.base.is_some() {
+            t(cx, "schema.state.published").await
+        } else {
+            t(cx, "schema.state.none").await
+        };
+    }
     let (columns, groups) = counts(&draft.elements);
     t_args(
         cx,

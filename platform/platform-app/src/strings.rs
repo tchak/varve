@@ -144,6 +144,10 @@ pub const EN: &[(&str, &str)] = &[
         "No draft yet: adding an element starts one.",
     ),
     (
+        "schema.state.published",
+        "Published schema \u{2014} editing starts a new draft.",
+    ),
+    (
         "schema.state.draft",
         ".input {$columns :integer}\n\
          .input {$groups :integer}\n\
@@ -552,6 +556,10 @@ pub const FR: &[(&str, &str)] = &[
     (
         "schema.state.none",
         "Pas encore de brouillon\u{a0}: ajouter un élément en ouvre un.",
+    ),
+    (
+        "schema.state.published",
+        "Schéma publié \u{2014} toute modification ouvre un nouveau brouillon.",
     ),
     (
         "schema.state.draft",

@@ -93,11 +93,7 @@ async fn panel_body(
     procedure: ProcedureRevisionDraft,
     selected: Option<String>,
 ) -> Result {
-    let elements = procedure
-        .revision_draft
-        .as_ref()
-        .map(|d| d.elements.clone())
-        .unwrap_or_default();
+    let elements = procedure.revision_draft.elements.clone();
     let empty = t(cx, "schema.structure.empty").await?;
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;

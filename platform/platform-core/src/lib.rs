@@ -63,10 +63,10 @@ pub use organization::{
 };
 pub use principal::Principal;
 pub use procedure::{
-    LifecycleError, Procedure, RevisionDraft, RevisionDraftError, TreeBytes, close_procedure,
-    create_procedure, current_state, discard_revision_draft, edit_revision_draft, find_procedure,
-    find_procedure_with_revision_draft, list_account_procedures, list_organization_procedures,
-    reopen_procedure, revision_draft_tree,
+    LifecycleError, Procedure, RevisionDraft, RevisionDraftError, TreeBytes, WorkingTree,
+    close_procedure, create_procedure, current_state, discard_revision_draft, edit_revision_draft,
+    find_procedure, find_procedure_with_revision_draft, list_account_procedures,
+    list_organization_procedures, reopen_procedure, working_tree,
 };
 pub use procedure_event::{
     FactsBytes, ProcedureEvent, ProcedureEventKind, PublishedFacts, list_procedure_events,

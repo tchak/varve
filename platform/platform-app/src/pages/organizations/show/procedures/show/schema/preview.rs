@@ -76,11 +76,7 @@ impl Preview {
 /// the tab rail with *Preview* active, and the rendered form.
 #[component]
 async fn preview_page(cx: &Cx, procedure: ProcedureRevisionDraft) -> Result {
-    let elements = procedure
-        .revision_draft
-        .as_ref()
-        .map(|d| d.elements.clone())
-        .unwrap_or_default();
+    let elements = procedure.revision_draft.elements.clone();
     let tree = Preview {
         elements,
         reviewer: t(cx, "schema.audience.reviewer").await?,

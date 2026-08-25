@@ -523,7 +523,7 @@ fn the_client_mirrors_every_error_code() {
 }
 
 /// The draft selection every draft mutation and the read share.
-const DRAFT: &str = "revisionDraft { base elements {
+const DRAFT: &str = "revisionDraft { base inProgress elements {
     __typename
     ... on Column { id parentId label required audience type { __typename
         ... on TextType { format { __typename ... on RegexFormat { pattern } } }
@@ -607,10 +607,14 @@ async fn revision_draft_editing_journey() {
     let procedure = api.create_procedure(&alice, &id_of(&org), "Bourse").await;
     let pid = id_of(&procedure);
 
-    // No draft until the first edit.
+    // Nothing in progress yet: the virtual draft (G.7) is the empty
+    // tree, pristine.
     let read = format!("query($id: ID!) {{ procedure(id: $id) {{ id {DRAFT} }} }}");
     let data = api.data(&alice, &read, json!({ "id": pid })).await;
-    assert!(data["procedure"]["revisionDraft"].is_null(), "{data}");
+    let draft = &data["procedure"]["revisionDraft"];
+    assert_eq!(draft["inProgress"], false, "{data}");
+    assert!(draft["base"].is_null(), "{data}");
+    assert_eq!(draft["elements"].as_array().unwrap().len(), 0, "{data}");
 
     // addColumn at the root starts the draft; base is null (no DAG yet).
     let p = api
@@ -849,7 +853,10 @@ async fn revision_draft_editing_journey() {
             json!({ "procedureId": pid }),
         )
         .await;
-    assert!(p["revisionDraft"].is_null(), "{p}");
+    // Discarded: back to the pristine virtual draft (the empty tree
+    // here — never published).
+    assert_eq!(p["revisionDraft"]["inProgress"], false, "{p}");
+    assert_eq!(p["revisionDraft"]["elements"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -1159,7 +1166,8 @@ async fn the_typed_client_edits_and_reads_the_draft() {
     .await
     .expect("addColumn")
     .add_column;
-    let draft = added.revision_draft.expect("draft started");
+    let draft = added.revision_draft;
+    assert!(draft.in_progress);
     assert!(draft.base.is_none());
     let Element::Column(column) = draft.elements[0].clone() else {
         panic!("{:?}", draft.elements);
@@ -1178,7 +1186,7 @@ async fn the_typed_client_edits_and_reads_the_draft() {
     .expect("read")
     .procedure
     .expect("visible");
-    assert_eq!(read.revision_draft, Some(draft));
+    assert_eq!(read.revision_draft, draft);
 
     // A refused edit arrives typed.
     let error = platform_client::run(
@@ -1451,7 +1459,7 @@ const PUBLISH: &str = "mutation($input: PublishRevisionInput!) {
         procedure {
             id
             state { __typename ... on ProcedurePublishedState { since } }
-            revisionDraft { base }
+            revisionDraft { base inProgress elements { ... on Column { label } } }
             events { kind }
         }
     }
@@ -1490,8 +1498,12 @@ async fn publish_revision_over_the_schema() {
         result["procedure"]["state"]["__typename"],
         "ProcedurePublishedState"
     );
-    // The draft is consumed, and the trail gained PUBLISHED.
-    assert!(result["procedure"]["revisionDraft"].is_null(), "{result}");
+    // The draft is consumed: what remains is the pristine virtual
+    // draft — the published head, base naming it (G.7).
+    let draft = &result["procedure"]["revisionDraft"];
+    assert_eq!(draft["inProgress"], false, "{result}");
+    assert!(!draft["base"].is_null(), "{result}");
+    assert_eq!(draft["elements"][0]["label"], "Nom", "{result}");
     let kinds: Vec<&str> = result["procedure"]["events"]
         .as_array()
         .unwrap()
@@ -1580,7 +1592,10 @@ async fn a_breaking_publication_gates_through_the_api() {
     assert_eq!(result["report"]["columns"][0]["columnId"], column_id);
     assert_eq!(result["report"]["columns"][0]["change"], "FORBIDDEN");
     // The procedure still shows the draft: nothing was consumed.
-    assert!(!result["procedure"]["revisionDraft"].is_null(), "{result}");
+    assert_eq!(
+        result["procedure"]["revisionDraft"]["inProgress"], true,
+        "{result}"
+    );
 
     // Confirmed through the typed client: published, report intact.
     let client = api.client(&alice);

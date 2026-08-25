@@ -138,12 +138,11 @@ pub(in crate::pages) async fn enum_column<'a>(
 ) -> Result<std::result::Result<(&'a Column, Vec<EnumOptionInput>), Notice>> {
     let column = procedure
         .revision_draft
-        .as_ref()
-        .and_then(|d| {
-            d.elements.iter().find_map(|e| match e {
-                Element::Column(c) if c.id.inner() == element_id => Some(c),
-                _ => None,
-            })
+        .elements
+        .iter()
+        .find_map(|e| match e {
+            Element::Column(c) if c.id.inner() == element_id => Some(c),
+            _ => None,
         })
         .filter(|c| matches!(c.ty, ColumnType::Enum(_)));
     match column {
@@ -203,11 +202,7 @@ pub(in crate::pages) async fn apply_update(
     element_id: &str,
     fields: &Fields,
 ) -> Result<std::result::Result<ProcedureRevisionDraft, Notice>> {
-    let elements = procedure
-        .revision_draft
-        .as_ref()
-        .map(|d| d.elements.as_slice())
-        .unwrap_or_default();
+    let elements = procedure.revision_draft.elements.as_slice();
     let Some(element) = elements.iter().find(|e| id_of(e) == element_id) else {
         return Ok(Err(Notice {
             kind: NoticeKind::Alert,

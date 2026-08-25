@@ -25,8 +25,8 @@ use platform_core::{
     find_organization_by_slug, find_procedure, find_procedure_with_revision_draft,
     is_organization_member, list_account_organizations, list_account_teams, list_live_api_tokens,
     list_live_sessions, list_organization_procedures, list_organization_teams, new_column_id,
-    register, remove_organization_member, remove_team_member, revision_draft_tree, sweep_expired,
-    sweep_expired_api_tokens, update_profile, verify_credentials,
+    register, remove_organization_member, remove_team_member, sweep_expired,
+    sweep_expired_api_tokens, update_profile, verify_credentials, working_tree,
 };
 use platform_core::{
     LifecycleError, ProcedureEventKind, ProcedureStateValue, PublishProcedureError,
@@ -928,7 +928,10 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .expect("exists");
-    assert_eq!(revision_draft_tree(&procedure).unwrap(), None);
+    let working = working_tree(&procedure).unwrap();
+    assert!(!working.in_progress);
+    assert!(working.tree.elements.is_empty());
+    assert!(working.base.is_none());
     let id = new_column_id();
     let stored = edit_revision_draft(&mut db, &mut procedure, |tree| {
         add_element(
@@ -955,10 +958,9 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        revision_draft_tree(&reloaded).unwrap(),
-        Some(stored.clone())
-    );
+    let working = working_tree(&reloaded).unwrap();
+    assert!(working.in_progress);
+    assert_eq!(working.tree, stored.clone());
     assert!(
         find_procedure(&mut db, created.id)
             .await
@@ -995,7 +997,9 @@ async fn procedure_draft_round_trips_through_edits() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(revision_draft_tree(&again).unwrap(), Some(stored));
+    let working = working_tree(&again).unwrap();
+    assert!(working.in_progress);
+    assert_eq!(working.tree, stored);
 
     // `procedure` is the stale copy from before the second edit:
     // optimistic concurrency refuses its save rather than overwriting.
@@ -1011,12 +1015,12 @@ async fn procedure_draft_round_trips_through_edits() {
     discard_revision_draft(&mut db, &mut fresh)
         .await
         .expect("discard");
-    assert_eq!(revision_draft_tree(&fresh).unwrap(), None);
+    assert!(!working_tree(&fresh).unwrap().in_progress);
     let after = find_procedure_with_revision_draft(&mut db, created.id)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(revision_draft_tree(&after).unwrap(), None);
+    assert!(!working_tree(&after).unwrap().in_progress);
 }
 
 /// Seeds an organization, an acting account and a procedure for the
@@ -1166,7 +1170,7 @@ async fn discarding_a_draft_is_not_an_event() {
     discard_revision_draft(&mut db, &mut loaded)
         .await
         .expect("discard");
-    assert_eq!(revision_draft_tree(&loaded).unwrap(), None);
+    assert!(!working_tree(&loaded).unwrap().in_progress);
 
     // The trail records lifecycle facts only: discarding the working
     // buffer is authoring workflow, absent by design (P.4).
