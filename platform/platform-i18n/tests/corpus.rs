@@ -9,8 +9,8 @@
 //! wrong, and these literals document the real bytes.
 
 use platform_i18n::{
-    ArgValue, Args, Catalog, Catalogs, CompileError, FormatError, Formatted, MessageTemplate,
-    Warning, locale,
+    ArgValue, Args, Catalog, Catalogs, CompileError, Date, Decimal, FormatError, Formatted,
+    MessageTemplate, Warning, locale,
 };
 
 fn args(pairs: &[(&str, ArgValue)]) -> Args {
@@ -452,4 +452,377 @@ fn catalog_reports_all_compile_errors_with_ids() {
     assert_eq!(ids, vec!["bad-unclosed", "bad-no-fallback"]);
     assert!(matches!(err.errors[0].1, CompileError::Syntax(_)));
     assert_eq!(err.errors[1].1, CompileError::MissingFallbackVariant);
+}
+
+// ── the rest of the fallback matrix ─────────────────────────────────────────
+// Every Warning arm and every option arm the sections above did not
+// reach: the catalogs carry only well-formed messages, so these paths
+// fire exactly when a message or its arguments are wrong — the moment
+// the warn-and-continue contract matters most.
+
+#[test]
+fn operandless_functions_fall_back() {
+    for (src, func) in [
+        ("{:number}", "number"),
+        ("{:date}", "date"),
+        ("{:string}", "string"),
+    ] {
+        let out = fmt(src, "en", &Args::new());
+        assert_eq!(out.text, format!("{{:{func}}}"));
+        assert!(matches!(
+            &out.warnings[..],
+            [Warning::BadOperand { function, .. }] if function == func
+        ));
+    }
+}
+
+#[test]
+fn a_failed_operand_stays_failed_through_its_annotation() {
+    // The missing-variable warning is recorded once; :number sees the
+    // failure and propagates silently instead of piling on BadOperand.
+    let out = fmt("{$missing :number}", "en", &Args::new());
+    assert_eq!(out.text, "{$missing}");
+    assert_eq!(
+        out.warnings,
+        vec![Warning::UnresolvedVariable("missing".into())]
+    );
+}
+
+#[test]
+fn string_annotation_renders_and_number_coerces_from_text() {
+    // :string renders its operand into final text.
+    let out = fmt("{$n :string}", "en", &args(&[("n", ArgValue::from(42))]));
+    assert_eq!(out.text, "42");
+    assert!(out.warnings.is_empty());
+    // :number parses a text operand, refuses garbage with the
+    // literal's own fallback.
+    let out = fmt("{|42| :number}", "en", &Args::new());
+    assert_eq!(out.text, "42");
+    assert!(out.warnings.is_empty());
+    let out = fmt("{|nope| :number}", "en", &Args::new());
+    assert_eq!(out.text, "{|nope|}");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::BadOperand { function, .. }] if function == "number"
+    ));
+    // A date is not a number.
+    let out = fmt(
+        "{$d :number}",
+        "en",
+        &args(&[("d", ArgValue::date(2026, 8, 25).unwrap())]),
+    );
+    assert_eq!(out.text, "{$d}");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::BadOperand { function, detail }]
+            if function == "number" && detail == "date operand"
+    ));
+}
+
+#[test]
+fn number_grouping_and_style_options() {
+    let thousand = args(&[("n", ArgValue::from(1000))]);
+    let out = fmt("{$n :number useGrouping=never}", "en", &thousand);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("1000", 0));
+    // min2 needs two digits in the leading group: 1000 stays solid.
+    let out = fmt("{$n :number useGrouping=min2}", "en", &thousand);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("1000", 0));
+    let out = fmt("{$n :number useGrouping=always}", "en", &thousand);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("1,000", 0));
+    // A grouping value outside the registry: warn, keep the default.
+    let out = fmt("{$n :number useGrouping=sometimes}", "en", &thousand);
+    assert_eq!(out.text, "1,000");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::UnsupportedOption { function, option, value }]
+            if function == "number" && option == "useGrouping" && value == "sometimes"
+    ));
+    // style: decimal is the one implemented value; percent warns.
+    let out = fmt("{$n :number style=decimal}", "en", &thousand);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("1,000", 0));
+    let out = fmt("{$n :number style=percent}", "en", &thousand);
+    assert_eq!(out.text, "1,000");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::UnsupportedOption { option, .. }] if option == "style"
+    ));
+    // Fraction digit counts must be digits in 0..=20.
+    for bad in ["abc", "99", "-1"] {
+        let out = fmt(
+            &format!("{{$n :number maximumFractionDigits={bad}}}"),
+            "en",
+            &thousand,
+        );
+        assert_eq!(out.text, "1,000");
+        assert!(matches!(
+            &out.warnings[..],
+            [Warning::UnsupportedOption { option, value, .. }]
+                if option == "maximumFractionDigits" && value == bad
+        ));
+    }
+}
+
+#[test]
+fn option_values_resolve_from_variables() {
+    // A numeric option variable arrives as plain digits (a
+    // locale-grouped "1 234" would not parse as a digit count)...
+    let out = fmt(
+        "{$n :number maximumFractionDigits=$digits}",
+        "en",
+        &args(&[
+            ("n", ArgValue::from(3.7_f64)),
+            ("digits", ArgValue::from(0)),
+        ]),
+    );
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("4", 0));
+    // ...a string one is taken as-is...
+    let out = fmt(
+        "{$n :number maximumFractionDigits=$digits}",
+        "en",
+        &args(&[
+            ("n", ArgValue::from(3.7_f64)),
+            ("digits", ArgValue::from("0")),
+        ]),
+    );
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("4", 0));
+    // ...and a date has no option form: the option is ignored.
+    let out = fmt(
+        "{$n :number maximumFractionDigits=$digits}",
+        "en",
+        &args(&[
+            ("n", ArgValue::from(3.7_f64)),
+            ("digits", ArgValue::date(2026, 8, 25).unwrap()),
+        ]),
+    );
+    assert_eq!(out.text, "3.7");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::UnsupportedOption { option, value, .. }]
+            if option == "maximumFractionDigits" && value == "$digits (date)"
+    ));
+    // An unresolved option variable warns twice: the missing variable,
+    // then the unusable option value.
+    let out = fmt(
+        "{$n :number maximumFractionDigits=$digits}",
+        "en",
+        &args(&[("n", ArgValue::from(3.7_f64))]),
+    );
+    assert_eq!(out.text, "3.7");
+    assert!(matches!(
+        &out.warnings[..],
+        [
+            Warning::UnresolvedVariable(name),
+            Warning::UnsupportedOption { value, .. },
+        ] if name == "digits" && value == "$digits (unresolved)"
+    ));
+}
+
+#[test]
+fn date_styles_operand_coercion_and_refusals() {
+    let d = args(&[("d", ArgValue::date(2026, 8, 25).unwrap())]);
+    // Unannotated date: medium by default; :date takes style,
+    // :datetime takes dateStyle (MF2 default registry).
+    let out = fmt("{$d}", "en", &d);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("Aug 25, 2026", 0));
+    let out = fmt("{$d :date style=short}", "en", &d);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("8/25/26", 0));
+    let out = fmt("{$d :datetime dateStyle=short}", "en", &d);
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("8/25/26", 0));
+    // A style outside the registry: warn, keep medium.
+    let out = fmt("{$d :date style=tiny}", "en", &d);
+    assert_eq!(out.text, "Aug 25, 2026");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::UnsupportedOption { option, value, .. }]
+            if option == "style" && value == "tiny"
+    ));
+    // An option :date does not know at all.
+    let out = fmt("{$d :date zone=utc}", "en", &d);
+    assert_eq!(out.text, "Aug 25, 2026");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::UnknownOption { function, option }]
+            if function == "date" && option == "zone"
+    ));
+    // A text operand parses as YYYY-MM-DD, or falls back.
+    let out = fmt("{|2026-08-25| :date style=short}", "en", &Args::new());
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("8/25/26", 0));
+    let out = fmt("{|soon| :date}", "en", &Args::new());
+    assert_eq!(out.text, "{|soon|}");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::BadOperand { function, .. }] if function == "date"
+    ));
+    // A number is not a date.
+    let out = fmt("{$n :date}", "en", &args(&[("n", ArgValue::from(5))]));
+    assert_eq!(out.text, "{$n}");
+    assert!(matches!(
+        &out.warnings[..],
+        [Warning::BadOperand { function, .. }] if function == "date"
+    ));
+}
+
+#[test]
+fn a_non_numeric_selector_matches_only_the_catch_all() {
+    let out = fmt(
+        ".input {$s :string}\n.match $s\none {{one}}\n* {{fallback}}",
+        "en",
+        &args(&[("s", ArgValue::from("one"))]),
+    );
+    assert_eq!(out.text, "fallback");
+    assert_eq!(out.warnings, vec![Warning::SelectorNotNumeric("s".into())]);
+}
+
+#[test]
+fn selection_scores_selectors_left_to_right() {
+    // Spec ordering: per key, exact numeric match (0) beats plural
+    // category (1) beats `*` (2), compared lexicographically across
+    // selectors — so an exact match on the *first* selector outranks
+    // category matches on both.
+    let out = fmt(
+        ".input {$a :integer}\n.input {$b :integer}\n.match $a $b\n\
+         one one {{both one-ish}}\n1 * {{a exactly one}}\n* * {{other}}",
+        "en",
+        &args(&[("a", ArgValue::from(1)), ("b", ArgValue::from(1))]),
+    );
+    assert_eq!(
+        (out.text.as_str(), out.warnings.len()),
+        ("a exactly one", 0)
+    );
+    // A key that matches nothing disqualifies its variant outright.
+    let out = fmt(
+        ".input {$a :integer}\n.match $a\n7 {{seven}}\n* {{other}}",
+        "en",
+        &args(&[("a", ArgValue::from(3))]),
+    );
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("other", 0));
+}
+
+#[test]
+fn escapes_unescape_in_text_and_quoted_literals() {
+    let out = clean(r"literal \{braces\} and a \\ backslash", "en", &Args::new());
+    assert_eq!(out, r"literal {braces} and a \ backslash");
+    // A quoted literal keeps its escaped pipe, loses its quotes.
+    let out = clean(r"{|a \| pipe|}", "en", &Args::new());
+    assert_eq!(out, "a | pipe");
+}
+
+#[test]
+fn markup_and_key_arity_are_rejected_at_compile_time() {
+    // Markup placeholders are documented out of scope until the IR
+    // grows open/close parts.
+    assert!(matches!(
+        MessageTemplate::compile("{#b}bold{/b}").unwrap_err(),
+        CompileError::Unsupported(_) | CompileError::Syntax(_)
+    ));
+    // A variant must carry one key per selector.
+    assert_eq!(
+        MessageTemplate::compile(".input {$a :integer}\n.match $a\none one {{x}}\n* {{y}}")
+            .unwrap_err(),
+        CompileError::VariantKeyMismatch {
+            selectors: 1,
+            keys: 2
+        }
+    );
+}
+
+#[test]
+fn decomposed_argument_keys_still_resolve() {
+    // The message name is NFC ("café", U+00E9); the caller's key is
+    // decomposed ("cafe" + U+0301). Lookup normalizes.
+    let out = fmt(
+        "Chez {$caf\u{e9}}",
+        "fr",
+        &args(&[("cafe\u{301}", ArgValue::from("Flore"))]),
+    );
+    assert_eq!((out.text.as_str(), out.warnings.len()), ("Chez Flore", 0));
+}
+
+#[test]
+fn warnings_render_for_logs() {
+    let cases: Vec<(Warning, &str)> = vec![
+        (
+            Warning::UnresolvedVariable("n".into()),
+            "unresolved variable $n",
+        ),
+        (
+            Warning::UnknownFunction("frob".into()),
+            "unknown function :frob",
+        ),
+        (
+            Warning::UnknownOption {
+                function: "date".into(),
+                option: "zone".into(),
+            },
+            "unknown option zone on :date",
+        ),
+        (
+            Warning::UnsupportedOption {
+                function: "number".into(),
+                option: "style".into(),
+                value: "percent".into(),
+            },
+            "unsupported option style=percent on :number",
+        ),
+        (
+            Warning::BadOperand {
+                function: "number".into(),
+                detail: "date operand".into(),
+            },
+            "bad operand for :number: date operand",
+        ),
+        (
+            Warning::SelectorNotNumeric("s".into()),
+            "selector $s is not a number",
+        ),
+    ];
+    for (warning, text) in cases {
+        assert_eq!(warning.to_string(), text);
+    }
+}
+
+#[test]
+fn arg_values_convert_from_native_types() {
+    assert_eq!(ArgValue::from("s"), ArgValue::String("s".into()));
+    assert_eq!(
+        ArgValue::from(String::from("s")),
+        ArgValue::String("s".into())
+    );
+    assert_eq!(ArgValue::from(7_i32), ArgValue::Int(7));
+    assert_eq!(ArgValue::from(7_i64), ArgValue::Int(7));
+    assert_eq!(ArgValue::from(7_u32), ArgValue::UInt(7));
+    assert_eq!(ArgValue::from(u64::MAX), ArgValue::UInt(u64::MAX));
+    let d: Decimal = "1.5".parse().unwrap();
+    assert_eq!(ArgValue::from(d.clone()), ArgValue::Decimal(d));
+    let date = Date::try_new_iso(2026, 8, 25).unwrap();
+    assert_eq!(ArgValue::from(date), ArgValue::Date(date));
+    // Impossible dates are rejected at the boundary, so format time
+    // never sees an invalid Date.
+    assert!(ArgValue::date(2026, 2, 30).is_err());
+}
+
+#[test]
+fn catalog_surface_for_the_loader() {
+    let mut catalog = Catalog::from_pairs([("greeting", "Hello")]).unwrap();
+    assert!(!catalog.is_empty());
+    catalog.insert("farewell", MessageTemplate::compile("Bye").unwrap());
+    assert_eq!(catalog.len(), 2);
+    assert_eq!(
+        catalog.ids().collect::<Vec<_>>(),
+        vec!["farewell", "greeting"]
+    );
+    assert!(catalog.get("greeting").is_some());
+    assert!(catalog.get("nope").is_none());
+    // The error names every failing message for the log line.
+    let err = Catalog::from_pairs([("a", "{$x"), ("b", "{$y")]).unwrap_err();
+    let text = err.to_string();
+    assert!(text.starts_with("2 message(s) failed to compile"), "{text}");
+    assert!(text.contains("'a'") && text.contains("'b'"), "{text}");
+    // Re-inserting a locale replaces its catalog in place.
+    let en = locale("en").unwrap();
+    let mut catalogs = Catalogs::new(vec![]);
+    catalogs.insert(en.clone(), Catalog::from_pairs([("id", "old")]).unwrap());
+    catalogs.insert(en.clone(), Catalog::from_pairs([("id", "new")]).unwrap());
+    let out = catalogs.format(&en, "id", &Args::new()).unwrap();
+    assert_eq!(out.text, "new");
 }

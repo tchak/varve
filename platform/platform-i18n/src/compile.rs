@@ -287,7 +287,7 @@ impl<'a> Lowerer<'a> {
         for token in text.tokens() {
             let slice = self.view.source_slice(token.span());
             match token.kind() {
-                SyntaxKind::EscapeToken => out.push_str(slice.trim_start_matches('\\')),
+                SyntaxKind::EscapeToken => out.push_str(slice.strip_prefix('\\').unwrap_or(slice)),
                 _ => out.push_str(slice),
             }
         }
@@ -304,7 +304,9 @@ impl<'a> Lowerer<'a> {
                     let slice = self.view.source_slice(token.span());
                     match token.kind() {
                         SyntaxKind::PipeToken => {}
-                        SyntaxKind::EscapeToken => out.push_str(slice.trim_start_matches('\\')),
+                        SyntaxKind::EscapeToken => {
+                            out.push_str(slice.strip_prefix('\\').unwrap_or(slice))
+                        }
                         _ => out.push_str(slice),
                     }
                 }
