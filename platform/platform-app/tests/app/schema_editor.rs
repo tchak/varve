@@ -7,8 +7,9 @@
 //! edits as alerts (blank label, a `many` group inside a `many`
 //! group), removing, discarding behind its confirmation, sections
 //! and notes with inherited audiences (the reviewer badge, the
-//! refused widening), the preview tab (the draft rendered as a
-//! read-only form, its gate, French), publishing (the two-phase
+//! refused widening), the preview tab (the draft rendered as its
+//! fillable form over the preview bag — values, rows, findings —
+//! its gate, French), publishing (the two-phase
 //! `publishRevision`: free first publication, the confirmation
 //! carrying the impact report for a checked cast, the refused
 //! draftless publish), and French.
@@ -1380,11 +1381,26 @@ async fn the_preview_tab() {
     assert!(html.contains("Vérifier la pièce."), "{html}");
     assert!(html.contains("Reviewers only"), "{html}");
     assert!(html.contains("type=\"date\""), "{html}");
-    // The group is a fieldset with the `many` badge; its choice is a
-    // select with the blank option and the authored one.
+    // The group is a fieldset with the `many` badge; with no rows in
+    // the bag its choice waits behind *Add a row* (G.12: rows are the
+    // bag's item lists).
     assert!(html.contains("<fieldset"), "{html}");
     assert!(html.contains("Enfants"), "{html}");
     assert!(html.contains(">Many<"), "{html}");
+    assert!(html.contains("data-preview-add"), "{html}");
+    assert!(!html.contains(">Paris<"), "{html}");
+    // One row in: the choice renders as a select with the blank
+    // option and the authored one.
+    act(
+        &router,
+        &cookie,
+        &format!("{preview}/fill"),
+        &[("add", &group)],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("data-preview-row"), "{html}");
+    assert!(html.contains(">Row 1<"), "{html}");
     assert!(html.contains("<option value=\"\">"), "{html}");
     assert!(html.contains(">Paris<"), "{html}");
     // Geometry has no control: the caption is plain text and the gap
@@ -1401,4 +1417,203 @@ async fn the_preview_tab() {
     assert!(html.contains(">Aperçu<"), "{html}");
     assert!(html.contains(">Édition<"), "{html}");
     assert!(html.contains("Rien à prévisualiser"), "{html}");
+}
+
+#[tokio::test]
+async fn the_preview_fills_and_reports() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "fill-owner").await;
+    let organization = create_organization(&router, &cookie, "Fill").await;
+    let editor = create_procedure(&router, &cookie, &organization, "Bourse").await;
+    let preview = format!("{editor}/preview");
+    let fill = format!("{preview}/fill");
+    let add = format!("{editor}/add");
+
+    // A required public text column and an email-formatted one
+    // (optional, so its finding can only be the format's).
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "column"), ("label", "Nom")],
+    )
+    .await;
+    let nom = selected_of(&to.to);
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "column"), ("label", "Courriel")],
+    )
+    .await;
+    let courriel = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{courriel}/update"),
+        &[("format", "EMAIL"), ("required", "")],
+    )
+    .await;
+
+    // The empty bag: the required column's finding shows beside its
+    // control — text the control references — and the summary counts
+    // it once (deduplicated across the surface pair).
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("1 field needs attention."), "{html}");
+    assert!(html.contains("This field is required."), "{html}");
+    assert!(
+        html.contains(&format!("id=\"preview-{nom}-finding\"")),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!("aria-describedby=\"preview-{nom}-finding\"")),
+        "{html}"
+    );
+    assert!(html.contains("aria-invalid=\"true\""), "{html}");
+    assert!(html.contains("novalidate"), "{html}");
+    assert!(html.contains(">Check the form<"), "{html}");
+
+    // Filling the required cell and botching the email: the check
+    // lands back with the value prefilled, the required finding gone
+    // and the format one in its place.
+    let nom_field = format!("cell:{nom}");
+    let courriel_field = format!("cell:{courriel}");
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[
+            (nom_field.as_str(), "Ada"),
+            (courriel_field.as_str(), "pas-un-courriel"),
+        ],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("value=\"Ada\""), "{html}");
+    assert!(html.contains("1 field needs attention."), "{html}");
+    assert!(!html.contains("This field is required."), "{html}");
+    assert!(
+        html.contains("This value does not match the expected format."),
+        "{html}"
+    );
+
+    // Fixing the email answers the admissible summary; blanking the
+    // required field brings its finding back (blank = unset).
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[
+            (nom_field.as_str(), "Ada"),
+            (courriel_field.as_str(), "ada@example.org"),
+        ],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("The form is admissible."), "{html}");
+    assert!(!html.contains("data-preview-finding"), "{html}");
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[
+            (nom_field.as_str(), ""),
+            (courriel_field.as_str(), "ada@example.org"),
+        ],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("This field is required."), "{html}");
+
+    // Rows: a `many` group with a required column inside. Adding a
+    // row (values riding the same submission survive it) opens the
+    // row's own finding; filling through the row's path clears it;
+    // removing the row takes its cells with it.
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "group"), ("label", "Enfants")],
+    )
+    .await;
+    let group = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &format!("{editor}/elements/{group}/update"),
+        &[("cardinality", "MANY")],
+    )
+    .await;
+    let to = act(
+        &router,
+        &cookie,
+        &add,
+        &[("what", "column"), ("label", "Prénom"), ("parent", &group)],
+    )
+    .await;
+    let prenom = selected_of(&to.to);
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[(nom_field.as_str(), "Ada"), ("add", group.as_str())],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("value=\"Ada\""), "{html}");
+    assert!(html.contains(">Row 1<"), "{html}");
+    assert!(html.contains(">Remove row 1<"), "{html}");
+    let item = attribute_values(&html, "data-preview-row")
+        .pop()
+        .expect("the added row");
+    // The whole form posts each time: the omitted email field went
+    // back to absent (it is optional, so no finding), and the new
+    // row's required column is the one needing attention.
+    assert!(html.contains("1 field needs attention."), "{html}");
+    let row_field = format!("cell:{prenom}:{group}.{item}");
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[
+            (nom_field.as_str(), "Ada"),
+            (courriel_field.as_str(), "ada@example.org"),
+            (row_field.as_str(), "Sam"),
+        ],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(html.contains("The form is admissible."), "{html}");
+    assert!(html.contains("value=\"Sam\""), "{html}");
+    act(
+        &router,
+        &cookie,
+        &fill,
+        &[
+            (nom_field.as_str(), "Ada"),
+            ("remove", format!("{group}.{item}").as_str()),
+        ],
+    )
+    .await;
+    let html = page(&router, &cookie, &preview).await;
+    assert!(!html.contains("data-preview-row"), "{html}");
+    assert!(!html.contains("value=\"Sam\""), "{html}");
+
+    // French: the summary, the finding and the check button localize.
+    let french = french_member(&router, "fill-french").await;
+    let organization = create_organization(&router, &french, "Remplir").await;
+    let editor_fr = create_procedure(&router, &french, &organization, "Titre").await;
+    act(
+        &router,
+        &french,
+        &format!("{editor_fr}/add"),
+        &[("what", "column"), ("label", "Nom")],
+    )
+    .await;
+    let html = page(&router, &french, &format!("{editor_fr}/preview")).await;
+    assert!(html.contains("1 champ demande votre attention."), "{html}");
+    assert!(html.contains("Ce champ est requis."), "{html}");
+    assert!(html.contains(">Vérifier le formulaire<"), "{html}");
 }

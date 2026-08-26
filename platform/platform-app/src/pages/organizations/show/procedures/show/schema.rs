@@ -41,7 +41,8 @@
 //! - [`element`] — the total helpers for reading a client `Element`.
 //! - [`controls`] — the vendored controls' look, for the plain
 //!   elements that carry runtime handlers.
-//! - [`preview`] — the read-only second tab.
+//! - [`preview`] — the fillable second tab (G.12): the draft
+//!   rendered as its form, over the preview value bag.
 //! - [`publish`] — the publish POST (two-phase `publishRevision`,
 //!   G.10) and the confirmation that carries the impact report.
 //!
@@ -167,26 +168,29 @@ pub(super) async fn back_to_editor(
 }
 
 /// A refused client operation, mapped the editor's way: `FORBIDDEN`
-/// is the 404; `INVALID_EDIT` / `CONFLICT` / `INVALID_INPUT` become
-/// an alert notice carrying the server's reason; anything else is
-/// the request's error.
+/// is the 404; `INVALID_EDIT` / `INVALID_WRITE` (the preview's
+/// batch, G.12) / `CONFLICT` / `INVALID_INPUT` become an alert
+/// notice carrying the server's reason; anything else is the
+/// request's error.
 pub(super) async fn refused(cx: &Cx, error: Error) -> Result<Notice> {
     match error.code() {
         Some(Code::Forbidden) => Err(not_found().into()),
-        Some(Code::InvalidEdit | Code::Conflict | Code::InvalidInput) => Ok(Notice {
-            kind: NoticeKind::Alert,
-            text: match error.code() {
-                Some(Code::Conflict) => t(cx, "schema.error.conflict").await?,
-                _ => {
-                    t_args(
-                        cx,
-                        "schema.error.refused",
-                        &one_arg("reason", error.to_string()),
-                    )
-                    .await?
-                }
-            },
-        }),
+        Some(Code::InvalidEdit | Code::InvalidWrite | Code::Conflict | Code::InvalidInput) => {
+            Ok(Notice {
+                kind: NoticeKind::Alert,
+                text: match error.code() {
+                    Some(Code::Conflict) => t(cx, "schema.error.conflict").await?,
+                    _ => {
+                        t_args(
+                            cx,
+                            "schema.error.refused",
+                            &one_arg("reason", error.to_string()),
+                        )
+                        .await?
+                    }
+                },
+            })
+        }
         _ => Err(error.into()),
     }
 }

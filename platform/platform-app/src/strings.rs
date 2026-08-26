@@ -165,6 +165,23 @@ pub const EN: &[(&str, &str)] = &[
         "schema.preview.geometry",
         "Map input — not shown in the preview.",
     ),
+    ("schema.preview.check", "Check the form"),
+    (
+        "schema.preview.findings",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         0 {{The form is admissible.}}\n\
+         one {{1 field needs attention.}}\n\
+         * {{{$n} fields need attention.}}",
+    ),
+    ("schema.preview.add_row", "Add a row"),
+    ("schema.preview.remove_row", "Remove row {$n :integer}"),
+    ("schema.preview.row", "Row {$n :integer}"),
+    ("schema.preview.finding.required", "This field is required."),
+    (
+        "schema.preview.finding.format",
+        "This value does not match the expected format.",
+    ),
     (
         "schema.state.none",
         "No draft yet: adding an element starts one.",
@@ -722,6 +739,26 @@ pub const FR: &[(&str, &str)] = &[
     (
         "schema.preview.geometry",
         "Saisie sur carte — non affichée dans l'aperçu.",
+    ),
+    ("schema.preview.check", "Vérifier le formulaire"),
+    (
+        "schema.preview.findings",
+        ".input {$n :integer}\n\
+         .match $n\n\
+         0 {{Le formulaire est admissible.}}\n\
+         one {{1 champ demande votre attention.}}\n\
+         * {{{$n} champs demandent votre attention.}}",
+    ),
+    ("schema.preview.add_row", "Ajouter une ligne"),
+    (
+        "schema.preview.remove_row",
+        "Supprimer la ligne {$n :integer}",
+    ),
+    ("schema.preview.row", "Ligne {$n :integer}"),
+    ("schema.preview.finding.required", "Ce champ est requis."),
+    (
+        "schema.preview.finding.format",
+        "Cette valeur ne respecte pas le format attendu.",
     ),
     (
         "schema.state.none",

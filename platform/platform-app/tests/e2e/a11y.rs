@@ -360,8 +360,9 @@ async fn axe_scenario(
         "/organizations/{id}/procedures/{pid}/schema (choice options)",
     )
     .await?;
-    // The preview tab: the same draft rendered as a read-only form
-    // (the selected column is a choice by now, so a select shows).
+    // The preview tab: the same draft rendered as its fillable form
+    // (G.12; the selected column is a choice by now, so a select
+    // shows).
     page.get_by_role(
         AriaRole::Link,
         Some(GetByRoleOptions::default().name("Preview").exact(true)),
@@ -372,6 +373,27 @@ async fn axe_scenario(
         .to_be_visible()
         .await?;
     check_axe(&page, "/organizations/{id}/procedures/{pid}/schema/preview").await?;
+    // Checking the empty form round-trips through `updatePreview`
+    // and lands on the findings state: the required choice reported
+    // beside its control, referenced from it.
+    page.get_by_role(
+        AriaRole::Button,
+        Some(
+            GetByRoleOptions::default()
+                .name("Check the form")
+                .exact(true),
+        ),
+    )
+    .click(None)
+    .await?;
+    expect(page.locator(locator!("[data-preview-finding]")))
+        .to_be_visible()
+        .await?;
+    check_axe(
+        &page,
+        "/organizations/{id}/procedures/{pid}/schema/preview (findings)",
+    )
+    .await?;
     page.goto(&editor_url, None).await?;
     // A refused autosave: a blank label, blurred, is reported on the
     // status line (no Save button exists with the script running).
