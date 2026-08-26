@@ -653,6 +653,26 @@ tree (the G.8 read side — the diff page shows what a publication
 *changed*, not everything it contained) and any pagination — the
 trail is bounded by design (G.9.3).
 
+**The fillable preview (settled 2026-08-26).** The preview tab's
+promised second slice, designed in graphql.md G.12: administrators
+fill the draft form with scratch values and watch required and
+format findings behave before publishing. Platform-side facts: the
+values are a plain `varve_value::RecordValues` in **its own column
+beside the `revision_draft` embed** on the procedure row (encoded
+like the tree, a bytes newtype constructed only from the kernel
+type) — never inside the embed, so filling the preview does not
+fork the virtual draft and `inProgress` stays a statement about the
+authored tree; cleared by discard and by publication (a draft-cycle
+scope); sharing the row's optimistic version guard (a fill racing a
+tree autosave is a `CONFLICT` retry, accepted); and stale cells are
+inert — reads fold only cells whose column still exists with a
+matching kind, orphans dropped on the next write, `tree_edit`
+ignorant of preview state. The slice is the deliberate pilot of the
+case-file write and read models (`updateCells`, `cells`) — shapes
+fixed against scratch before they cost a migration. Page design
+(form wiring, per-cell autosave, findings rendering) comes with the
+implementation.
+
 **Moved to `design/graphql.md` (2026-08-22).** The schema design grew
 past a section; it has its own document with its own numbering (G.x).
 This heading stays so every `P.5` cross-reference keeps resolving —

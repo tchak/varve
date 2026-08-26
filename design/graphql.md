@@ -189,6 +189,14 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    the report on the `published` event's facts at publish time.
    Not needed until that day; the historical read stays the
    schema-only classification either way.
+5. **Attachment values in the preview.** The fillable preview
+   (G.12) keeps attachment controls inert: filling one would mean
+   minting upload slots against a *draft* — scratch blobs entering
+   `varve-files` with the §2.15 scan lifecycle, needing GC when the
+   draft is discarded. Whether that is ever worth building, or
+   attachments stay permanently preview-inert, decide when real
+   case-file uploads exist and the slot machinery has a shape to
+   share. P2.
 
 ## G.6 The P0 slice (settled 2026-08-22)
 
@@ -645,3 +653,83 @@ argument on G.9, G.10 and the kernel store shape.
    holds on both compiled surfaces, a qualifier when not) with a
    lapse sentence on `CHECKED` entries; that presentation is the
    app's, not the API's.
+
+## G.12 The fillable preview (settled 2026-08-26)
+
+The schema editor's preview tab stops being inert: administrators
+fill the draft form with scratch values and watch admissibility
+behave before publishing — the "later slice" the read-only preview
+promised. One read shape and one mutation, settled by design argument
+on G.7, the virtual-draft amendment, and the kernel value model
+(DESIGN §2.4–§2.6). This slice is deliberately the **pilot of the
+case-file models**: the write input `updateCells` will take and the
+`cells` read shape G.1 promises are fixed here first, against scratch
+values, where a wrong call costs a redesign and not a migration.
+
+1. **`RevisionDraft.preview: Preview!`** — non-null like its parent
+   (an empty bag until filled, the virtual-draft rule applied again).
+   `Preview { cells: [Cell!]!, findings: [AdmissibilityFinding!]! }`.
+   `Cell` pilots G.1's record read model: a union with one member per
+   value kind plus the written-blank state (§2.4: `Empty` is a value
+   state, not absence), each carrying `columnId` and the row path
+   (the `{group, item}` segment chain of DESIGN §2.4), lists on the
+   three `multiple` kinds, each member with `kind` (the G.7.2
+   precedent). `findings` is the point of the slice: the
+   server-evaluated admissibility of the values against the draft —
+   `compile_surfaces` over the draft tree, `varve_surface::
+   admissibility` per compiled surface, findings unioned with their
+   surface named (`applicant` | `reviewer`) and deduplicated in
+   presentation, the G.11.7 move. A union `MissingRequiredFinding |
+   FormatViolationFinding`, each naming its column and path;
+   eligibility is not evaluated (no lifecycle in a preview) and the
+   pending set is empty.
+2. **`updatePreview(input)`** — the `updateCells` pilot:
+   `{ procedureId, writes: [CellWriteInput!]! }`, applied in order,
+   all-or-nothing, answering the full `Procedure` (G.2.7). **Not
+   named `updateDraft`**: bare "draft" is reserved for the case-file
+   state (the G.7.1 argument that named `revisionDraft`), and the
+   seven element mutations are already what "updating the draft"
+   means. `@oneOf CellWriteInput` mirrors the kernel's five-op patch
+   set (`varve_value::patch::Op`, the one representation the record
+   log, export and migration already share): `set { columnId, path,
+   state }`, `unset { columnId, path }` (back to absent, distinct
+   from set-empty), `addItem { groupId, parent, beforeItemId }`,
+   `removeItem`, `reorder { order }` — item placement is a sibling
+   anchor, never an index, and item ids are server-minted, both by
+   the G.7.3 argument. `state` is a `@oneOf CellStateInput`:
+   `{ empty: true }` or one value constructor per scalar kind, the
+   `ColumnTypeInput` idiom. Type errors refuse the whole batch —
+   unknown column, kind mismatch, a path into a non-`many` group, a
+   bad anchor — as **`INVALID_WRITE`**, a new G.6.4 code minted here
+   precisely so `updateCells` inherits it; `CONFLICT` applies as
+   everywhere. **Admissibility never refuses**: required and format
+   findings are the read model's output, not a gate — watching them
+   is what the preview is for.
+3. **Values are scratch, not a record.** Stored as a plain
+   `varve_value::RecordValues` (cells + item lists) beside the draft
+   on the procedure row — never a `varve-record` log: no history, no
+   actor, no hash chain, and §2.10's salted-encoding obligations
+   exist for case files, not for a bag an administrator discards.
+   Two consequences are the decision's substance: **filling the
+   preview does not fork the virtual draft** — `inProgress` stays a
+   statement about the authored tree, previewing the pristine head
+   creates no working buffer, and publish gating is untouched — and
+   the preview is **scoped to a draft cycle**: cleared by
+   `discardRevisionDraft` and by publication. Preview writes share
+   the procedure row's optimistic guard, so a fill racing a tree
+   autosave is `CONFLICT`, re-read and retry (G.7.4's answer);
+   accepted for P0, and the separate column leaves room to relax it.
+4. **Stale cells are inert.** The tree changes under stored values
+   (a type change, a removal): reads fold only cells whose column
+   still exists with a matching kind; orphans are dropped lazily on
+   the next write, never eagerly — `tree_edit` stays ignorant of
+   preview state, and running `varve-projection` over scratch buys
+   nothing.
+5. **Not here:** attachment and geometry *values* — those controls
+   stay inert (no upload slots against a draft, no map), and a
+   required attachment shows honestly as a standing
+   `MissingRequired` finding (G.5 Q5 holds the residual); and
+   per-audience preview (filling the form as the applicant or the
+   reviewer sees it) — a later slice over the same value bag; the
+   fillable preview is the full-tree administrator's view with the
+   audience badges.
