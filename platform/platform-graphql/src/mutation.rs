@@ -323,6 +323,20 @@ fn draft_error(error: RevisionDraftError) -> async_graphql::Error {
     }
 }
 
+fn preview_error(error: platform_core::PreviewError) -> async_graphql::Error {
+    use platform_core::PreviewError as E;
+    match error {
+        E::Write(e) => coded(Code::InvalidWrite, e.to_string()),
+        E::Draft(e) => draft_error(e),
+        E::Corrupt(e) => internal(e),
+        E::Db(e) if e.is_condition_failed() => coded(
+            Code::Conflict,
+            "the preview changed since it was read; re-read and retry",
+        ),
+        E::Db(e) => internal(e),
+    }
+}
+
 fn publish_error(error: PublishProcedureError) -> async_graphql::Error {
     match error {
         PublishProcedureError::NoDraft | PublishProcedureError::EmptyEnum(_) => {
@@ -789,6 +803,35 @@ impl Mutation {
         platform_core::discard_revision_draft(&mut db, &mut procedure)
             .await
             .map_err(|e| draft_error(RevisionDraftError::Db(e)))?;
+        Ok(Procedure {
+            procedure,
+            organization: OrganizationRef::from(&organization),
+        })
+    }
+
+    /// Applies an ordered batch of cell writes to the draft's
+    /// fillable preview (G.12) — the `updateCells` pilot.
+    /// All-or-nothing: a write the draft refuses (`INVALID_WRITE` —
+    /// unknown column, kind mismatch, a bad anchor) stores nothing.
+    /// Admissibility never refuses — required and format findings are
+    /// `preview.findings`' output. Filling never forks the virtual
+    /// draft; the bag clears with discard and publication.
+    async fn update_preview(
+        &self,
+        ctx: &Context<'_>,
+        input: crate::preview::UpdatePreviewInput,
+    ) -> async_graphql::Result<Procedure> {
+        let writes = input
+            .writes
+            .into_iter()
+            .map(crate::preview::CellWriteInput::into_write)
+            .collect::<async_graphql::Result<Vec<_>>>()?;
+        let (principal, mut db) = session(ctx)?;
+        let (mut procedure, organization) =
+            administered_procedure(&mut db, principal.account_id, &input.procedure_id).await?;
+        platform_core::update_preview(&mut db, &mut procedure, writes)
+            .await
+            .map_err(preview_error)?;
         Ok(Procedure {
             procedure,
             organization: OrganizationRef::from(&organization),

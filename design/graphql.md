@@ -668,7 +668,12 @@ values, where a wrong call costs a redesign and not a migration.
 
 1. **`RevisionDraft.preview: Preview!`** — non-null like its parent
    (an empty bag until filled, the virtual-draft rule applied again).
-   `Preview { cells: [Cell!]!, findings: [AdmissibilityFinding!]! }`.
+   `Preview { cells: [Cell!]!, items: [ItemList!]!, findings:
+   [AdmissibilityFinding!]! }` — `items` (each `many` group's ordered
+   item list, amended in implementation 2026-08-26) is there because
+   a freshly added item has no cells yet, and its server-minted id is
+   exactly what the next write must address: cells alone cannot carry
+   it.
    `Cell` pilots G.1's record read model: a union with one member per
    value kind plus the written-blank state (§2.4: `Empty` is a value
    state, not absence), each carrying `columnId` and the row path

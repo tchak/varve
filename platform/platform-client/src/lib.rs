@@ -23,6 +23,7 @@ use std::future::Future;
 use serde::de::DeserializeOwned;
 
 pub mod organization;
+pub mod preview;
 pub mod procedure;
 pub mod revision_draft;
 pub mod team;
@@ -111,13 +112,16 @@ pub enum Code {
     /// The draft cannot publish as-is (nothing in progress, or a
     /// choice with no options): fix the draft and retry.
     InvalidDraft,
+    /// A preview cell write refused by the draft (G.12); the message
+    /// says why and nothing was stored.
+    InvalidWrite,
     /// The platform failed, not the request.
     Internal,
 }
 
 impl Code {
     /// Every code, for the server-side set-equality test.
-    pub const ALL: [Code; 8] = [
+    pub const ALL: [Code; 9] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
@@ -125,6 +129,7 @@ impl Code {
         Code::Conflict,
         Code::InvalidTransition,
         Code::InvalidDraft,
+        Code::InvalidWrite,
         Code::Internal,
     ];
 
@@ -138,6 +143,7 @@ impl Code {
             Code::Conflict => "CONFLICT",
             Code::InvalidTransition => "INVALID_TRANSITION",
             Code::InvalidDraft => "INVALID_DRAFT",
+            Code::InvalidWrite => "INVALID_WRITE",
             Code::Internal => "INTERNAL",
         }
     }

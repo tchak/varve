@@ -4428,6 +4428,7 @@ dependencies = [
  "varve-schema",
  "varve-store",
  "varve-surface",
+ "varve-value",
 ]
 
 [[package]]

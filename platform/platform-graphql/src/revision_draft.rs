@@ -46,6 +46,11 @@ pub struct RevisionDraft {
     /// schema is derived there, only when the report is selected.
     #[graphql(skip)]
     tree: Tree,
+    /// The preview's pruned value bag (G.12), kept for
+    /// [`Self::preview`] — findings are evaluated there, only when
+    /// the preview is selected.
+    #[graphql(skip)]
+    preview_values: varve_value::RecordValues,
     /// The procedure — the lineage the base publication resolves in.
     #[graphql(skip)]
     procedure_id: uuid::Uuid,
@@ -57,6 +62,7 @@ impl RevisionDraft {
         base: Option<&str>,
         tree: Tree,
         in_progress: bool,
+        preview_values: varve_value::RecordValues,
     ) -> Self {
         let mut elements = Vec::new();
         push_elements(&mut elements, None, &tree.elements);
@@ -65,6 +71,7 @@ impl RevisionDraft {
             elements,
             in_progress,
             tree,
+            preview_values,
             procedure_id,
         }
     }
@@ -118,6 +125,16 @@ impl RevisionDraft {
             &surface_report,
             &labels,
         ))
+    }
+
+    /// The fillable preview (G.12): the draft's scratch value bag —
+    /// stale cells already pruned — with its admissibility findings,
+    /// evaluated per compiled surface only when selected. Empty until
+    /// filled; cleared by discard and by publication.
+    async fn preview(&self) -> async_graphql::Result<crate::preview::Preview> {
+        let findings =
+            platform_core::preview_findings(&self.tree, &self.preview_values).map_err(internal)?;
+        Ok(crate::preview::preview(&self.preview_values, findings))
     }
 }
 

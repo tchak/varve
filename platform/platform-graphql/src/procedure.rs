@@ -85,16 +85,24 @@ impl Procedure {
         if self.procedure.revision_draft.is_unloaded() {
             return Err(internal("procedure loaded without its revision draft"));
         }
+        if self.procedure.preview.is_unloaded() {
+            return Err(internal("procedure loaded without its preview"));
+        }
         let platform_core::WorkingTree {
             tree,
             base,
             in_progress,
         } = platform_core::working_tree(&self.procedure).map_err(internal)?;
+        // The preview bag as reads fold it (G.12): stale cells pruned
+        // against the working tree's derived schema.
+        let preview_values =
+            platform_core::preview_values(&self.procedure, &tree.schema()).map_err(internal)?;
         Ok(RevisionDraft::new(
             self.procedure.id,
             base.as_deref(),
             tree,
             in_progress,
+            preview_values,
         ))
     }
 }

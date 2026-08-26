@@ -31,6 +31,11 @@ pub enum Code {
     /// choice has no options (G.7 — a legal draft state, refused at
     /// publication). Fix the draft and retry.
     InvalidDraft,
+    /// A preview cell write the draft refuses (G.12): unknown column,
+    /// kind mismatch, a path into a non-`many` group, a bad anchor.
+    /// The message carries the reason and the batch stored nothing.
+    /// Minted here so `updateCells` inherits it.
+    InvalidWrite,
     /// The platform failed, not the request: a store error or a
     /// wiring bug. The cause is logged server-side and never
     /// serialized — a client learns nothing about the database.
@@ -40,7 +45,7 @@ pub enum Code {
 impl Code {
     /// Every code; `platform-client` mirrors this set and a test
     /// keeps the two equal.
-    pub const ALL: [Code; 8] = [
+    pub const ALL: [Code; 9] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
@@ -48,6 +53,7 @@ impl Code {
         Code::Conflict,
         Code::InvalidTransition,
         Code::InvalidDraft,
+        Code::InvalidWrite,
         Code::Internal,
     ];
 
@@ -61,6 +67,7 @@ impl Code {
             Code::Conflict => "CONFLICT",
             Code::InvalidTransition => "INVALID_TRANSITION",
             Code::InvalidDraft => "INVALID_DRAFT",
+            Code::InvalidWrite => "INVALID_WRITE",
             Code::Internal => "INTERNAL",
         }
     }

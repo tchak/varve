@@ -35,6 +35,7 @@ pub mod impact;
 pub mod member;
 pub mod mutation;
 pub mod organization;
+pub mod preview;
 pub mod procedure;
 pub mod procedure_event;
 pub mod query;

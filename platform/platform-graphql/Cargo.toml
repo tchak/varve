@@ -21,6 +21,10 @@ varve-core = { path = "../../crates/varve-core" }
 varve-impact = { path = "../../crates/varve-impact" }
 varve-revision = { path = "../../crates/varve-revision" }
 varve-schema = { path = "../../crates/varve-schema" }
+# The fillable preview (G.12): the value bag is a kernel
+# `RecordValues`; its GraphQL cells and writes mirror the kernel
+# value model.
+varve-value = { path = "../../crates/varve-value" }
 varve-surface = { path = "../../crates/varve-surface" }
 # `RevisionDraft.report` reads the draft's base schema through the
 # kernel store (the reading-lens point lookup).

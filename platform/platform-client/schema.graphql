@@ -48,6 +48,23 @@ input AddGroupInput {
 }
 
 """
+Adds an item to a `many` group's list. Placement is a **sibling
+anchor**, never an index (the G.7.3 argument), and the item id is
+server-minted — read it back off the answered preview.
+"""
+input AddItemInput {
+	groupId: ID!
+	"""
+	The enclosing scope's row path; omitted = the root scope.
+	"""
+	parent: [RowSegmentInput!]! = []
+	"""
+	The new item lands in front of this one; omitted appends.
+	"""
+	beforeItemId: ID
+}
+
+"""
 `addNote` input.
 """
 input AddNoteInput {
@@ -86,6 +103,12 @@ input AddSectionInput {
 	"""
 	audience: Audience! = ALL
 }
+
+"""
+One admissibility finding, tagged with the compiled surface it
+holds on.
+"""
+union AdmissibilityFinding = MissingRequiredFinding | FormatViolationFinding
 
 """
 A file column with its representability constraints (DESIGN §2.15).
@@ -140,6 +163,13 @@ enum Audience {
 	REVIEWER
 }
 
+type BooleanCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: Boolean!
+}
+
 type BooleanType {
 	kind: ColumnTypeKind!
 }
@@ -150,6 +180,81 @@ A group holds one row or many (DESIGN §2.2).
 enum Cardinality {
 	ONE
 	MANY
+}
+
+"""
+A written cell (G.1's record read model, piloted here): one member
+per value kind plus the written-blank state — `EMPTY` is a value
+state, distinct from absence (DESIGN §2.4).
+"""
+union Cell = TextCell | BooleanCell | IntegerCell | DecimalCell | DateCell | DatetimeCell | EnumCell | EmptyCell
+
+"""
+The cell constructors, carried by every member as `kind` (the
+G.7.2 precedent).
+"""
+enum CellKind {
+	TEXT
+	BOOLEAN
+	INTEGER
+	DECIMAL
+	DATE
+	DATETIME
+	ENUM
+	EMPTY
+}
+
+"""
+A cell state on input (`@oneOf`): written-blank, or one value
+constructor per scalar kind — the `ColumnTypeInput` idiom.
+Attachment and geometry values are not writable in the preview
+(G.12; G.5 Q5 holds the residual). Exact numbers are strings, the
+output's mirror.
+"""
+input CellStateInput @oneOf {
+	"""
+	Written blank (`true`; `false` is `INVALID_INPUT`) — distinct
+	from `unset`.
+	"""
+	empty: Boolean
+	text: String
+	boolean: Boolean
+	"""
+	An exact integer as a decimal string.
+	"""
+	integer: String
+	"""
+	An exact decimal as a string (`1.5`).
+	"""
+	decimal: String
+	"""
+	An ISO 8601 date (`2026-08-26`).
+	"""
+	date: String
+	"""
+	An RFC 3339 instant.
+	"""
+	datetime: String
+	"""
+	A single selected option.
+	"""
+	enum: ID
+	"""
+	The selected options of a `multiple` choice column.
+	"""
+	enumList: [ID!]
+}
+
+"""
+One preview write (`@oneOf`): the kernel's five-op patch set
+(DESIGN §5/§2.9) — the `updateCells` pilot.
+"""
+input CellWriteInput @oneOf {
+	set: SetCellInput
+	unset: UnsetCellInput
+	addItem: AddItemInput
+	removeItem: RemoveItemInput
+	reorder: ReorderItemsInput
 }
 
 """
@@ -322,14 +427,44 @@ input CreateTeamInput {
 	name: String!
 }
 
+"""
+An ISO 8601 date (`2026-08-26`).
+"""
+type DateCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: String!
+}
+
 scalar DateTime
 
 type DateType {
 	kind: ColumnTypeKind!
 }
 
+"""
+An RFC 3339 instant, UTC.
+"""
+type DatetimeCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: String!
+}
+
 type DatetimeType {
 	kind: ColumnTypeKind!
+}
+
+"""
+An exact decimal, as its normalized string (`1.5`, never `1.50`).
+"""
+type DecimalCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: String!
 }
 
 type DecimalType {
@@ -351,6 +486,28 @@ union Element = Column | Group | Section | Note
 
 type EmailFormat {
 	kind: TextFormatKind!
+}
+
+"""
+Written blank (DESIGN §2.4) — distinct from an absent cell, which
+is simply not in `cells`.
+"""
+type EmptyCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+}
+
+"""
+A choice cell: the selected option ids (DESIGN §2.11 — cells store
+ids, labels live in the revision). One element on a single-select
+column; the column's `multiple` says which.
+"""
+type EnumCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	optionIds: [ID!]!
 }
 
 """
@@ -392,6 +549,28 @@ whether several may be selected.
 input EnumTypeInput {
 	multiple: Boolean! = false
 	options: [EnumOptionInput!]!
+}
+
+"""
+The finding constructors, carried by every member as `kind`.
+"""
+enum FindingKind {
+	MISSING_REQUIRED
+	FORMAT_VIOLATION
+}
+
+"""
+A filled text cell violating the surface's format constraint
+(DESIGN §2.6): non-admissible, never ill-typed.
+"""
+type FormatViolationFinding {
+	kind: FindingKind!
+	"""
+	Which surface: `applicant` or `reviewer` (P.4's fixed pair).
+	"""
+	surface: ID!
+	columnId: ID!
+	path: [RowSegment!]!
 }
 
 type GeometryType {
@@ -462,9 +641,35 @@ type ImpactReport {
 	surfaces: [SurfaceChangeEntry!]!
 }
 
+"""
+An exact integer, as a decimal string (the §5 wire precedent —
+full-range `i64` does not survive a JSON double).
+"""
+type IntegerCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: String!
+}
+
 type IntegerType {
 	kind: ColumnTypeKind!
 	unit: Unit
+}
+
+"""
+One `many` group instance's ordered items.
+"""
+type ItemList {
+	groupId: ID!
+	"""
+	The enclosing scope's row path; empty = the root scope.
+	"""
+	parent: [RowSegment!]!
+	"""
+	Document order — `reorder`'s subject.
+	"""
+	itemIds: [ID!]!
 }
 
 type Member {
@@ -476,6 +681,19 @@ type Member {
 	When the membership was created.
 	"""
 	joinedAt: DateTime!
+}
+
+"""
+A reachable, required cell that is not filled (DESIGN §2.6).
+"""
+type MissingRequiredFinding {
+	kind: FindingKind!
+	"""
+	Which surface: `applicant` or `reviewer` (P.4's fixed pair).
+	"""
+	surface: ID!
+	columnId: ID!
+	path: [RowSegment!]!
 }
 
 """
@@ -584,6 +802,16 @@ type Mutation {
 	false`. On a pristine draft this is a no-op.
 	"""
 	discardRevisionDraft(input: DiscardRevisionDraftInput!): Procedure!
+	"""
+	Applies an ordered batch of cell writes to the draft's
+	fillable preview (G.12) — the `updateCells` pilot.
+	All-or-nothing: a write the draft refuses (`INVALID_WRITE` —
+	unknown column, kind mismatch, a bad anchor) stores nothing.
+	Admissibility never refuses — required and format findings are
+	`preview.findings`' output. Filling never forks the virtual
+	draft; the bag clears with discard and publication.
+	"""
+	updatePreview(input: UpdatePreviewInput!): Procedure!
 }
 
 """
@@ -666,6 +894,33 @@ Where to put an element: `parentId` names a group or a section
 input PlacementInput {
 	parentId: ID
 	beforeId: ID
+}
+
+"""
+The draft's preview (G.12): scratch values an administrator fills
+the form with, and what admissibility makes of them. Empty until
+filled; cleared by discard and by publication.
+"""
+type Preview {
+	"""
+	Every written cell, in address order.
+	"""
+	cells: [Cell!]!
+	"""
+	Every `many` group's ordered item list (the row identities of
+	DESIGN §2.4). Not derivable from `cells`: a freshly added item
+	has no cells yet, and its server-minted id is what the next
+	write addresses.
+	"""
+	items: [ItemList!]!
+	"""
+	Admissibility of the values against the draft, evaluated per
+	compiled surface (`applicant` / `reviewer`) — the point of the
+	preview: required and format findings are watched, never
+	refused. Eligibility is not evaluated (no lifecycle in a
+	preview).
+	"""
+	findings: [AdmissibilityFinding!]!
 }
 
 type Procedure {
@@ -994,6 +1249,19 @@ input RemoveElementInput {
 }
 
 """
+Removes an item — and everything under it: its cells and any
+nested item lists.
+"""
+input RemoveItemInput {
+	groupId: ID!
+	"""
+	The enclosing scope's row path; omitted = the root scope.
+	"""
+	parent: [RowSegmentInput!]! = []
+	itemId: ID!
+}
+
+"""
 `reopenProcedure` input.
 """
 input ReopenProcedureInput {
@@ -1001,6 +1269,19 @@ input ReopenProcedureInput {
 	The procedure; the viewer must administer it.
 	"""
 	procedureId: ID!
+}
+
+"""
+Reorders a `many` group's list; `order` must be a permutation of
+the current items.
+"""
+input ReorderItemsInput {
+	groupId: ID!
+	"""
+	The enclosing scope's row path; omitted = the root scope.
+	"""
+	parent: [RowSegmentInput!]! = []
+	order: [ID!]!
 }
 
 """
@@ -1039,6 +1320,30 @@ type RevisionDraft {
 	schema — every column `ADDED`, `SAFE`.
 	"""
 	report: ImpactReport!
+	"""
+	The fillable preview (G.12): the draft's scratch value bag —
+	stale cells already pruned — with its admissibility findings,
+	evaluated per compiled surface only when selected. Empty until
+	filled; cleared by discard and by publication.
+	"""
+	preview: Preview!
+}
+
+"""
+One segment of a row path: which item of which `many` group
+(DESIGN §2.4).
+"""
+type RowSegment {
+	groupId: ID!
+	itemId: ID!
+}
+
+"""
+One row-path segment on input.
+"""
+input RowSegmentInput {
+	groupId: ID!
+	itemId: ID!
 }
 
 """
@@ -1057,6 +1362,18 @@ type Section {
 	"""
 	help: String
 	audience: Audience!
+}
+
+"""
+Writes one cell's state.
+"""
+input SetCellInput {
+	columnId: ID!
+	"""
+	The row path; omitted = the root scope.
+	"""
+	path: [RowSegmentInput!]! = []
+	state: CellStateInput!
 }
 
 """
@@ -1139,6 +1456,13 @@ type TeamRef {
 	organization: OrganizationRef!
 }
 
+type TextCell {
+	kind: CellKind!
+	columnId: ID!
+	path: [RowSegment!]!
+	value: String!
+}
+
 """
 A text column's format constraint (DESIGN §2.6): admissibility
 over text, checked per surface — never a type.
@@ -1207,6 +1531,18 @@ enum Unit {
 }
 
 """
+Takes a cell back to absent — distinct from setting it empty
+(DESIGN §2.4).
+"""
+input UnsetCellInput {
+	columnId: ID!
+	"""
+	The row path; omitted = the root scope.
+	"""
+	path: [RowSegmentInput!]! = []
+}
+
+"""
 `updateColumn` input: an omitted field is left as it is.
 """
 input UpdateColumnInput {
@@ -1254,6 +1590,21 @@ input UpdateNoteInput {
 	Wider than the parent's effective audience is `INVALID_EDIT`.
 	"""
 	audience: Audience
+}
+
+"""
+`updatePreview` input (G.12): an ordered batch, all-or-nothing.
+"""
+input UpdatePreviewInput {
+	"""
+	The procedure whose draft preview is written; the viewer must
+	administer it.
+	"""
+	procedureId: ID!
+	"""
+	Applied in order; the first refused write refuses the batch.
+	"""
+	writes: [CellWriteInput!]!
 }
 
 """

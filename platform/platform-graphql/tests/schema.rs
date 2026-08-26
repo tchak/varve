@@ -1893,3 +1893,429 @@ async fn the_draft_report_reads_live() {
         .collect();
     assert_eq!(kinds, ["CREATED", "PUBLISHED"]);
 }
+
+/// The preview selection every preview write and read shares (G.12).
+const PREVIEW: &str = "revisionDraft { inProgress preview {
+    cells { __typename
+        ... on TextCell { columnId path { groupId itemId } value }
+        ... on BooleanCell { columnId value }
+        ... on IntegerCell { columnId value }
+        ... on EnumCell { columnId optionIds }
+        ... on EmptyCell { columnId path { groupId itemId } }
+    }
+    items { groupId parent { groupId itemId } itemIds }
+    findings { __typename
+        ... on MissingRequiredFinding { surface columnId path { groupId itemId } }
+        ... on FormatViolationFinding { surface columnId path { groupId itemId } }
+    }
+} }";
+
+impl Api {
+    async fn write_preview(&self, who: &Principal, procedure_id: &str, writes: Value) -> Value {
+        let mut data = self
+            .data(
+                who,
+                &format!(
+                    "mutation($input: UpdatePreviewInput!) {{
+                        updatePreview(input: $input) {{ id {PREVIEW} }}
+                    }}"
+                ),
+                json!({ "input": { "procedureId": procedure_id, "writes": writes } }),
+            )
+            .await;
+        data["updatePreview"].take()
+    }
+
+    async fn write_preview_error(
+        &self,
+        who: &Principal,
+        procedure_id: &str,
+        writes: Value,
+    ) -> String {
+        self.error_code(
+            who,
+            &format!(
+                "mutation($input: UpdatePreviewInput!) {{
+                    updatePreview(input: $input) {{ id {PREVIEW} }}
+                }}"
+            ),
+            json!({ "input": { "procedureId": procedure_id, "writes": writes } }),
+        )
+        .await
+    }
+
+    async fn read_preview(&self, who: &Principal, procedure_id: &str) -> Value {
+        let mut data = self
+            .data(
+                who,
+                &format!("query($id: ID!) {{ procedure(id: $id) {{ id {PREVIEW} }} }}"),
+                json!({ "id": procedure_id }),
+            )
+            .await;
+        data["procedure"].take()
+    }
+}
+
+/// `(surface, columnId)` of every finding, sorted.
+fn finding_index(procedure: &Value) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = procedure["revisionDraft"]["preview"]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|f| {
+            (
+                f["surface"].as_str().expect("surface").to_owned(),
+                f["columnId"].as_str().expect("columnId").to_owned(),
+            )
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+fn preview_cells(procedure: &Value) -> &Vec<Value> {
+    procedure["revisionDraft"]["preview"]["cells"]
+        .as_array()
+        .expect("cells")
+}
+
+#[tokio::test]
+async fn the_fillable_preview_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("preview"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Bourse").await);
+
+    // A draft: one required public column, one `many` group with a
+    // required column inside.
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+        )
+        .await;
+    let nom = id_of(&p["revisionDraft"]["elements"][0]);
+    let p = api
+        .edit(
+            &alice,
+            "addGroup",
+            "AddGroupInput",
+            json!({ "procedureId": pid, "label": "Enfants", "cardinality": "MANY" }),
+        )
+        .await;
+    let enfants = id_of(&p["revisionDraft"]["elements"][1]);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Prénom", "type": { "text": {} },
+                    "placement": { "parentId": enfants } }),
+        )
+        .await;
+    let prenom = id_of(&p["revisionDraft"]["elements"][2]);
+
+    // The empty bag: no cells, no items — and the required column is
+    // missing on both compiled surfaces. The group's column has no
+    // rows yet, so it is not reachable and not missing (§2.6).
+    let read = api.read_preview(&alice, &pid).await;
+    assert_eq!(preview_cells(&read).len(), 0, "{read}");
+    assert_eq!(
+        finding_index(&read),
+        [
+            ("applicant".to_owned(), nom.clone()),
+            ("reviewer".to_owned(), nom.clone())
+        ],
+        "{read}"
+    );
+
+    // Filling the required cell clears its findings; the cell reads
+    // back typed.
+    let p = api
+        .write_preview(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": nom, "state": { "text": "Ada" } } }]),
+        )
+        .await;
+    assert_eq!(finding_index(&p), [] as [(String, String); 0], "{p}");
+    assert_eq!(preview_cells(&p)[0]["__typename"], "TextCell", "{p}");
+    assert_eq!(preview_cells(&p)[0]["value"], "Ada", "{p}");
+
+    // An item joins the `many` group: its server-minted id comes back
+    // in `items`, and the required column inside is now missing on
+    // that row, on both surfaces.
+    let p = api
+        .write_preview(&alice, &pid, json!([{ "addItem": { "groupId": enfants } }]))
+        .await;
+    let items = &p["revisionDraft"]["preview"]["items"];
+    assert_eq!(items[0]["groupId"], enfants.as_str(), "{p}");
+    let item = items[0]["itemIds"][0]
+        .as_str()
+        .expect("minted id")
+        .to_owned();
+    assert_eq!(
+        finding_index(&p),
+        [
+            ("applicant".to_owned(), prenom.clone()),
+            ("reviewer".to_owned(), prenom.clone())
+        ],
+        "{p}"
+    );
+
+    // Writing into the row through its path clears the finding.
+    let p = api
+        .write_preview(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": prenom,
+                "path": [{ "groupId": enfants, "itemId": item }],
+                "state": { "text": "Sam" } } }]),
+        )
+        .await;
+    assert_eq!(finding_index(&p), [] as [(String, String); 0], "{p}");
+    assert_eq!(preview_cells(&p).len(), 2, "{p}");
+
+    // Filling never forks: this whole time, the working buffer is the
+    // one the tree edits stored — the preview writes left `inProgress`
+    // exactly as the tree left it.
+    assert_eq!(p["revisionDraft"]["inProgress"], true, "{p}");
+
+    // A refused batch stores nothing: unknown column, then a kind
+    // mismatch on a known one — both `INVALID_WRITE`.
+    assert_eq!(
+        api.write_preview_error(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": "missing", "state": { "text": "x" } } }]),
+        )
+        .await,
+        "INVALID_WRITE"
+    );
+    assert_eq!(
+        api.write_preview_error(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": nom, "state": { "boolean": true } } }]),
+        )
+        .await,
+        "INVALID_WRITE"
+    );
+    // A malformed scalar literal fails input decoding, before any use
+    // case runs.
+    assert_eq!(
+        api.write_preview_error(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": nom, "state": { "empty": false } } }]),
+        )
+        .await,
+        "INVALID_INPUT"
+    );
+    let read = api.read_preview(&alice, &pid).await;
+    assert_eq!(preview_cells(&read).len(), 2, "{read}");
+
+    // Removing the item cascades: its cells go with it.
+    let p = api
+        .write_preview(
+            &alice,
+            &pid,
+            json!([{ "removeItem": { "groupId": enfants, "itemId": item } }]),
+        )
+        .await;
+    assert_eq!(preview_cells(&p).len(), 1, "{p}");
+    assert_eq!(p["revisionDraft"]["preview"]["items"], json!([]), "{p}");
+
+    // Stale cells are inert (G.12): the column leaves the tree and
+    // its cell disappears from the read — no error, nothing refused.
+    api.edit(
+        &alice,
+        "removeElement",
+        "RemoveElementInput",
+        json!({ "procedureId": pid, "id": nom }),
+    )
+    .await;
+    let read = api.read_preview(&alice, &pid).await;
+    assert_eq!(preview_cells(&read).len(), 0, "{read}");
+    assert_eq!(finding_index(&read), [] as [(String, String); 0], "{read}");
+}
+
+#[tokio::test]
+async fn the_preview_is_scoped_to_a_draft_cycle() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("preview-cycle"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Bourse").await);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+        )
+        .await;
+    let nom = id_of(&p["revisionDraft"]["elements"][0]);
+    api.data(
+        &alice,
+        PUBLISH,
+        json!({ "input": { "procedureId": pid, "confirm": true } }),
+    )
+    .await;
+
+    // Filling the pristine head's preview does not fork the virtual
+    // draft (G.12): the values store, `inProgress` stays false.
+    let p = api
+        .write_preview(
+            &alice,
+            &pid,
+            json!([{ "set": { "columnId": nom, "state": { "text": "Ada" } } }]),
+        )
+        .await;
+    assert_eq!(p["revisionDraft"]["inProgress"], false, "{p}");
+    assert_eq!(preview_cells(&p).len(), 1, "{p}");
+
+    // Discard clears the bag (a draft-cycle scope) and stays a no-op
+    // for the pristine tree.
+    let mut data = api
+        .data(
+            &alice,
+            &format!(
+                "mutation($input: DiscardRevisionDraftInput!) {{
+                    discardRevisionDraft(input: $input) {{ id {PREVIEW} }}
+                }}"
+            ),
+            json!({ "input": { "procedureId": pid } }),
+        )
+        .await;
+    let p = data["discardRevisionDraft"].take();
+    assert_eq!(preview_cells(&p).len(), 0, "{p}");
+    assert_eq!(p["revisionDraft"]["inProgress"], false, "{p}");
+
+    // Publication clears it too: fill, edit the tree, publish — the
+    // new head answers the empty bag.
+    api.write_preview(
+        &alice,
+        &pid,
+        json!([{ "set": { "columnId": nom, "state": { "text": "Ada" } } }]),
+    )
+    .await;
+    api.edit(
+        &alice,
+        "addColumn",
+        "AddColumnInput",
+        json!({ "procedureId": pid, "label": "Ville", "type": { "text": {} },
+                "required": false }),
+    )
+    .await;
+    let data = api
+        .data(
+            &alice,
+            PUBLISH,
+            json!({ "input": { "procedureId": pid, "confirm": true } }),
+        )
+        .await;
+    assert_eq!(data["publishRevision"]["published"], true, "{data}");
+    let read = api.read_preview(&alice, &pid).await;
+    assert_eq!(preview_cells(&read).len(), 0, "{read}");
+}
+
+#[tokio::test]
+async fn the_typed_client_fills_the_preview() {
+    use platform_client::preview::{
+        AdmissibilityFinding, Cell, CellStateInput, CellWriteInput, ProcedurePreviewQuery,
+        ProcedurePreviewVariables, UpdatePreview, UpdatePreviewInput, UpdatePreviewVariables,
+    };
+
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let org = api
+        .create_organization(&alice, &unique_slug("typed-preview"), "Org")
+        .await;
+    let pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Bourse").await);
+    let p = api
+        .edit(
+            &alice,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+        )
+        .await;
+    let nom = id_of(&p["revisionDraft"]["elements"][0]);
+
+    let client = api.client(&alice);
+    let written = platform_client::run(
+        &client,
+        UpdatePreview::build(UpdatePreviewVariables {
+            input: UpdatePreviewInput {
+                procedure_id: cynic::Id::new(&pid),
+                writes: vec![CellWriteInput::set(
+                    cynic::Id::new(&nom),
+                    vec![],
+                    CellStateInput::text("Ada"),
+                )],
+            },
+        }),
+    )
+    .await
+    .expect("updatePreview")
+    .update_preview;
+    let preview = &written.revision_draft.preview;
+    assert_eq!(preview.findings, []);
+    match &preview.cells[0] {
+        Cell::Text(cell) => {
+            assert_eq!(cell.column_id.inner(), nom);
+            assert_eq!(cell.value, "Ada");
+        }
+        other => panic!("expected a text cell, got {other:?}"),
+    }
+
+    // Blank the cell: the finding returns, the cell reads back
+    // written-blank — distinct from absent.
+    let written = platform_client::run(
+        &client,
+        UpdatePreview::build(UpdatePreviewVariables {
+            input: UpdatePreviewInput {
+                procedure_id: cynic::Id::new(&pid),
+                writes: vec![CellWriteInput::set(
+                    cynic::Id::new(&nom),
+                    vec![],
+                    CellStateInput::empty(),
+                )],
+            },
+        }),
+    )
+    .await
+    .expect("updatePreview")
+    .update_preview;
+    let preview = &written.revision_draft.preview;
+    assert!(matches!(preview.cells[0], Cell::Empty(_)), "{preview:?}");
+    assert!(
+        preview
+            .findings
+            .iter()
+            .all(|f| matches!(f, AdmissibilityFinding::MissingRequired(_))),
+        "{preview:?}"
+    );
+    assert_eq!(preview.findings.len(), 2, "{preview:?}");
+
+    let read = platform_client::run(
+        &client,
+        ProcedurePreviewQuery::build(ProcedurePreviewVariables {
+            id: cynic::Id::new(&pid),
+        }),
+    )
+    .await
+    .expect("read")
+    .procedure
+    .expect("visible");
+    assert_eq!(read.revision_draft.preview, written.revision_draft.preview);
+}
