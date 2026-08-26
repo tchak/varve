@@ -91,6 +91,15 @@ pub struct Procedure {
     /// publication. Deferred with the draft.
     pub published_tree: Deferred<Option<TreeBytes>>,
 
+    /// The fillable preview's value bag (P.4 *The fillable preview*,
+    /// graphql.md G.12): scratch record values, `None` until filled.
+    /// Beside the draft, never inside it — filling must not fork the
+    /// virtual draft, and `working_tree`'s `in_progress` stays a
+    /// statement about the tree. Cleared by
+    /// [`discard_revision_draft`] and by publication. Deferred with
+    /// the draft.
+    pub preview: Deferred<Option<crate::preview::PreviewBytes>>,
+
     /// The audit trail ([`crate::procedure_event`]), oldest first by
     /// id.
     #[has_many]
@@ -197,6 +206,7 @@ pub async fn find_procedure_with_revision_draft(
     Procedure::filter_by_id(id)
         .include(Procedure::fields().revision_draft())
         .include(Procedure::fields().published_tree())
+        .include(Procedure::fields().preview())
         .first()
         .exec(db)
         .await
@@ -273,15 +283,22 @@ pub async fn edit_revision_draft(
     Ok(tree)
 }
 
-/// Drops the procedure's draft, if any. Not an event (P.4: the
-/// draft is a working buffer — discarding it is authoring workflow,
-/// the same altitude as the autosaves the log deliberately omits).
-/// Same loading and concurrency contract as [`edit_revision_draft`].
+/// Drops the procedure's draft, if any — and the preview bag with it
+/// (G.12: the preview is scoped to a draft cycle). Not an event (P.4:
+/// the draft is a working buffer — discarding it is authoring
+/// workflow, the same altitude as the autosaves the log deliberately
+/// omits). Same loading and concurrency contract as
+/// [`edit_revision_draft`].
 pub async fn discard_revision_draft(
     db: &mut toasty::Db,
     procedure: &mut Procedure,
 ) -> toasty::Result<()> {
-    procedure.update().revision_draft(None).exec(db).await
+    procedure
+        .update()
+        .revision_draft(None)
+        .preview(None)
+        .exec(db)
+        .await
 }
 
 /// Errors of the persisted lifecycle transitions.

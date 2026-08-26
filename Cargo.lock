@@ -4399,10 +4399,12 @@ dependencies = [
  "varve-core",
  "varve-impact",
  "varve-logic",
+ "varve-record",
  "varve-schema",
  "varve-service",
  "varve-store",
  "varve-surface",
+ "varve-value",
 ]
 
 [[package]]

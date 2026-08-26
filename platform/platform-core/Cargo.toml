@@ -33,6 +33,13 @@ serde_json = "1"
 # the kernel `Schema`, validated by the kernel on every edit.
 varve-core = { path = "../../crates/varve-core" }
 varve-schema = { path = "../../crates/varve-schema" }
+# `preview` (G.12): the fillable preview's scratch value bag is a
+# kernel `RecordValues`, written through the kernel patch ops and
+# type-checked by kernel conformance; its stored encoding reuses
+# `varve-record`'s canonical cell/path codecs (plain JSON column, no
+# hashing — the shapes stay the kernel's).
+varve-value = { path = "../../crates/varve-value" }
+varve-record = { path = "../../crates/varve-record" }
 # `surfaces`: compiled rules are varve-logic exprs (the vacuous
 # always-required rule).
 varve-logic = { path = "../../crates/varve-logic" }

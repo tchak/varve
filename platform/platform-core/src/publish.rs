@@ -244,6 +244,8 @@ where
         .state_since(since)
         .latest_publication(Some(publication.as_str().to_owned()))
         .revision_draft(None)
+        // The preview bag is scoped to the draft cycle (G.12).
+        .preview(None)
         .published_tree(Some(crate::procedure::TreeBytes::encode(&tree)))
         .exec(&mut **guard)
         .await?;
