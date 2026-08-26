@@ -230,6 +230,119 @@ pub const EN: &[(&str, &str)] = &[
         "The \u{201c}{$from}\u{201d} group is renamed \u{201c}{$to}\u{201d} \u{2014} answers are untouched.",
     ),
     (
+        "surface.impact.surface-added",
+        ".input {$surface :string}\n\
+         .match $surface\n\
+         applicant {{The applicant form is created.}}\n\
+         * {{The reviewer view is created.}}",
+    ),
+    (
+        "surface.impact.surface-removed",
+        ".input {$surface :string}\n\
+         .match $surface\n\
+         applicant {{The applicant form is retired.}}\n\
+         * {{The reviewer view is retired.}}",
+    ),
+    (
+        "surface.impact.section-added",
+        "The \u{201c}{$label}\u{201d} section is added.",
+    ),
+    (
+        "surface.impact.section-removed",
+        "The \u{201c}{$label}\u{201d} section is removed.",
+    ),
+    (
+        "surface.impact.section-retitled",
+        "The \u{201c}{$from}\u{201d} section is renamed \u{201c}{$to}\u{201d}.",
+    ),
+    (
+        "surface.impact.section-help-changed",
+        "The guidance of the \u{201c}{$label}\u{201d} section is updated.",
+    ),
+    ("surface.impact.note-added", "An explanatory note is added."),
+    (
+        "surface.impact.note-removed",
+        "An explanatory note is removed.",
+    ),
+    (
+        "surface.impact.note-changed",
+        "An explanatory note is updated.",
+    ),
+    (
+        "surface.impact.column-presented",
+        "\u{201c}{$label}\u{201d} joins the form.",
+    ),
+    (
+        "surface.impact.column-withdrawn",
+        "\u{201c}{$label}\u{201d} leaves the form.",
+    ),
+    (
+        "surface.impact.prompt-changed",
+        "The question for \u{201c}{$label}\u{201d} is reworded.",
+    ),
+    (
+        "surface.impact.help-changed",
+        "The guidance for \u{201c}{$label}\u{201d} is updated.",
+    ),
+    (
+        "surface.impact.group-prompt-changed",
+        "The prompt of the \u{201c}{$label}\u{201d} group is updated.",
+    ),
+    (
+        "surface.impact.requiredness-tightened",
+        "\u{201c}{$label}\u{201d} becomes required.",
+    ),
+    (
+        "surface.impact.requiredness-loosened",
+        "\u{201c}{$label}\u{201d} is no longer required.",
+    ),
+    (
+        "surface.impact.requiredness-changed",
+        "The conditions under which \u{201c}{$label}\u{201d} is required change.",
+    ),
+    (
+        "surface.impact.visibility-changed",
+        "The conditions under which \u{201c}{$label}\u{201d} is shown change.",
+    ),
+    (
+        "surface.impact.format-tightened",
+        "\u{201c}{$label}\u{201d} gains a format constraint.",
+    ),
+    (
+        "surface.impact.format-loosened",
+        "\u{201c}{$label}\u{201d} loses its format constraint.",
+    ),
+    (
+        "surface.impact.format-changed",
+        "The format constraint on \u{201c}{$label}\u{201d} changes.",
+    ),
+    (
+        "surface.impact.write-policy-changed",
+        "Who may write \u{201c}{$label}\u{201d} changes.",
+    ),
+    (
+        "surface.impact.ineligibility-added",
+        "An ineligibility rule is added.",
+    ),
+    (
+        "surface.impact.ineligibility-removed",
+        "The ineligibility rule is removed.",
+    ),
+    (
+        "surface.impact.ineligibility-rule-changed",
+        "The ineligibility rule changes.",
+    ),
+    (
+        "surface.impact.ineligibility-message-changed",
+        "The ineligibility message is reworded.",
+    ),
+    (
+        "surface.impact.lapse",
+        "Case files in progress may no longer be admissible.",
+    ),
+    ("surface.impact.applicant-only", "Applicant form only."),
+    ("surface.impact.reviewer-only", "Reviewer view only."),
+    (
         "schema.impact.options-removed",
         ".input {$n :integer}\n\
          .match $n\n\
@@ -673,6 +786,128 @@ pub const FR: &[(&str, &str)] = &[
     (
         "schema.impact.group-relabeled",
         "Le groupe «\u{a0}{$from}\u{a0}» est renommé «\u{a0}{$to}\u{a0}» \u{2014} les réponses sont inchangées.",
+    ),
+    (
+        "surface.impact.surface-added",
+        ".input {$surface :string}\n\
+         .match $surface\n\
+         applicant {{Le formulaire usager est créé.}}\n\
+         * {{La vue instructeur est créée.}}",
+    ),
+    (
+        "surface.impact.surface-removed",
+        ".input {$surface :string}\n\
+         .match $surface\n\
+         applicant {{Le formulaire usager est retiré.}}\n\
+         * {{La vue instructeur est retirée.}}",
+    ),
+    (
+        "surface.impact.section-added",
+        "La section «\u{a0}{$label}\u{a0}» est ajoutée.",
+    ),
+    (
+        "surface.impact.section-removed",
+        "La section «\u{a0}{$label}\u{a0}» est supprimée.",
+    ),
+    (
+        "surface.impact.section-retitled",
+        "La section «\u{a0}{$from}\u{a0}» est renommée «\u{a0}{$to}\u{a0}».",
+    ),
+    (
+        "surface.impact.section-help-changed",
+        "L'aide de la section «\u{a0}{$label}\u{a0}» est mise à jour.",
+    ),
+    (
+        "surface.impact.note-added",
+        "Une note explicative est ajoutée.",
+    ),
+    (
+        "surface.impact.note-removed",
+        "Une note explicative est supprimée.",
+    ),
+    (
+        "surface.impact.note-changed",
+        "Une note explicative est mise à jour.",
+    ),
+    (
+        "surface.impact.column-presented",
+        "«\u{a0}{$label}\u{a0}» apparaît sur le formulaire.",
+    ),
+    (
+        "surface.impact.column-withdrawn",
+        "«\u{a0}{$label}\u{a0}» quitte le formulaire.",
+    ),
+    (
+        "surface.impact.prompt-changed",
+        "La question de «\u{a0}{$label}\u{a0}» est reformulée.",
+    ),
+    (
+        "surface.impact.help-changed",
+        "L'aide de «\u{a0}{$label}\u{a0}» est mise à jour.",
+    ),
+    (
+        "surface.impact.group-prompt-changed",
+        "L'intitulé du groupe «\u{a0}{$label}\u{a0}» est mis à jour.",
+    ),
+    (
+        "surface.impact.requiredness-tightened",
+        "«\u{a0}{$label}\u{a0}» devient obligatoire.",
+    ),
+    (
+        "surface.impact.requiredness-loosened",
+        "«\u{a0}{$label}\u{a0}» n'est plus obligatoire.",
+    ),
+    (
+        "surface.impact.requiredness-changed",
+        "Les conditions rendant «\u{a0}{$label}\u{a0}» obligatoire changent.",
+    ),
+    (
+        "surface.impact.visibility-changed",
+        "Les conditions d'affichage de «\u{a0}{$label}\u{a0}» changent.",
+    ),
+    (
+        "surface.impact.format-tightened",
+        "«\u{a0}{$label}\u{a0}» gagne une contrainte de format.",
+    ),
+    (
+        "surface.impact.format-loosened",
+        "«\u{a0}{$label}\u{a0}» perd sa contrainte de format.",
+    ),
+    (
+        "surface.impact.format-changed",
+        "La contrainte de format de «\u{a0}{$label}\u{a0}» change.",
+    ),
+    (
+        "surface.impact.write-policy-changed",
+        "Les droits d'écriture de «\u{a0}{$label}\u{a0}» changent.",
+    ),
+    (
+        "surface.impact.ineligibility-added",
+        "Une règle d'inéligibilité est ajoutée.",
+    ),
+    (
+        "surface.impact.ineligibility-removed",
+        "La règle d'inéligibilité est supprimée.",
+    ),
+    (
+        "surface.impact.ineligibility-rule-changed",
+        "La règle d'inéligibilité change.",
+    ),
+    (
+        "surface.impact.ineligibility-message-changed",
+        "Le message d'inéligibilité est reformulé.",
+    ),
+    (
+        "surface.impact.lapse",
+        "Des dossiers en cours peuvent cesser d'être admissibles.",
+    ),
+    (
+        "surface.impact.applicant-only",
+        "Formulaire usager uniquement.",
+    ),
+    (
+        "surface.impact.reviewer-only",
+        "Vue instructeur uniquement.",
     ),
     (
         "schema.impact.options-removed",

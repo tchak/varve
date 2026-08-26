@@ -564,18 +564,22 @@ argument on G.9, G.10 and the kernel store shape.
 1. **The events list is the history; no new list.**
    `Procedure.events` (G.9.3) already carries the timeline —
    lifecycle transitions with actors and dates, bounded by design —
-   and the `published` rows carry `{ revision, base }` facts
-   (G.10.4). History needed no new query, only those facts made
-   API-visible. Newest-first is presentation; the log stays oldest
+   and the `published` rows carry `{ publication, base }` facts
+   (G.10.4; amended 2026-08-26 — publication content addresses,
+   DESIGN §2.13 decision 9). History needed no new query, only those
+   facts made API-visible. Newest-first is presentation; the log stays oldest
    first.
 2. **`ProcedureEvent` becomes an interface** — the schema's first —
    with the G.9.3 row as its shared shape (`id`, `kind`, `actor`,
    `createdAt`) and one member per kind:
    `ProcedureCreatedEvent | ProcedurePublishedEvent |
    ProcedureClosedEvent | ProcedureReopenedEvent`. Only
-   `ProcedurePublishedEvent` adds fields: `revision: ID!` and
+   `ProcedurePublishedEvent` adds fields: `publication: ID!` and
    `base: ID` (`null` = first publication — the honest optional the
-   platform facts already store). This is G.2 rule 5 applied to
+   platform facts already store). **Amended 2026-08-26 (was
+   `revision: ID!`):** the facts are publication content addresses
+   (DESIGN §2.13 decision 9) — a revision id cannot tell two
+   surface-only publications apart. This is G.2 rule 5 applied to
    events — facts live where they are meaningful, so no nullable
    `revision` on a `CLOSED` row — but as an interface, not a union:
    the state unions share nothing, while every event shares the
@@ -594,16 +598,18 @@ argument on G.9, G.10 and the kernel store shape.
 4. **The diff *is* the report, recomputed.**
    `ProcedurePublishedEvent.report: ImpactReport!` — the exact
    classification `publishRevision` gated on (G.10.1), computed at
-   read time from the two content-addressed schemas
-   (`RevisionStore::schema` point lookups; a `null` base classifies
-   against the empty schema, so a first publication renders as the
-   initial column list with no special case) through the pure
-   classifier — the G.10.5 move again, resolved only when the field
-   is selected. Recomputation is *exact* because today's report is
-   a pure function of the two schemas; the day record assessments
-   join it, the historical read keeps the schema-only
-   classification and persisting the confirmed report becomes G.5
-   Q4. With the labels now on the entries (below), the report needs
+   read time from the two publications (resolved through the
+   lineage's event log — each arrives with its schema, and its
+   surface map names the stored surfaces; a `null` base classifies
+   against the empty schema and the empty surface set, so a first
+   publication renders as the initial column and surface list with
+   no special case) through the pure classifier and the §3.1 surface
+   diff (amended 2026-08-26) — the G.10.5 move again, resolved only
+   when the field is selected. Recomputation is *exact* because
+   today's report pair is a pure function of the two publications'
+   content; the day record assessments join it, the historical read
+   keeps the static classification and persisting the confirmed
+   report becomes G.5 Q4. With the labels now on the entries (below), the report needs
    no companion tree fetch to render.
 5. **`ColumnImpactEntry.label: String!`** (amends G.10.2): resolved
    server-side from the next schema, falling back to the base
@@ -620,3 +626,22 @@ argument on G.9, G.10 and the kernel store shape.
    show one. `null` for an unknown id, the G.6.2 absent/invisible
    rule; no breach of G.2 rule 1 (a scoped point lookup inside the
    full object, not a traversal).
+7. **The report carries both §3.1 halves (settled 2026-08-26).**
+   `ImpactReport` grows the surface section and the rename entries,
+   everywhere the type appears — the mutation result, the draft's
+   live report, the event diff: `worst` becomes the composed
+   verdict (the worst class of the schema and surface halves — the
+   exact class the gate used, so a client never re-derives it);
+   `columns` gains `RELABELED` with `renamedFrom: String` (the base
+   label; `label` is already the new one) instead of a rename
+   vanishing as unchanged; `relabeledGroups: [GroupRelabelEntry!]!`
+   names group renames; and `surfaces: [SurfaceChangeEntry!]!`
+   carries the §3.1 diff — `surface` (`applicant` | `reviewer`),
+   authoritative `class`, a `SurfaceChangeKind` of 26 members, and
+   server-resolved naming (`label` from the schemas, section titles
+   from the kernel diff, `from`/`to` for retitles) — G.11.5's rule
+   extended: the report needs no companion fetch to render. The
+   platform renders the pair deduplicated (one line when a change
+   holds on both compiled surfaces, a qualifier when not) with a
+   lapse sentence on `CHECKED` entries; that presentation is the
+   app's, not the API's.

@@ -145,33 +145,51 @@ impl ProcedurePublishedEvent {
         &self,
         ctx: &Context<'_>,
     ) -> async_graphql::Result<crate::impact::ImpactReport> {
-        use varve_store::RevisionStore;
+        use varve_store::{RevisionStore, SurfaceStore};
         let (_, mut db) = crate::session(ctx)?;
         let shared: platform_core::SharedExecutor =
             tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
         let store = platform_store::PlatformStore::new(&shared);
         // Publication ids resolve through the lineage's event log
         // (§2.13 decision 9) — each publication arrives with its
-        // schema.
+        // schema, and its surface map names the stored surfaces the
+        // §3.1 half diffs.
         let lineage = varve_store::LineageId::new(self.row.event.procedure_id.to_string());
         let publications = store.publications(&lineage).await.map_err(internal)?;
-        let schema_of = |id: &str| {
+        let event_of = |id: &str| {
             publications
                 .iter()
                 .find(|(publication, _)| publication.id().as_str() == id)
-                .map(|(_, schema)| schema.clone())
         };
-        let base = match &self.facts.base {
-            Some(id) => Some(
-                schema_of(id).ok_or_else(|| internal("publication's base is not in the store"))?,
-            ),
-            None => None,
+        let surfaces_of =
+            async |publication: &varve_revision::Publication| {
+                let mut surfaces = Vec::new();
+                for hash in publication.surfaces.values() {
+                    surfaces.push(store.surface(hash).await.map_err(internal)?.ok_or_else(
+                        || internal("a publication names a surface the store does not hold"),
+                    )?);
+                }
+                async_graphql::Result::<Vec<varve_surface::Surface>>::Ok(surfaces)
+            };
+        let (base, base_surfaces) = match &self.facts.base {
+            Some(id) => {
+                let (publication, schema) = event_of(id)
+                    .ok_or_else(|| internal("publication's base is not in the store"))?;
+                (Some(schema.clone()), surfaces_of(publication).await?)
+            }
+            None => (None, Vec::new()),
         };
-        let next = schema_of(&self.facts.publication)
+        let (publication, next) = event_of(&self.facts.publication)
             .ok_or_else(|| internal("published event's publication is not in the store"))?;
-        let report = platform_core::draft_report(base.as_ref(), &next).map_err(internal)?;
-        let labels = platform_core::ColumnLabels::resolve(base.as_ref(), &next);
-        Ok(crate::impact::ImpactReport::labeled(&report, &labels))
+        let next_surfaces = surfaces_of(publication).await?;
+        let report = platform_core::draft_report(base.as_ref(), next).map_err(internal)?;
+        let surface_report = varve_surface::diff_sets(&base_surfaces, &next_surfaces);
+        let labels = platform_core::ColumnLabels::resolve(base.as_ref(), next);
+        Ok(crate::impact::ImpactReport::labeled(
+            &report,
+            &surface_report,
+            &labels,
+        ))
     }
 }
 

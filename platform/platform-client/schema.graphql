@@ -437,11 +437,14 @@ type IbanFormat {
 }
 
 """
-What a publication would do to the records reading through it.
+What a publication would do to the records reading through it —
+both halves of the §3.1 story: the schema classification and the
+surface (admissibility + presentation) diff.
 """
 type ImpactReport {
 	"""
-	The one-line verdict: the worst class any column hits.
+	The one-line verdict: the worst class either half hits — the
+	exact class `publishRevision` gates on.
 	"""
 	worst: ChangeClass!
 	"""
@@ -452,6 +455,11 @@ type ImpactReport {
 	Groups whose labels changed (§3.1): safe, reported.
 	"""
 	relabeledGroups: [GroupRelabelEntry!]!
+	"""
+	The §3.1 surface diff: admissibility and presentation changes,
+	classified by their admissibility delta.
+	"""
+	surfaces: [SurfaceChangeEntry!]!
 }
 
 type IntegerType {
@@ -1056,6 +1064,59 @@ URL/API handle of an organization: `[a-z0-9-]`, non-empty. Input
 is trimmed and lowercased before validation.
 """
 scalar Slug
+
+"""
+One §3.1 surface change, named server-side like the column
+entries: `label` carries the schema label of the column or group
+the change touches, or a section's title — whichever the change
+names; `from`/`to` carry both sides of a retitle.
+"""
+type SurfaceChangeEntry {
+	"""
+	Which surface: `applicant` or `reviewer` (P.4's fixed pair).
+	"""
+	surface: ID!
+	class: ChangeClass!
+	change: SurfaceChangeKind!
+	label: String
+	from: String
+	to: String
+}
+
+"""
+§3.1's vocabulary: presentation kinds are safe; tightening kinds
+are checked; loosening kinds are safe — the entry's `class` is
+authoritative (visibility, e.g., classifies by whether a required
+rule rides on the column).
+"""
+enum SurfaceChangeKind {
+	SURFACE_ADDED
+	SURFACE_REMOVED
+	SECTION_ADDED
+	SECTION_REMOVED
+	SECTION_RETITLED
+	SECTION_HELP_CHANGED
+	NOTE_ADDED
+	NOTE_REMOVED
+	NOTE_CHANGED
+	COLUMN_PRESENTED
+	COLUMN_WITHDRAWN
+	PROMPT_CHANGED
+	HELP_CHANGED
+	GROUP_PROMPT_CHANGED
+	REQUIREDNESS_TIGHTENED
+	REQUIREDNESS_LOOSENED
+	REQUIREDNESS_CHANGED
+	VISIBILITY_CHANGED
+	FORMAT_TIGHTENED
+	FORMAT_LOOSENED
+	FORMAT_CHANGED
+	WRITE_POLICY_CHANGED
+	INELIGIBILITY_ADDED
+	INELIGIBILITY_REMOVED
+	INELIGIBILITY_RULE_CHANGED
+	INELIGIBILITY_MESSAGE_CHANGED
+}
 
 type Team {
 	id: ID!

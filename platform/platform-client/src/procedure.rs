@@ -388,6 +388,53 @@ pub struct ImpactReport {
     pub worst: ChangeClass,
     pub columns: Vec<ColumnImpactEntry>,
     pub relabeled_groups: Vec<GroupRelabelEntry>,
+    pub surfaces: Vec<SurfaceChangeEntry>,
+}
+
+/// One §3.1 surface change, named server-side: `label` is the schema
+/// label (or section title) the change touches; `from`/`to` carry a
+/// retitle's both sides.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "SurfaceChangeEntry")]
+pub struct SurfaceChangeEntry {
+    pub surface: cynic::Id,
+    pub class: ChangeClass,
+    pub change: SurfaceChangeKind,
+    pub label: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+/// §3.1's vocabulary; the entry's `class` is authoritative.
+#[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[cynic(graphql_type = "SurfaceChangeKind")]
+pub enum SurfaceChangeKind {
+    SurfaceAdded,
+    SurfaceRemoved,
+    SectionAdded,
+    SectionRemoved,
+    SectionRetitled,
+    SectionHelpChanged,
+    NoteAdded,
+    NoteRemoved,
+    NoteChanged,
+    ColumnPresented,
+    ColumnWithdrawn,
+    PromptChanged,
+    HelpChanged,
+    GroupPromptChanged,
+    RequirednessTightened,
+    RequirednessLoosened,
+    RequirednessChanged,
+    VisibilityChanged,
+    FormatTightened,
+    FormatLoosened,
+    FormatChanged,
+    WritePolicyChanged,
+    IneligibilityAdded,
+    IneligibilityRemoved,
+    IneligibilityRuleChanged,
+    IneligibilityMessageChanged,
 }
 
 /// A renamed group (§3.1): safe, reported.

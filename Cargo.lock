@@ -4422,6 +4422,7 @@ dependencies = [
  "uuid",
  "varve-core",
  "varve-impact",
+ "varve-revision",
  "varve-schema",
  "varve-store",
  "varve-surface",

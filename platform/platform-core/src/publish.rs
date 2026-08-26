@@ -59,41 +59,55 @@ pub enum PublishProcedureOutcome {
     },
 }
 
-/// Column labels for naming report entries (G.11.5): the next
-/// schema's, the base schema filling in the columns the next no
-/// longer holds — a `Removed` entry is named by the schema it was
-/// removed *from*.
+/// Column and group labels for naming report entries (G.11.5): the
+/// next schema's, the base schema filling in what the next no longer
+/// holds — a `Removed` entry is named by the schema it was removed
+/// *from*. Groups joined for the surface report's entries (§3.1: a
+/// group prompt change is named by the group's schema label).
 #[derive(Debug, Default)]
-pub struct ColumnLabels(std::collections::HashMap<ColumnId, String>);
+pub struct ColumnLabels {
+    columns: std::collections::HashMap<ColumnId, String>,
+    groups: std::collections::HashMap<varve_core::GroupId, String>,
+}
 
 impl ColumnLabels {
     /// Resolves labels from the two sides of a classification; the
-    /// next schema wins where both hold a column.
+    /// next schema wins where both hold an element.
     pub fn resolve(base: Option<&varve_schema::Schema>, next: &varve_schema::Schema) -> Self {
         fn collect(
             elements: &[varve_schema::Element],
-            into: &mut std::collections::HashMap<ColumnId, String>,
+            columns: &mut std::collections::HashMap<ColumnId, String>,
+            groups: &mut std::collections::HashMap<varve_core::GroupId, String>,
         ) {
             for element in elements {
                 match element {
                     varve_schema::Element::Column(c) => {
-                        into.insert(c.id.clone(), c.label.clone());
+                        columns.insert(c.id.clone(), c.label.clone());
                     }
-                    varve_schema::Element::Group(g) => collect(&g.children, into),
+                    varve_schema::Element::Group(g) => {
+                        groups.insert(g.id.clone(), g.label.clone());
+                        collect(&g.children, columns, groups);
+                    }
                 }
             }
         }
-        let mut labels = std::collections::HashMap::new();
+        let mut columns = std::collections::HashMap::new();
+        let mut groups = std::collections::HashMap::new();
         if let Some(base) = base {
-            collect(&base.root, &mut labels);
+            collect(&base.root, &mut columns, &mut groups);
         }
-        collect(&next.root, &mut labels);
-        Self(labels)
+        collect(&next.root, &mut columns, &mut groups);
+        Self { columns, groups }
     }
 
     /// The label for a column, if either schema held it.
     pub fn get(&self, id: &ColumnId) -> Option<&str> {
-        self.0.get(id).map(String::as_str)
+        self.columns.get(id).map(String::as_str)
+    }
+
+    /// The label for a group, if either schema held it.
+    pub fn get_group(&self, id: &varve_core::GroupId) -> Option<&str> {
+        self.groups.get(id).map(String::as_str)
     }
 }
 
@@ -265,6 +279,19 @@ pub fn draft_report(
         next,
         &varve_schema::NomenclatureTable::new(),
     )
+}
+
+/// The surface half of the pair (§3.1), computable at any time from
+/// a draft's compiled pair against the base publication's stored
+/// surfaces — empty `base` (a first publication) reports the initial
+/// surface list, the same one-code-path rule as [`draft_report`].
+pub fn draft_surface_report(
+    base: &[varve_surface::Surface],
+    tree: &Tree,
+) -> varve_surface::SurfaceReport {
+    let schema = tree.schema();
+    let revision = revision_id(&schema);
+    varve_surface::diff_sets(base, &compile_surfaces(tree, &revision).into_vec())
 }
 
 /// G.7: the editor never seeds an option, an empty choice is a draft

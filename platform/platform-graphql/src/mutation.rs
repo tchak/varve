@@ -501,10 +501,15 @@ impl Mutation {
             .await
         };
         match outcome {
-            Ok(PublishProcedureOutcome::Published { report, labels, .. }) => {
+            Ok(PublishProcedureOutcome::Published {
+                report,
+                surface_report,
+                labels,
+                ..
+            }) => {
                 tx.commit().await.map_err(internal)?;
                 Ok(crate::PublishRevisionResult {
-                    report: ImpactReport::labeled(&report, &labels),
+                    report: ImpactReport::labeled(&report, &surface_report, &labels),
                     published: true,
                     procedure: Procedure {
                         procedure,
@@ -513,18 +518,18 @@ impl Mutation {
                 })
             }
             // Nothing was written; the dropped transaction rolls back.
-            // The surface report reaches the API with G.11's §3.1
-            // section (platform step 4); the gate already composed it.
-            Ok(PublishProcedureOutcome::RequiresConfirmation { report, labels, .. }) => {
-                Ok(crate::PublishRevisionResult {
-                    report: ImpactReport::labeled(&report, &labels),
-                    published: false,
-                    procedure: Procedure {
-                        procedure,
-                        organization: OrganizationRef::from(&organization),
-                    },
-                })
-            }
+            Ok(PublishProcedureOutcome::RequiresConfirmation {
+                report,
+                surface_report,
+                labels,
+            }) => Ok(crate::PublishRevisionResult {
+                report: ImpactReport::labeled(&report, &surface_report, &labels),
+                published: false,
+                procedure: Procedure {
+                    procedure,
+                    organization: OrganizationRef::from(&organization),
+                },
+            }),
             Err(error) => Err(publish_error(error)),
         }
     }

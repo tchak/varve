@@ -197,6 +197,18 @@ async fn the_history_lists_events_and_each_publication_answers_its_diff() {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     let location = response.headers()[header::LOCATION].to_str().unwrap();
     assert!(location.contains("publish=confirm"), "{location}");
+    // The confirmation names the surface half (§3.1): the required
+    // newcomer joins the form, in-flight files may lapse — one line,
+    // the applicant/reviewer pair deduplicated.
+    let html = page(&router, &cookie, location).await;
+    assert!(
+        html.contains("\u{201c}Ville\u{201d} joins the form."),
+        "{html}"
+    );
+    assert!(
+        html.contains("Case files in progress may no longer be admissible."),
+        "{html}"
+    );
     act(
         &router,
         &cookie,
@@ -288,4 +300,78 @@ async fn the_history_speaks_french() {
         "{html}"
     );
     assert!(html.contains("Fil d'Ariane"), "{html}");
+}
+
+/// The bug that opened Q23, end to end: a section rename is a
+/// surface-only publication — same revision id, a distinct
+/// publication — that publishes free (presentation is safe, §3.1)
+/// and whose diff page *names the rename* instead of showing "no
+/// changes".
+#[tokio::test]
+async fn a_section_rename_publishes_free_and_shows_in_the_diff() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let cookie = member(&router, "history-rename").await;
+    let organization = create_organization(&router, &cookie, "Mairie").await;
+    let procedure = create_procedure(&router, &cookie, &organization, "Aide").await;
+
+    // A section, then the first publication.
+    let response = router
+        .handle(post(
+            &format!("{procedure}/schema/add"),
+            &[("cookie", &cookie)],
+            form_body(&[("what", "section"), ("label", "Identité")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers()[header::LOCATION].to_str().unwrap();
+    let section = location
+        .split("selected=")
+        .nth(1)
+        .expect("add selects the section")
+        .split('&')
+        .next()
+        .unwrap()
+        .to_owned();
+    act(
+        &router,
+        &cookie,
+        &format!("{procedure}/schema/publish"),
+        &[],
+    )
+    .await;
+
+    // The rename, and the surface-only publication: free — no
+    // confirmation state on the way.
+    act(
+        &router,
+        &cookie,
+        &format!("{procedure}/schema/elements/{section}/update"),
+        &[("title", "Votre identité")],
+    )
+    .await;
+    act(
+        &router,
+        &cookie,
+        &format!("{procedure}/schema/publish"),
+        &[],
+    )
+    .await;
+
+    // Two publications, and the newest diff names the rename.
+    let html = page(&router, &cookie, &procedure).await;
+    let hrefs = diff_hrefs(&html);
+    assert_eq!(hrefs.len(), 2, "{html}");
+    let html = page(&router, &cookie, &hrefs[0]).await;
+    assert!(
+        html.contains(
+            "The \u{201c}Identité\u{201d} section is renamed \u{201c}Votre identité\u{201d}."
+        ),
+        "{html}"
+    );
+    assert!(
+        !html.contains("No changes against the published revision."),
+        "{html}"
+    );
 }

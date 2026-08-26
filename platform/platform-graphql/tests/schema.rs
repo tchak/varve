@@ -1484,7 +1484,11 @@ async fn the_typed_client_walks_the_lifecycle() {
 const PUBLISH: &str = "mutation($input: PublishRevisionInput!) {
     publishRevision(input: $input) {
         published
-        report { worst columns { columnId class change } }
+        report {
+            worst
+            columns { columnId class change }
+            surfaces { surface class change label }
+        }
         procedure {
             id
             state { __typename ... on ProcedurePublishedState { since } }
@@ -1723,11 +1727,32 @@ async fn history_reads_each_publication_and_its_diff() {
     .await;
     // §3.1: the added column is required (the public default), so
     // the *surface* half of the report tightens admissibility while
-    // the schema half stays SAFE — the publication gates, and
-    // confirms.
+    // every schema entry stays SAFE — the composed verdict is
+    // CHECKED, the publication gates, and the surface section names
+    // the tightening on both surfaces.
     let gated = api.data(&alice, PUBLISH, input.clone()).await;
     assert_eq!(gated["publishRevision"]["published"], false, "{gated}");
-    assert_eq!(gated["publishRevision"]["report"]["worst"], "SAFE");
+    let report = &gated["publishRevision"]["report"];
+    assert_eq!(report["worst"], "CHECKED", "{report}");
+    assert!(
+        report["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["class"] == "SAFE"),
+        "{report}"
+    );
+    let presented: Vec<&Value> = report["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["change"] == "COLUMN_PRESENTED")
+        .collect();
+    assert_eq!(presented.len(), 2, "{report}");
+    for entry in presented {
+        assert_eq!(entry["class"], "CHECKED");
+        assert_eq!(entry["label"], "Ville");
+    }
     let confirmed = api
         .data(
             &alice,
@@ -1777,7 +1802,9 @@ async fn history_reads_each_publication_and_its_diff() {
         )
         .await;
     let report = &second["procedure"]["event"]["report"];
-    assert_eq!(report["worst"], "SAFE");
+    // The recomputed diff composes both halves, exactly as the gate
+    // did (§3.1): the required addition keeps reading CHECKED.
+    assert_eq!(report["worst"], "CHECKED");
     let mut named: Vec<(&str, &str)> = report["columns"]
         .as_array()
         .unwrap()

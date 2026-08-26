@@ -81,32 +81,43 @@ impl RevisionDraft {
         &self,
         ctx: &async_graphql::Context<'_>,
     ) -> async_graphql::Result<crate::impact::ImpactReport> {
-        use varve_store::RevisionStore;
+        use varve_store::{RevisionStore, SurfaceStore};
         let (_, mut db) = crate::session(ctx)?;
-        let base = match &self.base {
+        // The base is a publication id (§2.13 decision 9), resolved
+        // through the lineage's event log — each publication arrives
+        // with its schema, and its surface map names the stored
+        // surfaces the §3.1 half diffs the draft's compiled pair
+        // against.
+        let (base, base_surfaces) = match &self.base {
             Some(id) => {
                 let shared: platform_core::SharedExecutor =
                     tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
                 let store = platform_store::PlatformStore::new(&shared);
-                // The base is a publication id (§2.13 decision 9),
-                // resolved through the lineage's event log — each
-                // publication arrives with its schema.
                 let lineage = varve_store::LineageId::new(self.procedure_id.to_string());
                 let publications = store.publications(&lineage).await.map_err(internal)?;
-                Some(
-                    publications
-                        .into_iter()
-                        .find(|(publication, _)| publication.id().as_str() == id.as_str())
-                        .map(|(_, schema)| schema)
-                        .ok_or_else(|| internal("draft's base is not in the store"))?,
-                )
+                let (publication, schema) = publications
+                    .into_iter()
+                    .find(|(publication, _)| publication.id().as_str() == id.as_str())
+                    .ok_or_else(|| internal("draft's base is not in the store"))?;
+                let mut surfaces = Vec::new();
+                for hash in publication.surfaces.values() {
+                    surfaces.push(store.surface(hash).await.map_err(internal)?.ok_or_else(
+                        || internal("a publication names a surface the store does not hold"),
+                    )?);
+                }
+                (Some(schema), surfaces)
             }
-            None => None,
+            None => (None, Vec::new()),
         };
         let next = self.tree.schema();
         let report = platform_core::draft_report(base.as_ref(), &next).map_err(internal)?;
+        let surface_report = platform_core::draft_surface_report(&base_surfaces, &self.tree);
         let labels = platform_core::ColumnLabels::resolve(base.as_ref(), &next);
-        Ok(crate::impact::ImpactReport::labeled(&report, &labels))
+        Ok(crate::impact::ImpactReport::labeled(
+            &report,
+            &surface_report,
+            &labels,
+        ))
     }
 }
 

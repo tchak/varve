@@ -309,7 +309,10 @@ platform-owned JSON, `created_at` — written in the same transaction
 as the state-column update by the use-case service, so column and
 log cannot disagree. Two constraints: **authoring workflow is not
 events** (the procedure alphabet is `created`, `published
-{ revision, base }`, `closed`, `reopened` — amended 2026-08-24:
+{ publication, base }` — publication content addresses, DESIGN §2.13
+decision 9 (amended 2026-08-26: was `{ revision, base }`, which two
+surface-only publications could not tell apart) — `closed`,
+`reopened` — amended 2026-08-24:
 `draft_discarded` dropped; discarding the working buffer is the
 same altitude as the per-edit autosaves, P.9 Q4's bloat,
 procedure-side — the trail records lifecycle facts), and
@@ -329,8 +332,11 @@ what it publishes as — "draft" alone will also be a case-file state),
 a nullable embedded object on the catalog row
 (`platform-core::procedure`), holding the schema as the kernel's own **wire-canonical bytes**
 (`varve_wire::schema_bytes`, the body of a `revision` line, DESIGN §5)
-plus `base`, the id of the published revision it forks from (the
-publication's parent; `None` until the revision DAG lands). Rationale
+plus `base`, the content address of the **publication** it forks
+from (DESIGN §2.13 decision 9, amended 2026-08-26: was a revision id,
+which made two surface-only forks from one revision
+indistinguishable to the stale-fork check; `None` until the first
+publication). Rationale
 for bytes over a normalized `columns` table or a JSON mirror: the
 schema is a recursive tree the kernel already types (`Element`),
 the only query a draft ever answers is "load the whole thing", and
@@ -421,10 +427,17 @@ pure kernel, generic over the `varve-store` traits: check the
 caller's fork point against the lineage head, validate the schema
 (`varve_schema::validate`) and both surfaces
 (`varve_surface::validate`, which re-checks the revision pairing),
-classify against the head with `varve-impact`, gate on the report —
-`worst() > Safe` without explicit confirmation returns the report
-and writes nothing — then append the publication event and put the
-surfaces. **The lineage is the procedure's UUID** (`LineageId` is
+classify against the head with `varve-impact`, diff the compiled
+pair against the head publication's stored surfaces
+(`varve_surface::diff_sets`, DESIGN §3.1 — amended 2026-08-26), gate
+on the worst class of the report *pair* — beyond `Safe` without
+explicit confirmation both reports return and nothing is written; a
+requiredness tightening now gates exactly as a lossy cast does, and
+the everyday "add a required column" demands the confirmation DN's
+mid-campaign incidents earned — then append the publication event
+and put the surfaces (content-addressed and immutable, decision 9:
+the event first, so the platform's surfaces→revisions foreign key
+holds). **The lineage is the procedure's UUID** (`LineageId` is
 storage scoping by design, §13.2). **First publication classifies
 against the empty schema**: every column `Added`, the report free —
 one code path, no special case. **The surface pair compiles from

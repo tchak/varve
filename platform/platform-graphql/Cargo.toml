@@ -19,6 +19,7 @@ platform-core = { version = "0.1.0", path = "../platform-core" }
 # flattening of the kernel types (G.6, revision-draft slice).
 varve-core = { path = "../../crates/varve-core" }
 varve-impact = { path = "../../crates/varve-impact" }
+varve-revision = { path = "../../crates/varve-revision" }
 varve-schema = { path = "../../crates/varve-schema" }
 varve-surface = { path = "../../crates/varve-surface" }
 # `RevisionDraft.report` reads the draft's base schema through the
