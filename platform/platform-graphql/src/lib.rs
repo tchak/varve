@@ -18,9 +18,12 @@
 //! it, and runs the impact-gated use case.
 //! The type graph follows G.2: full objects only at root
 //! ([`organization::Organization`], [`team::Team`],
-//! [`procedure::Procedure`]), `*Ref` types everywhere a list or a
-//! parent is named, `Member` as the account⟷container link. The
-//! case-file types arrive with the kernel edge (P0's last step,
+//! [`procedure::Procedure`], [`case_file::CaseFile`]), `*Ref` types
+//! everywhere a list or a parent is named, `Member` as the
+//! account⟷container link — plus the **case-file catalog slice**
+//! (G.13): `createCaseFile`, the viewer-scoped `caseFiles`
+//! connection and `Procedure.caseFiles`; cells, checkpoints and
+//! `submitCaseFile` arrive with the kernel edge (P0's last step,
 //! `varve-service`).
 //!
 //! Visibility is membership (G.6): every root lookup answers `null`
@@ -30,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod case_file;
 pub mod error;
 pub mod impact;
 pub mod member;

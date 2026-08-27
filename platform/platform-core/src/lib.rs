@@ -32,6 +32,8 @@
 
 pub mod account;
 pub mod api_token;
+pub mod case_file;
+pub mod case_file_event;
 pub mod db;
 pub mod organization;
 pub mod preview;
@@ -54,13 +56,20 @@ pub use api_token::{
     MAX_API_TOKEN_NAME_CHARS, api_token_lifetime, create_api_token, destroy_api_token,
     find_live_api_token, list_live_api_tokens, sweep_expired_api_tokens,
 };
+pub use case_file::{
+    CaseFile, CaseFilePage, CaseFileParticipant, CaseFileState, CaseFileStateValue,
+    CorruptCaseFileState, CreateCaseFileError, add_case_file_participant, create_case_file,
+    current_case_file_state, find_case_file, is_case_file_participant, list_account_case_files,
+    list_case_file_participants, list_procedure_case_files,
+};
+pub use case_file_event::{CaseFileEvent, CaseFileEventKind, list_case_file_events};
 pub use db::{MIGRATIONS, connect, connect_with};
 pub use organization::{
     CreateOrganizationError, Member, Organization, OrganizationMembership, add_organization_member,
     count_organization_members, count_organization_procedures, count_organization_teams,
     create_organization, create_organization_for, find_organization, find_organization_by_slug,
     is_organization_member, list_account_organizations, list_organization_members, normalize_slug,
-    remove_organization_member,
+    organizations_by_ids, remove_organization_member,
 };
 pub use preview::{
     PreviewBytes, PreviewDecodeError, PreviewError, PreviewFinding, PreviewWrite,
@@ -71,7 +80,7 @@ pub use procedure::{
     LifecycleError, Procedure, RevisionDraft, RevisionDraftError, TreeBytes, WorkingTree,
     close_procedure, create_procedure, current_state, discard_revision_draft, edit_revision_draft,
     find_procedure, find_procedure_with_revision_draft, list_account_procedures,
-    list_organization_procedures, reopen_procedure, working_tree,
+    list_organization_procedures, procedures_by_ids, reopen_procedure, working_tree,
 };
 pub use procedure_event::{
     FactsBytes, ProcedureEvent, ProcedureEventKind, PublishedFacts, list_procedure_events,

@@ -279,6 +279,20 @@ pub struct Member {
     pub joined_at: jiff::Timestamp,
 }
 
+/// The organizations with these ids, in one `IN`-list query — see
+/// [`crate::procedure::procedures_by_ids`].
+pub async fn organizations_by_ids(
+    db: &mut toasty::Db,
+    ids: Vec<uuid::Uuid>,
+) -> toasty::Result<Vec<Organization>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Organization::filter(Organization::fields().id().in_list(ids))
+        .exec(db)
+        .await
+}
+
 /// The organizations `account_id` is a member of, oldest first.
 pub async fn list_account_organizations(
     db: &mut toasty::Db,

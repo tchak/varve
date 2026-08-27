@@ -3,14 +3,16 @@
 
 use async_graphql::{Context, ID, InputObject, MaybeUndefined, Object};
 use platform_core::{
-    ColumnPatch, CreateOrganizationError, EditError, GroupPatch, LifecycleError, NotePatch,
-    PublishProcedureError, PublishProcedureOutcome, RevisionDraftError, SectionPatch, Tree,
+    ColumnPatch, CreateCaseFileError, CreateOrganizationError, EditError, GroupPatch,
+    LifecycleError, NotePatch, PublishProcedureError, PublishProcedureOutcome, RevisionDraftError,
+    SectionPatch, Tree,
 };
 
+use crate::case_file::CaseFile;
 use crate::error::{Code, coded, forbidden, internal, invalid_input};
 use crate::impact::ImpactReport;
 use crate::organization::{Organization, OrganizationRef};
-use crate::procedure::Procedure;
+use crate::procedure::{Procedure, ProcedureRef};
 use crate::revision_draft::{
     Audience, Cardinality, ColumnTypeInput, PlacementInput, element_id, new_column, new_group,
     new_note, new_section,
@@ -50,6 +52,13 @@ pub struct CreateProcedureInput {
     /// Free-text description.
     #[graphql(default)]
     pub description: String,
+}
+
+/// `createCaseFile` input.
+#[derive(InputObject)]
+pub struct CreateCaseFileInput {
+    /// The procedure to open a case file on; must be published.
+    pub procedure_id: ID,
 }
 
 /// `closeProcedure` input.
@@ -358,6 +367,22 @@ fn publish_error(error: PublishProcedureError) -> async_graphql::Error {
     }
 }
 
+fn create_case_file_error(error: CreateCaseFileError) -> async_graphql::Error {
+    match error {
+        // A missing procedure and a never-published one answer the
+        // same (G.13): the one party who can see a draft procedure,
+        // its administrators, has the preview — a case file on an
+        // unpublished schema is a contradiction, not a permission.
+        CreateCaseFileError::ProcedureNotFound | CreateCaseFileError::NeverPublished => forbidden(),
+        CreateCaseFileError::Closed { since } => coded(
+            Code::InvalidTransition,
+            format!("the procedure is closed to new submissions (since {since})"),
+        ),
+        CreateCaseFileError::Corrupt(e) => internal(e),
+        CreateCaseFileError::Db(e) => internal(e),
+    }
+}
+
 fn lifecycle_error(error: LifecycleError) -> async_graphql::Error {
     match error {
         LifecycleError::Transition(e) => coded(Code::InvalidTransition, e.to_string()),
@@ -441,6 +466,38 @@ impl Mutation {
         Ok(Procedure {
             procedure,
             organization: OrganizationRef::from(&organization),
+        })
+    }
+
+    /// Creates a case file on a published procedure, with the viewer
+    /// as its first participant (G.13). Any account may create one —
+    /// applicants need no prior relation to the procedure. A closed
+    /// procedure answers `INVALID_TRANSITION`; a never-published or
+    /// missing one `FORBIDDEN`.
+    async fn create_case_file(
+        &self,
+        ctx: &Context<'_>,
+        input: CreateCaseFileInput,
+    ) -> async_graphql::Result<CaseFile> {
+        let (principal, mut db) = session(ctx)?;
+        let procedure_id = parse_id(&input.procedure_id)?;
+        let case_file =
+            platform_core::create_case_file(&mut db, procedure_id, principal.account_id)
+                .await
+                .map_err(create_case_file_error)?;
+        // The rows the use case just wrote against; a miss is a
+        // wiring bug, never a `null`.
+        let procedure = platform_core::find_procedure(&mut db, procedure_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("created case file's procedure not found"))?;
+        let organization = platform_core::find_organization(&mut db, procedure.organization_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("created case file's organization not found"))?;
+        Ok(CaseFile {
+            case_file,
+            procedure: ProcedureRef::of(&procedure, OrganizationRef::from(&organization)),
         })
     }
 

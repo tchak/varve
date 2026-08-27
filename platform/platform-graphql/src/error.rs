@@ -23,9 +23,10 @@ pub enum Code {
     /// The target changed since the client last read it (two editors
     /// or administrators racing): re-read and retry.
     Conflict,
-    /// A lifecycle transition the state machine refuses from the
-    /// procedure's current state (closing a draft, reopening an open
-    /// procedure). The message carries the refusal; nothing changed.
+    /// An operation the subject's lifecycle state refuses (G.13
+    /// widened it from transitions alone): closing a draft,
+    /// reopening an open procedure, creating a case file on a
+    /// closed one. The message carries the refusal; nothing changed.
     InvalidTransition,
     /// The draft cannot publish as-is: nothing is in progress, or a
     /// choice has no options (G.7 — a legal draft state, refused at

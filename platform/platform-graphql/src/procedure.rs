@@ -76,6 +76,25 @@ impl Procedure {
         &self.organization
     }
 
+    /// All the procedure's case files, newest first, forward-only —
+    /// the unbounded list, a connection (G.2.4, G.13). Reaching this
+    /// object already required administering the procedure.
+    async fn case_files(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i32>,
+        after: Option<String>,
+    ) -> async_graphql::Result<crate::case_file::CaseFileConnection> {
+        let (_, mut db) = session(ctx)?;
+        let (limit, after) = crate::case_file::page_arguments(first, after)?;
+        let page =
+            platform_core::list_procedure_case_files(&mut db, self.procedure.id, after, limit)
+                .await
+                .map_err(internal)?;
+        let procedure = ProcedureRef::of(&self.procedure, self.organization.clone());
+        crate::case_file::connection_of(page, |_| Ok(procedure.clone()))
+    }
+
     /// The draft of the next revision — *head until touched* (G.7
     /// virtual draft): the stored working buffer when one is in
     /// progress, otherwise the published head's tree (`base` naming
@@ -110,6 +129,7 @@ impl Procedure {
 /// A procedure as lists name it: scalars plus its ancestor Ref. The
 /// state rides as the bare enum (G.2 rule 5's parallel enum) — the
 /// facts stay on the full object's union.
+#[derive(Clone)]
 pub struct ProcedureRef {
     id: uuid::Uuid,
     title: String,
@@ -119,9 +139,15 @@ pub struct ProcedureRef {
 
 impl ProcedureRef {
     pub fn new(procedure: platform_core::Procedure, organization: OrganizationRef) -> Self {
+        Self::of(&procedure, organization)
+    }
+
+    /// Builds from a borrowed row — the case-file listings (G.13)
+    /// name each row's procedure without consuming it.
+    pub fn of(procedure: &platform_core::Procedure, organization: OrganizationRef) -> Self {
         Self {
             id: procedure.id,
-            title: procedure.title,
+            title: procedure.title.clone(),
             state: procedure.state,
             organization,
         }

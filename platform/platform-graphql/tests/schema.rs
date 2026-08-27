@@ -428,11 +428,23 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "type ProcedurePublishedEvent implements ProcedureEvent",
         "report: ImpactReport!",
         "label: String!",
+        // G.13: the case-file catalog slice.
+        "caseFile(id: ID!): CaseFile",
+        "caseFiles(first: Int, after: String): CaseFileConnection!",
+        "createCaseFile(input: CreateCaseFileInput!): CaseFile!",
+        "union CaseFileState = CaseFileDraftState",
+        "participants: [CaseFileParticipant!]!",
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
     }
     // G.2 rule 1: a Ref holds scalars and ancestor Refs only.
-    for ref_type in ["OrganizationRef", "TeamRef", "ProcedureRef", "AccountRef"] {
+    for ref_type in [
+        "OrganizationRef",
+        "TeamRef",
+        "ProcedureRef",
+        "AccountRef",
+        "CaseFileRef",
+    ] {
         let start = sdl.find(&format!("type {ref_type} {{")).expect(ref_type);
         let body = &sdl[start..start + sdl[start..].find('}').unwrap()];
         assert!(!body.contains('['), "{ref_type} has a list field:\n{body}");
@@ -2318,4 +2330,324 @@ async fn the_typed_client_fills_the_preview() {
     .procedure
     .expect("visible");
     assert_eq!(read.revision_draft.preview, written.revision_draft.preview);
+}
+
+// ---------------------------------------------------------------
+// The case-file catalog slice (G.13): createCaseFile, the
+// viewer-scoped connection, Procedure.caseFiles.
+// ---------------------------------------------------------------
+
+const CASE_FILE: &str = "query($id: ID!) {
+    caseFile(id: $id) {
+        id createdAt updatedAt
+        state { __typename ... on CaseFileDraftState { createdAt } }
+        procedure { id title organization { id name } }
+        participants { account { id email } joinedAt }
+    }
+}";
+
+const CASE_FILES: &str = "query($first: Int, $after: String) {
+    caseFiles(first: $first, after: $after) {
+        edges { cursor node { id state createdAt procedure { id title organization { id } } } }
+        pageInfo { hasNextPage endCursor }
+    }
+}";
+
+const PROCEDURE_CASE_FILES: &str = "query($id: ID!, $first: Int, $after: String) {
+    procedure(id: $id) {
+        caseFiles(first: $first, after: $after) {
+            edges { node { id state } }
+            pageInfo { hasNextPage endCursor }
+        }
+    }
+}";
+
+const CREATE_CASE_FILE: &str = "mutation($input: CreateCaseFileInput!) {
+    createCaseFile(input: $input) {
+        id
+        state { __typename }
+        procedure { id title organization { id } }
+        participants { account { id email } }
+    }
+}";
+
+impl Api {
+    /// A procedure of a fresh organization, published with one text
+    /// column — the smallest thing a case file can be created on.
+    async fn published_procedure(&self, who: &Principal, tag: &str) -> String {
+        let org = self
+            .create_organization(who, &unique_slug(tag), "Org")
+            .await;
+        let pid = id_of(&self.create_procedure(who, &id_of(&org), "Bourse").await);
+        self.edit(
+            who,
+            "addColumn",
+            "AddColumnInput",
+            json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+        )
+        .await;
+        let data = self
+            .data(
+                who,
+                "mutation($input: PublishRevisionInput!) {
+                    publishRevision(input: $input) { published }
+                }",
+                json!({ "input": { "procedureId": pid } }),
+            )
+            .await;
+        assert_eq!(data["publishRevision"]["published"], true, "{data}");
+        pid
+    }
+}
+
+#[tokio::test]
+async fn case_file_catalog_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await; // administers
+    let bob = account(&mut db, "bob").await; // applies
+    let carol = account(&mut db, "carol").await; // stranger
+
+    // A never-published procedure refuses everyone the same way —
+    // its administrator included (G.13: the preview is the tool for
+    // a draft schema, not a case file).
+    let org = api
+        .create_organization(&alice, &unique_slug("catalog"), "Org")
+        .await;
+    let draft_pid = id_of(&api.create_procedure(&alice, &id_of(&org), "Jamais").await);
+    for who in [&bob, &alice] {
+        let code = api
+            .error_code(
+                who,
+                CREATE_CASE_FILE,
+                json!({ "input": { "procedureId": draft_pid } }),
+            )
+            .await;
+        assert_eq!(code, "FORBIDDEN");
+    }
+
+    // A missing procedure reads the same as an invisible one.
+    let code = api
+        .error_code(
+            &bob,
+            CREATE_CASE_FILE,
+            json!({ "input": { "procedureId": NIL } }),
+        )
+        .await;
+    assert_eq!(code, "FORBIDDEN");
+
+    // On a published procedure any account creates — no prior
+    // relation — and becomes the first participant.
+    let pid = api.published_procedure(&alice, "open").await;
+    let data = api
+        .data(
+            &bob,
+            CREATE_CASE_FILE,
+            json!({ "input": { "procedureId": pid } }),
+        )
+        .await;
+    let created = &data["createCaseFile"];
+    assert_eq!(created["state"]["__typename"], "CaseFileDraftState");
+    assert_eq!(created["procedure"]["id"], pid);
+    assert_eq!(
+        created["participants"][0]["account"]["id"],
+        bob.account_id.to_string()
+    );
+    let cid = id_of(created);
+
+    // The platform event log holds the created entry with its actor.
+    let events = platform_core::list_case_file_events(&mut db, cid.parse().unwrap())
+        .await
+        .expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].actor_account_id,
+        Some(bob.account_id),
+        "{events:?}"
+    );
+
+    // caseFile(id): the participant and the administering
+    // organization's member see it; a stranger reads null.
+    for who in [&bob, &alice] {
+        let data = api.data(who, CASE_FILE, json!({ "id": cid })).await;
+        let case_file = &data["caseFile"];
+        assert_eq!(id_of(case_file), cid);
+        assert_eq!(case_file["state"]["__typename"], "CaseFileDraftState");
+        assert_eq!(case_file["procedure"]["title"], "Bourse");
+        assert_eq!(case_file["participants"].as_array().unwrap().len(), 1);
+    }
+    let data = api.data(&carol, CASE_FILE, json!({ "id": cid })).await;
+    assert!(data["caseFile"].is_null(), "{data}");
+
+    // Root caseFiles is viewer-scoped: bob's one file, carol's none.
+    let data = api.data(&bob, CASE_FILES, json!({})).await;
+    let edges = data["caseFiles"]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(id_of(&edges[0]["node"]), cid);
+    assert_eq!(edges[0]["node"]["state"], "DRAFT");
+    assert_eq!(edges[0]["node"]["procedure"]["title"], "Bourse");
+    assert_eq!(data["caseFiles"]["pageInfo"]["hasNextPage"], false);
+    let data = api.data(&carol, CASE_FILES, json!({})).await;
+    assert_eq!(data["caseFiles"]["edges"], json!([]));
+    assert!(
+        data["caseFiles"]["pageInfo"]["endCursor"].is_null(),
+        "{data}"
+    );
+
+    // Procedure.caseFiles: the administrator's listing (the full
+    // procedure is already member-gated — bob reads null there).
+    let data = api
+        .data(&alice, PROCEDURE_CASE_FILES, json!({ "id": pid }))
+        .await;
+    let edges = data["procedure"]["caseFiles"]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(id_of(&edges[0]["node"]), cid);
+    let data = api
+        .data(&bob, PROCEDURE_CASE_FILES, json!({ "id": pid }))
+        .await;
+    assert!(data["procedure"].is_null(), "{data}");
+
+    // Closing the procedure refuses new case files as
+    // INVALID_TRANSITION; the existing one stays readable.
+    api.data(
+        &alice,
+        "mutation($input: CloseProcedureInput!) {
+            closeProcedure(input: $input) { id }
+        }",
+        json!({ "input": { "procedureId": pid } }),
+    )
+    .await;
+    let code = api
+        .error_code(
+            &bob,
+            CREATE_CASE_FILE,
+            json!({ "input": { "procedureId": pid } }),
+        )
+        .await;
+    assert_eq!(code, "INVALID_TRANSITION");
+    let data = api.data(&bob, CASE_FILE, json!({ "id": cid })).await;
+    assert!(!data["caseFile"].is_null(), "{data}");
+
+    // Page arguments validate before any use case runs.
+    for variables in [
+        json!({ "first": 0 }),
+        json!({ "first": 101 }),
+        json!({ "after": "not-a-cursor" }),
+    ] {
+        let code = api.error_code(&bob, CASE_FILES, variables).await;
+        assert_eq!(code, "INVALID_INPUT");
+    }
+}
+
+#[tokio::test]
+async fn case_file_pagination_walks_newest_first() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let bob = account(&mut db, "bob").await;
+    let pid = api.published_procedure(&alice, "pages").await;
+
+    let mut created: Vec<String> = Vec::new();
+    for _ in 0..3 {
+        let data = api
+            .data(
+                &bob,
+                CREATE_CASE_FILE,
+                json!({ "input": { "procedureId": pid } }),
+            )
+            .await;
+        created.push(id_of(&data["createCaseFile"]));
+    }
+
+    // First page: the two newest, in creation-descending order.
+    let data = api.data(&bob, CASE_FILES, json!({ "first": 2 })).await;
+    let edges = data["caseFiles"]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 2);
+    assert_eq!(id_of(&edges[0]["node"]), created[2]);
+    assert_eq!(id_of(&edges[1]["node"]), created[1]);
+    assert_eq!(data["caseFiles"]["pageInfo"]["hasNextPage"], true);
+    let cursor = data["caseFiles"]["pageInfo"]["endCursor"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(cursor, edges[1]["cursor"].as_str().unwrap());
+
+    // Second page: the oldest, and the end.
+    let data = api
+        .data(&bob, CASE_FILES, json!({ "first": 2, "after": cursor }))
+        .await;
+    let edges = data["caseFiles"]["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(id_of(&edges[0]["node"]), created[0]);
+    assert_eq!(data["caseFiles"]["pageInfo"]["hasNextPage"], false);
+
+    // The parent-scoped connection pages the same way.
+    let data = api
+        .data(
+            &alice,
+            PROCEDURE_CASE_FILES,
+            json!({ "id": pid, "first": 2 }),
+        )
+        .await;
+    let connection = &data["procedure"]["caseFiles"];
+    assert_eq!(connection["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(connection["pageInfo"]["hasNextPage"], true);
+}
+
+#[tokio::test]
+async fn the_typed_client_walks_the_case_file_catalog() {
+    use platform_client::case_file::{
+        CaseFileQuery, CaseFileState, CaseFileStateValue, CaseFileVariables, CaseFilesQuery,
+        CaseFilesVariables, CreateCaseFile, CreateCaseFileInput, CreateCaseFileVariables,
+    };
+
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let bob = account(&mut db, "bob").await;
+    let pid = api.published_procedure(&alice, "typed").await;
+    let client = api.client(&bob);
+
+    let created = platform_client::run(
+        &client,
+        CreateCaseFile::build(CreateCaseFileVariables {
+            input: CreateCaseFileInput {
+                procedure_id: cynic::Id::new(&pid),
+            },
+        }),
+    )
+    .await
+    .expect("createCaseFile")
+    .create_case_file;
+    assert!(matches!(created.state, CaseFileState::Draft(_)));
+    assert_eq!(created.procedure.title, "Bourse");
+    assert_eq!(created.participants.len(), 1);
+    assert_eq!(created.participants[0].account.email, bob.email);
+
+    let read = platform_client::run(
+        &client,
+        CaseFileQuery::build(CaseFileVariables {
+            id: created.id.clone(),
+        }),
+    )
+    .await
+    .expect("caseFile")
+    .case_file
+    .expect("visible to its participant");
+    assert_eq!(read, created);
+
+    let page = platform_client::run(
+        &client,
+        CaseFilesQuery::build(CaseFilesVariables {
+            first: Some(1),
+            after: None,
+        }),
+    )
+    .await
+    .expect("caseFiles")
+    .case_files;
+    assert_eq!(page.edges.len(), 1);
+    assert_eq!(page.edges[0].node.id, created.id);
+    assert_eq!(page.edges[0].node.state, CaseFileStateValue::Draft);
+    assert!(!page.page_info.has_next_page);
 }

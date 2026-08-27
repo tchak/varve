@@ -412,6 +412,21 @@ pub async fn list_account_procedures(
     .await
 }
 
+/// The procedures with these ids, in one `IN`-list query — the
+/// read-model joins (a case-file listing naming each row's
+/// procedure) batch through this, never one query per row.
+pub async fn procedures_by_ids(
+    db: &mut toasty::Db,
+    ids: Vec<uuid::Uuid>,
+) -> toasty::Result<Vec<Procedure>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Procedure::filter(Procedure::fields().id().in_list(ids))
+        .exec(db)
+        .await
+}
+
 /// The procedures an organization owns, oldest first.
 pub async fn list_organization_procedures(
     db: &mut toasty::Db,

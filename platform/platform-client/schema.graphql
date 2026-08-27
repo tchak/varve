@@ -182,6 +182,89 @@ enum Cardinality {
 	MANY
 }
 
+type CaseFile {
+	id: ID!
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	"""
+	The lifecycle state (G.2 rule 5): a union of state-specific
+	objects — one member until the checkpoint machine lands.
+	"""
+	state: CaseFileState!
+	"""
+	The procedure this case file was created on.
+	"""
+	procedure: ProcedureRef!
+	"""
+	The participants, oldest first — every one may see the case
+	file and later fill its applicant surface (bounded, G.2.4).
+	"""
+	participants: [CaseFileParticipant!]!
+}
+
+"""
+One page of case files (G.13): newest first, forward-only.
+"""
+type CaseFileConnection {
+	edges: [CaseFileEdge!]!
+	pageInfo: PageInfo!
+}
+
+"""
+Being filled, never submitted. Its only fact is the row's
+creation time.
+"""
+type CaseFileDraftState {
+	createdAt: DateTime!
+}
+
+"""
+One row of a connection page.
+"""
+type CaseFileEdge {
+	"""
+	Resume after this row: pass as `after`.
+	"""
+	cursor: String!
+	node: CaseFileRef!
+}
+
+type CaseFileParticipant {
+	"""
+	The participating account.
+	"""
+	account: AccountRef!
+	"""
+	When the participation was created.
+	"""
+	joinedAt: DateTime!
+}
+
+type CaseFileRef {
+	id: ID!
+	"""
+	The bare lifecycle state.
+	"""
+	state: CaseFileStateValue!
+	createdAt: DateTime!
+	procedure: ProcedureRef!
+}
+
+"""
+The lifecycle state (G.2 rule 5): a union of state-specific
+objects, subject-prefixed. One member until the checkpoint
+machine lands (P1).
+"""
+union CaseFileState = CaseFileDraftState
+
+"""
+The bare state, for list rows and filters (G.2 rule 5's parallel
+enum, generated from the platform-core discriminant).
+"""
+enum CaseFileStateValue {
+	DRAFT
+}
+
 """
 A written cell (G.1's record read model, piloted here): one member
 per value kind plus the written-blank state — `EMPTY` is a value
@@ -379,6 +462,16 @@ enum ColumnTypeKind {
 	ENUM
 	ATTACHMENT
 	GEOMETRY
+}
+
+"""
+`createCaseFile` input.
+"""
+input CreateCaseFileInput {
+	"""
+	The procedure to open a case file on; must be published.
+	"""
+	procedureId: ID!
 }
 
 """
@@ -723,6 +816,14 @@ type Mutation {
 	"""
 	createProcedure(input: CreateProcedureInput!): Procedure!
 	"""
+	Creates a case file on a published procedure, with the viewer
+	as its first participant (G.13). Any account may create one —
+	applicants need no prior relation to the procedure. A closed
+	procedure answers `INVALID_TRANSITION`; a never-published or
+	missing one `FORBIDDEN`.
+	"""
+	createCaseFile(input: CreateCaseFileInput!): CaseFile!
+	"""
 	Closes a published procedure to new submissions (platform
 	P.4 *Procedure lifecycle*); `INVALID_TRANSITION` from any
 	other state.
@@ -882,6 +983,21 @@ type OrganizationRef {
 	name: String!
 }
 
+"""
+Forward-only paging facts (G.13); the backward half joins with
+the reviewer table if it needs it.
+"""
+type PageInfo {
+	"""
+	Whether another page follows `endCursor`.
+	"""
+	hasNextPage: Boolean!
+	"""
+	The last row's cursor; `null` on an empty page.
+	"""
+	endCursor: String
+}
+
 type PhoneFormat {
 	kind: TextFormatKind!
 }
@@ -953,6 +1069,12 @@ type Procedure {
 	The owning organization.
 	"""
 	organization: OrganizationRef!
+	"""
+	All the procedure's case files, newest first, forward-only —
+	the unbounded list, a connection (G.2.4, G.13). Reaching this
+	object already required administering the procedure.
+	"""
+	caseFiles(first: Int, after: String): CaseFileConnection!
 	"""
 	The draft of the next revision — *head until touched* (G.7
 	virtual draft): the stored working buffer when one is in
@@ -1213,6 +1335,17 @@ type Query {
 	of; `null` otherwise.
 	"""
 	procedure(id: ID!): Procedure
+	"""
+	A case file the viewer participates in, or one on a procedure
+	the viewer administers; `null` otherwise (G.13).
+	"""
+	caseFile(id: ID!): CaseFile
+	"""
+	The case files the viewer can see — today, those the viewer
+	participates in (G.13, viewer-scoped) — newest first,
+	forward-only.
+	"""
+	caseFiles(first: Int, after: String): CaseFileConnection!
 	"""
 	Every procedure the viewer administers — those owned by the
 	viewer's organizations — oldest first.

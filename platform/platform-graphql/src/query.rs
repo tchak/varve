@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use async_graphql::{Context, ID, Object};
 use platform_core::Principal;
 
+use crate::case_file::{
+    CaseFile, CaseFileConnection, connection_of, page_arguments, procedure_refs_of,
+};
 use crate::error::internal;
 use crate::organization::{Organization, OrganizationRef};
 use crate::procedure::{Procedure, ProcedureRef};
@@ -131,6 +134,82 @@ impl Query {
             procedure,
             organization: OrganizationRef::from(&organization),
         }))
+    }
+
+    /// A case file the viewer participates in, or one on a procedure
+    /// the viewer administers; `null` otherwise (G.13).
+    async fn case_file(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+    ) -> async_graphql::Result<Option<CaseFile>> {
+        let (principal, mut db) = session(ctx)?;
+        let id = parse_id(&id)?;
+        let Some(case_file) = platform_core::find_case_file(&mut db, id)
+            .await
+            .map_err(internal)?
+        else {
+            return Ok(None);
+        };
+        let Some(procedure) = platform_core::find_procedure(&mut db, case_file.procedure_id)
+            .await
+            .map_err(internal)?
+        else {
+            return Ok(None);
+        };
+        let visible =
+            platform_core::is_case_file_participant(&mut db, case_file.id, principal.account_id)
+                .await
+                .map_err(internal)?
+                || platform_core::is_organization_member(
+                    &mut db,
+                    procedure.organization_id,
+                    principal.account_id,
+                )
+                .await
+                .map_err(internal)?;
+        if !visible {
+            return Ok(None);
+        }
+        let Some(organization) =
+            platform_core::find_organization(&mut db, procedure.organization_id)
+                .await
+                .map_err(internal)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(CaseFile {
+            case_file,
+            procedure: ProcedureRef::of(&procedure, OrganizationRef::from(&organization)),
+        }))
+    }
+
+    /// The case files the viewer can see — today, those the viewer
+    /// participates in (G.13, viewer-scoped) — newest first,
+    /// forward-only.
+    async fn case_files(
+        &self,
+        ctx: &Context<'_>,
+        first: Option<i32>,
+        after: Option<String>,
+    ) -> async_graphql::Result<CaseFileConnection> {
+        let (principal, mut db) = session(ctx)?;
+        let (limit, after) = page_arguments(first, after)?;
+        let page =
+            platform_core::list_account_case_files(&mut db, principal.account_id, after, limit)
+                .await
+                .map_err(internal)?;
+        let refs = procedure_refs_of(&mut db, &page).await?;
+        connection_of(page, |case_file| {
+            // Foreign keys make a miss a wiring bug — surfaced,
+            // never silently dropped.
+            refs.get(&case_file.procedure_id).cloned().ok_or_else(|| {
+                internal(format!(
+                    "case file {} listed without its procedure {}",
+                    case_file.id, case_file.procedure_id
+                ))
+            })
+        })
     }
 
     /// Every procedure the viewer administers — those owned by the

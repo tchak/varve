@@ -22,6 +22,7 @@ use std::future::Future;
 
 use serde::de::DeserializeOwned;
 
+pub mod case_file;
 pub mod organization;
 pub mod preview;
 pub mod procedure;
