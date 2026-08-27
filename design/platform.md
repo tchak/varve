@@ -248,6 +248,78 @@ P.9 Q16; creator provenance needs no column either way (the
 `submitCaseFile`); until then the state column is the only authority
 and only `Draft` exists. API shape: `design/graphql.md` G.13.
 
+**Case-file record log (settled 2026-08-27).** The kernel half of a
+case file is a `varve-record` log persisted through `varve-store`'s
+`RecordLogStore`, implemented in `platform-store` beside the
+publication tables. Settled here, before the first entry is written,
+because two of the choices cannot be retrofitted (§2.10):
+
+- **The record id is its own column**, minted (UUID v7) by
+  `createCaseFile` beside the case-file id, unique, 1:1. The chain
+  commits to the record id (`genesis_hash`), so the id must travel
+  with the log — and §5/§6's one-way instance migration means a
+  record arriving from elsewhere keeps its id while getting a fresh
+  catalog row here. Reusing the case-file uuid would weld a platform
+  identity into the kernel chain for the price of one column. There
+  is **no genesis entry**: the store's own contract — a record is
+  created by its first entry — means the log stays empty until the
+  first cell write, and `createCaseFile` stays platform-only.
+- **The entries table physically separates the §2.13 halves**: the
+  envelope (seq, prev, actor, timestamp, revision, base_version,
+  content_hash — plaintext, survives redaction) in its own columns
+  or bytes beside the erasable content + salts, so §2.10 redaction
+  is an `UPDATE` nulling the erasable half while the chain still
+  verifies over the retained commitments. Salts are Tier 5 inputs:
+  fresh randomness per op plus meta at append, stored with the
+  content, destroyed with it.
+- **Actor = the account uuid, kind `Human`.** The account id is
+  already the §2.13 pseudonymous reference — the id→person mapping
+  is the accounts table, separately erasable. `Principal` grows no
+  fields for this; what actor kind an API-token write carries is
+  deferred to P2 with the tokens themselves.
+- **Every entry is authored against the head revision at write
+  time** (§2.9: the record is never "on" a revision) — a
+  republication mid-draft simply means later entries carry the new
+  revision; no migration event, no pinning.
+- **Concurrency is server-side for P0**: the use case reads the
+  log, folds, appends with `base_version` = what it read, in one
+  transaction; the store's next-seq rule turns a lost race between
+  co-participants into `CONFLICT`. A client-echoed version
+  (optimistic UI over stale reads) is a later, compatible addition.
+- **The `varve-service` append operation** (the P0 "surface-gated
+  append", shaped like publication): `(record, ops, actor,
+  timestamp, the writer's surface, base_version)` → ops checked
+  against the surface's writable set (§2.9 *surfaces absorb
+  writability*), conformance via `varve-value`, checkpoint
+  validation via `validate_after_checkpoint` (vacuous until
+  `SUBMITTED` exists, wired from day one), then
+  `RecordLog::append` + store append. Admissibility is a read
+  beside it, never a gate (the G.12 rule carried over).
+
+**Two-sided editing (recorded 2026-08-27, from DN direction).**
+Submitted case files will eventually be edited from both sides —
+applicant and reviewer each holding a **pending-changes draft in
+parallel**, committed as a batch, with rules on who wins a
+concurrent commit. This shapes the write model by lifecycle state:
+pre-submission `DRAFT` has one side and DN's autosave-is-the-record
+semantics, so batches append straight to the log (P.9 Q4, resolved);
+post-submission, a side's pending edits must be invisible to the
+other side until committed, so each side gets a platform
+pending-changes bag — the G.12 preview pattern generalized to
+`(case file, side)`, kernel-typed values overlaying the fold,
+folded into **one entry at commit**. Unlike the preview's scratch, a
+case-file bag is case-file personal data: it cascades with the case
+file. Records never branch (§5/§6) because the bags are platform
+overlays, never kernel branches; the kernel's detect-don't-merge is
+the primitive the commit policy builds on, not an obstacle — on a
+moved `base_version` the platform reads which cells the
+interleaving entries touched, auto-rebases disjoint commits (the
+common case, with writable sets mostly disjoint), and applies the
+who-wins rules only on genuine cell overlap (P.9 Q17). G.1's
+"`updateCells` legal in `DRAFT` and `SUBMITTED`" stands, with the
+caveat that in `SUBMITTED` and later the batch may land in the
+side's bag rather than the log.
+
 **Principals**: applicant, reviewer, procedure administrator, plus API
 tokens as non-human principals. Teams are platform tables whose entire
 effect is surface assignment over a set of case files. **Routing rules
@@ -813,11 +885,20 @@ everything shipped exists in DN and nothing shipped that doesn't.
    and the column is a read model maintained only by the use-case
    services, never written independently. Confirm when the P1 state
    machine lands.
-4. **Draft autosave granularity.** An entry per autosave is the
+4. ~~**Draft autosave granularity.** An entry per autosave is the
    kernel-pure answer but may bloat logs; DESIGN §12.8 (post-submission
    edit profile) will size it. The alternative — a platform-side draft
    buffer folded into one entry at submit — trades away provenance.
-   Decide with §12.8 data in hand.
+   Decide with §12.8 data in hand.~~ **Resolved (2026-08-27, P.4
+   *Two-sided editing*), split by lifecycle state:** both alternatives
+   were right about different states. Pre-submission `DRAFT` — one
+   side, autosave-is-the-record (DN semantics) — appends one entry per
+   `updateCells` batch, keeping provenance; post-submission editing
+   holds per-side pending-changes bags (the G.12 preview pattern
+   generalized) folded into one entry at commit, because a side's
+   pending edits must be invisible to the other side until committed.
+   §12.8 data still sizes the batch granularity within `DRAFT` if
+   logs bloat.
 5. **Public API armor.** (`design/graphql.md` G.2 bounds query depth
    structurally — full objects only at root, lists of Refs — which
    narrows this to page-size caps and per-list cost.) Depth/complexity
@@ -1036,6 +1117,17 @@ everything shipped exists in DN and nothing shipped that doesn't.
     column joins the table when the invitation machinery lands
     (G.5 Q2, P2). Decide there, with DN's actual invité rights in
     hand.
+
+17. **Concurrent-commit policy for two-sided editing.** (opened
+    2026-08-27, P.4 *Two-sided editing*.) When both sides commit
+    pending-changes bags and the cell sets genuinely overlap, who
+    wins — and does "wins" mean silent precedence or a surfaced
+    per-field conflict the loser resolves? DN memory to bring: do
+    reviewers actually edit applicant-writable fields (true overlap,
+    precedence rules central), or is overlap limited to edits across
+    a `returnToApplicant` boundary (conflict a rare dialog)?
+    Interacts with DESIGN §12.8 (post-submission edit profile).
+    Decide with the post-submission editor, not before.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
