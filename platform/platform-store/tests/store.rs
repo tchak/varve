@@ -1,5 +1,6 @@
-//! The store contract against Postgres (the varve-store/tests/store.rs
-//! points that RevisionStore + SurfaceStore own), DB-gated on
+//! The store contract against Postgres — the RevisionStore +
+//! SurfaceStore points, plus the executable record-log contract
+//! (`varve_store::contract`) — DB-gated on
 //! `VARVE_TEST_DATABASE_URL` like every platform DB suite. Each test
 //! scopes the store over its own transaction (the P.3 shape) and
 //! mints unique lineages — the database is shared.
@@ -9,6 +10,7 @@ use tokio::sync::Mutex;
 use varve_core::{ColumnId, RevisionId, SurfaceId};
 use varve_revision::Publication;
 use varve_schema::{Arity, Column, Element, ScalarType, Schema, revision_id};
+use varve_store::contract;
 use varve_store::load::load_dag;
 use varve_store::{LineageId, RevisionStore, StoreError, SurfaceStore};
 use varve_surface::{ColumnNode, Node, Surface, WritePolicy};
@@ -311,4 +313,34 @@ async fn an_uncommitted_transaction_leaves_nothing() {
     let store = PlatformStore::new(&shared);
     let dag = load_dag(&store, &line).await.expect("load");
     assert_eq!(dag.publications().len(), 0);
+}
+
+// ---- record logs ----------------------------------------------------
+
+/// Each contract check runs inside a transaction that is **dropped
+/// without commit**: the checks use fixed record ids, and the
+/// rollback isolates them from the shared test database, from
+/// previous runs, and from each other.
+macro_rules! rolled_back {
+    ($db:expr, $check:path) => {{
+        let mut tx = $db.transaction().await.unwrap();
+        let shared: platform_store::SharedExecutor = Mutex::new(&mut tx as &mut dyn Executor);
+        let store = PlatformStore::new(&shared);
+        $check(&store).await;
+        // `tx` drops without commit: rolled back.
+    }};
+}
+
+/// The executable record-log contract (`varve_store::contract`) —
+/// the same checks the reference `MemoryStore` passes in
+/// `varve-store`'s own suite, over the Toasty implementation.
+#[tokio::test]
+async fn record_log_contract() {
+    let Some(mut db) = test_db().await else {
+        return;
+    };
+    rolled_back!(db, contract::check_log_roundtrip);
+    rolled_back!(db, contract::check_log_seq_conflict);
+    rolled_back!(db, contract::check_loader_enforces_chain);
+    rolled_back!(db, contract::check_record_enumeration);
 }

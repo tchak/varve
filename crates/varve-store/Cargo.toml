@@ -16,8 +16,17 @@ varve-schema = { path = "../varve-schema" }
 varve-record = { path = "../varve-record" }
 varve-revision = { path = "../varve-revision" }
 varve-surface = { path = "../varve-surface" }
+# Only for the contract fixtures (`test-util`): the checks mint cell
+# ops. The traits themselves never touch values.
+varve-value = { path = "../varve-value", optional = true }
 thiserror.workspace = true
 
+[features]
+# The executable store contract (`contract`) with its deterministic
+# fixtures — for test suites of implementations, never production.
+test-util = ["dep:varve-value"]
+
 [dev-dependencies]
+varve-store = { path = ".", features = ["test-util"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 varve-value = { path = "../varve-value" }

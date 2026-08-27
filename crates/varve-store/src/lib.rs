@@ -42,6 +42,8 @@ use varve_revision::Publication;
 use varve_schema::{Block, OptionRow, Schema};
 use varve_surface::{BlockDefaults, Surface};
 
+#[cfg(feature = "test-util")]
+pub mod contract;
 pub mod load;
 mod memory;
 

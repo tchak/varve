@@ -4467,6 +4467,7 @@ dependencies = [
  "toasty-cli",
  "tokio",
  "varve-core",
+ "varve-record",
  "varve-revision",
  "varve-schema",
  "varve-store",
@@ -7958,6 +7959,7 @@ dependencies = [
  "varve-record",
  "varve-revision",
  "varve-schema",
+ "varve-store",
  "varve-surface",
  "varve-value",
 ]

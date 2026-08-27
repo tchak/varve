@@ -2455,6 +2455,15 @@ async fn case_file_catalog_journey() {
     );
     let cid = id_of(created);
 
+    // The kernel record id is minted at creation (P.4 *Case-file
+    // record log*); the log itself stays empty until the first cell
+    // write, so there is nothing else to see yet.
+    let stored = platform_core::find_case_file(&mut db, cid.parse().unwrap())
+        .await
+        .expect("find")
+        .expect("stored");
+    assert!(!stored.record_id.is_nil());
+
     // The platform event log holds the created entry with its actor.
     let events = platform_core::list_case_file_events(&mut db, cid.parse().unwrap())
         .await
@@ -2548,6 +2557,7 @@ async fn case_file_pagination_walks_newest_first() {
     let pid = api.published_procedure(&alice, "pages").await;
 
     let mut created: Vec<String> = Vec::new();
+    let mut record_ids = std::collections::HashSet::new();
     for _ in 0..3 {
         let data = api
             .data(
@@ -2556,8 +2566,16 @@ async fn case_file_pagination_walks_newest_first() {
                 json!({ "input": { "procedureId": pid } }),
             )
             .await;
-        created.push(id_of(&data["createCaseFile"]));
+        let cid = id_of(&data["createCaseFile"]);
+        let stored = platform_core::find_case_file(&mut db, cid.parse().unwrap())
+            .await
+            .expect("find")
+            .expect("stored");
+        record_ids.insert(stored.record_id);
+        created.push(cid);
     }
+    // Each case file minted its own kernel record id.
+    assert_eq!(record_ids.len(), 3);
 
     // First page: the two newest, in creation-descending order.
     let data = api.data(&bob, CASE_FILES, json!({ "first": 2 })).await;

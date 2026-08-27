@@ -4,72 +4,20 @@
 //! rules only**; content invariants re-run in the loaders, so a
 //! tampered row is accepted at write and caught at the first load.
 
-use varve_core::canonical::Salt;
-use varve_core::primitives::Instant;
-use varve_core::{
-    BlockId, ColumnId, GroupId, NomenclatureId, OptionId, RecordId, RevisionId, RowPath, SurfaceId,
-};
-use varve_record::{Actor, ActorKind, Draft, EntryOp, EntrySalts, Origin, RecordLog};
+use varve_core::{BlockId, ColumnId, GroupId, NomenclatureId, OptionId, RevisionId, SurfaceId};
 use varve_revision::{Publication, PublishBlockError, PublishNomenclatureError, RevisionDag};
 use varve_schema::{
     Arity, Block, BlockRef, Cardinality, Column, DepthPolicy, Element, Group, OptionRow,
     ScalarType, Schema, revision_id,
 };
-use varve_store::load::{LoadError, load_blocks, load_dag, load_log, load_nomenclatures};
+use varve_store::contract;
+use varve_store::load::{LoadError, load_blocks, load_dag, load_nomenclatures};
 use varve_store::{
-    BlockStore, LineageId, MemoryStore, NomenclatureStore, RecordLogStore, RevisionStore,
-    StoreError, SurfaceStore,
+    BlockStore, LineageId, MemoryStore, NomenclatureStore, RevisionStore, StoreError, SurfaceStore,
 };
 use varve_surface::{BlockDefaults, GroupNode, Surface};
-use varve_value::{CellState, CellValue, Op, Scalar};
 
 // ---- fixtures -------------------------------------------------------
-
-fn actor() -> Actor {
-    Actor {
-        id: "a1".into(),
-        kind: ActorKind::Human,
-    }
-}
-
-fn ts(minute: u8) -> Instant {
-    Instant::parse(&format!("2026-08-20T10:{minute:02}:00Z")).unwrap()
-}
-
-fn set(column: &str, value: &str) -> Op {
-    Op::Set {
-        column: ColumnId::new(column),
-        path: RowPath::root(),
-        state: CellState::Value(CellValue::One(Scalar::Text(value.into()))),
-    }
-}
-
-fn draft(minute: u8, base: u64, ops: Vec<Op>) -> Draft {
-    let n = ops.len();
-    Draft {
-        actor: actor(),
-        timestamp: ts(minute),
-        revision: RevisionId::new("rev-1"),
-        base_version: base,
-        origin: Origin::Entered,
-        note: None,
-        ops: ops.into_iter().map(EntryOp::Cell).collect(),
-        salts: EntrySalts {
-            meta: Salt([9; 32]),
-            ops: (0..n).map(|i| Salt([i as u8 + 1; 32])).collect(),
-        },
-    }
-}
-
-/// A valid log of `n` entries, minted by the kernel appender.
-fn log_of(record: &str, n: u64) -> RecordLog {
-    let mut log = RecordLog::new(RecordId::new(record));
-    for i in 0..n {
-        log.append(draft(i as u8, i, vec![set("name", &format!("v{i}"))]))
-            .unwrap();
-    }
-    log
-}
 
 fn column(id: &str) -> Element {
     Element::Column(Column {
@@ -120,122 +68,28 @@ fn surface(revision: &str, id: &str) -> Surface {
 }
 
 // ---- record logs ----------------------------------------------------
-
-async fn check_log_roundtrip(store: &impl RecordLogStore) {
-    let record = RecordId::new("r1");
-    let log = log_of("r1", 3);
-    for entry in log.entries() {
-        store.append(&record, entry).await.unwrap();
-    }
-    assert_eq!(store.version(&record).await.unwrap(), 3);
-
-    let reloaded = load_log(store, &record).await.unwrap();
-    assert_eq!(reloaded.entries(), log.entries());
-
-    // Partial read: entries from a seq; past-the-end is empty.
-    assert_eq!(store.entries(&record, 1).await.unwrap().len(), 2);
-    assert_eq!(store.entries(&record, 3).await.unwrap().len(), 0);
-
-    // Unknown record: empty, version 0 — creation is the first append.
-    let ghost = RecordId::new("ghost");
-    assert_eq!(store.entries(&ghost, 0).await.unwrap().len(), 0);
-    assert_eq!(store.version(&ghost).await.unwrap(), 0);
-    assert!(load_log(store, &ghost).await.unwrap().entries().is_empty());
-}
-
-async fn check_log_seq_conflict(store: &impl RecordLogStore) {
-    let record = RecordId::new("r1");
-    let log = log_of("r1", 2);
-    store.append(&record, &log.entries()[0]).await.unwrap();
-
-    // Replaying the same seq: the optimistic-concurrency refusal.
-    let err = store.append(&record, &log.entries()[0]).await.unwrap_err();
-    assert_eq!(
-        err,
-        StoreError::SeqConflict {
-            record: record.clone(),
-            next: 1,
-            got: 0,
-        }
-    );
-    // Skipping ahead is refused the same way.
-    let mut ahead = log.entries()[1].clone();
-    ahead.envelope.seq = 5;
-    let err = store.append(&record, &ahead).await.unwrap_err();
-    assert_eq!(
-        err,
-        StoreError::SeqConflict {
-            record: record.clone(),
-            next: 1,
-            got: 5,
-        }
-    );
-    // A refused append changes nothing.
-    assert_eq!(store.version(&record).await.unwrap(), 1);
-}
-
-async fn check_loader_enforces_chain(store: &impl RecordLogStore) {
-    // The store accepts any entry with the right seq — including one
-    // minted for another record (wrong genesis, wrong prev). The
-    // loader is where that dies.
-    let record = RecordId::new("r1");
-    store
-        .append(&record, &log_of("r1", 1).entries()[0])
-        .await
-        .unwrap();
-    let foreign = log_of("other", 2).entries()[1].clone();
-    store.append(&record, &foreign).await.unwrap();
-
-    let err = load_log(store, &record).await.unwrap_err();
-    assert!(matches!(err, LoadError::Chain { record: r, .. } if r == record));
-}
-
-async fn check_record_enumeration(store: &impl RecordLogStore) {
-    for name in ["r1", "r2", "r3", "r4", "r5"] {
-        let record = RecordId::new(name);
-        store
-            .append(&record, &log_of(name, 1).entries()[0])
-            .await
-            .unwrap();
-    }
-    let page = store.records(None, 2).await.unwrap();
-    assert_eq!(page, vec![RecordId::new("r1"), RecordId::new("r2")]);
-    let rest = store.records(Some(&RecordId::new("r2")), 10).await.unwrap();
-    assert_eq!(
-        rest,
-        vec![
-            RecordId::new("r3"),
-            RecordId::new("r4"),
-            RecordId::new("r5")
-        ]
-    );
-    assert!(
-        store
-            .records(Some(&RecordId::new("r5")), 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-}
+// The checks live in `varve_store::contract` (the executable store
+// contract, platform P.8) so the platform's Toasty implementation
+// runs the same ones; here they run against the reference store.
 
 #[tokio::test]
 async fn log_roundtrip() {
-    check_log_roundtrip(&MemoryStore::new()).await;
+    contract::check_log_roundtrip(&MemoryStore::new()).await;
 }
 
 #[tokio::test]
 async fn log_seq_conflict() {
-    check_log_seq_conflict(&MemoryStore::new()).await;
+    contract::check_log_seq_conflict(&MemoryStore::new()).await;
 }
 
 #[tokio::test]
 async fn loader_enforces_chain() {
-    check_loader_enforces_chain(&MemoryStore::new()).await;
+    contract::check_loader_enforces_chain(&MemoryStore::new()).await;
 }
 
 #[tokio::test]
 async fn record_enumeration() {
-    check_record_enumeration(&MemoryStore::new()).await;
+    contract::check_record_enumeration(&MemoryStore::new()).await;
 }
 
 // ---- revisions ------------------------------------------------------

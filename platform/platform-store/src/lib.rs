@@ -23,23 +23,30 @@
 //! as [`StoreError::Corrupt`], never as a silent repair, matching
 //! the loaders' §2.13 posture.
 //!
-//! Scope: `RevisionStore` + `SurfaceStore` (publication, P.4). The
-//! record-log, block, and nomenclature tables land with case files.
+//! Scope: `RevisionStore` + `SurfaceStore` (publication, P.4) and
+//! `RecordLogStore` (case files, P.4 *Case-file record log*): entry
+//! rows split into the §2.13 halves — envelope bytes beside the
+//! erasable content + salts — so §2.10 redaction is a column update
+//! under a chain that still verifies. The block and nomenclature
+//! tables land with the first block.
 
 #![forbid(unsafe_code)]
 
 mod rows;
 
+use std::collections::BTreeMap;
+
 use toasty::Executor;
 use tokio::sync::Mutex;
-use varve_core::RevisionId;
-use varve_core::canonical::ContentHash;
+use varve_core::canonical::{CanonicalValue, ContentHash, canonical_bytes};
+use varve_core::{RecordId, RevisionId};
+use varve_record::Entry;
 use varve_revision::Publication;
 use varve_schema::Schema;
-use varve_store::{LineageId, RevisionStore, StoreError, SurfaceStore};
+use varve_store::{LineageId, RecordLogStore, RevisionStore, StoreError, SurfaceStore};
 use varve_surface::Surface;
 
-use crate::rows::{PublicationRow, RevisionRow, SurfaceRow};
+use crate::rows::{PublicationRow, RecordEntryRow, RevisionRow, SurfaceRow};
 
 /// Every migration of the kernel tables, embedded at compile time
 /// from `toasty/`. Applied beside the platform set by
@@ -211,6 +218,145 @@ impl SurfaceStore for PlatformStore<'_> {
             .await
             .map_err(backend)?;
         row.map(|r| decode_surface(&r.body)).transpose()
+    }
+}
+
+/// The envelope fields of `varve_record::canon::entry_canonical` —
+/// the plaintext half that survives redaction (§2.13 decision 8).
+/// Everything else in the flat canonical object (ops, origin, note,
+/// salts) is the erasable half. `entry_from` re-validates the
+/// partition on read: a missing or extra key fails decoding.
+const ENVELOPE_KEYS: [&str; 8] = [
+    "seq",
+    "prev",
+    "actor",
+    "actor_kind",
+    "timestamp",
+    "revision",
+    "base_version",
+    "content_hash",
+];
+
+/// Splits one entry into the two stored halves, each JCS bytes of an
+/// object holding its share of `entry_canonical`'s fields.
+fn encode_entry(entry: &Entry) -> Result<(Vec<u8>, Vec<u8>), StoreError> {
+    let CanonicalValue::Object(fields) = varve_record::canon::entry_canonical(entry) else {
+        return Err(StoreError::Corrupt(
+            "entry_canonical is not an object".into(),
+        ));
+    };
+    let (envelope, content): (BTreeMap<_, _>, BTreeMap<_, _>) = fields
+        .into_iter()
+        .partition(|(key, _)| ENVELOPE_KEYS.contains(&key.as_str()));
+    let bytes = |half: BTreeMap<String, CanonicalValue>| {
+        canonical_bytes(&CanonicalValue::Object(half))
+            .map_err(|e| StoreError::Corrupt(format!("entry does not encode: {e}")))
+    };
+    Ok((bytes(envelope)?, bytes(content)?))
+}
+
+/// Rejoins the halves and decodes through the kernel codec, which
+/// enforces the exact key set and the op↔salt pairing.
+fn decode_entry(
+    record: &str,
+    seq: u64,
+    envelope: &[u8],
+    content: &[u8],
+) -> Result<Entry, StoreError> {
+    let corrupt = |e: &dyn std::fmt::Display| {
+        StoreError::Corrupt(format!("entry {seq} of '{record}' is unreadable: {e}"))
+    };
+    let mut fields = match varve_wire::canonical_from_bytes(envelope).map_err(|e| corrupt(&e))? {
+        CanonicalValue::Object(fields) => fields,
+        _ => return Err(corrupt(&"envelope is not an object")),
+    };
+    match varve_wire::canonical_from_bytes(content).map_err(|e| corrupt(&e))? {
+        CanonicalValue::Object(rest) => fields.extend(rest),
+        _ => return Err(corrupt(&"content is not an object")),
+    }
+    let entry = varve_record::canon::entry_from(&CanonicalValue::Object(fields))
+        .map_err(|e| corrupt(&e))?;
+    if entry.envelope.seq != seq {
+        return Err(corrupt(&format!(
+            "row seq {seq} carries an entry claiming seq {}",
+            entry.envelope.seq
+        )));
+    }
+    Ok(entry)
+}
+
+impl RecordLogStore for PlatformStore<'_> {
+    async fn append(&self, record: &RecordId, entry: &Entry) -> Result<(), StoreError> {
+        let (envelope, content) = encode_entry(entry)?;
+        let mut guard = self.exec.lock().await;
+        let next = RecordEntryRow::filter_by_record(record.as_str())
+            .count()
+            .exec(&mut **guard)
+            .await
+            .map_err(backend)?;
+        if entry.envelope.seq != next {
+            return Err(StoreError::SeqConflict {
+                record: record.clone(),
+                next,
+                got: entry.envelope.seq,
+            });
+        }
+        RecordEntryRow::create()
+            .record(record.as_str())
+            .seq(entry.envelope.seq)
+            .envelope(envelope)
+            .content(content)
+            .exec(&mut **guard)
+            .await
+            .map_err(backend)?;
+        Ok(())
+    }
+
+    async fn entries(&self, record: &RecordId, from: u64) -> Result<Vec<Entry>, StoreError> {
+        let mut guard = self.exec.lock().await;
+        let rows = RecordEntryRow::filter_by_record(record.as_str())
+            .filter(RecordEntryRow::fields().seq().ge(from))
+            .order_by(RecordEntryRow::fields().seq().asc())
+            .exec(&mut **guard)
+            .await
+            .map_err(backend)?;
+        rows.iter()
+            .map(|row| decode_entry(record.as_str(), row.seq, &row.envelope, &row.content))
+            .collect()
+    }
+
+    async fn version(&self, record: &RecordId) -> Result<u64, StoreError> {
+        let mut guard = self.exec.lock().await;
+        RecordEntryRow::filter_by_record(record.as_str())
+            .count()
+            .exec(&mut **guard)
+            .await
+            .map_err(backend)
+    }
+
+    async fn records(
+        &self,
+        after: Option<&RecordId>,
+        limit: usize,
+    ) -> Result<Vec<RecordId>, StoreError> {
+        let mut guard = self.exec.lock().await;
+        // One row per record: every record has an entry at seq 0 (a
+        // record is created by its first entry). An audit-sweep read
+        // (§13.6), not a hot path — no index beyond the primary key.
+        let mut filter = RecordEntryRow::fields().seq().eq(0u64);
+        if let Some(after) = after {
+            filter = filter.and(RecordEntryRow::fields().record().gt(after.as_str()));
+        }
+        let rows = RecordEntryRow::filter(filter)
+            .order_by(RecordEntryRow::fields().record().asc())
+            .limit(limit)
+            .exec(&mut **guard)
+            .await
+            .map_err(backend)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RecordId::new(row.record))
+            .collect())
     }
 }
 

@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["sync"] }
 anyhow = { version = "1", optional = true }
 thiserror.workspace = true
 varve-core = { path = "../../crates/varve-core" }
+varve-record = { path = "../../crates/varve-record" }
 varve-revision = { path = "../../crates/varve-revision" }
 varve-schema = { path = "../../crates/varve-schema" }
 varve-store = { path = "../../crates/varve-store" }
@@ -35,6 +36,8 @@ varve-wire = { path = "../../crates/varve-wire" }
 # platform-side.
 platform-core = { path = "../platform-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+# The executable store contract this implementation must pass.
+varve-store = { path = "../../crates/varve-store", features = ["test-util"] }
 
 [features]
 # The project-local migration CLI (the platform-core pattern): the CLI

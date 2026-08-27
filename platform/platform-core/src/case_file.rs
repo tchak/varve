@@ -40,6 +40,14 @@ pub struct CaseFile {
     #[belongs_to]
     pub procedure: Deferred<Procedure>,
 
+    /// The kernel record id (P.4 *Case-file record log*): minted
+    /// (UUID v7) at creation, its own identity because the chain
+    /// commits to it (`genesis_hash`) and §5/§6 migration carries it
+    /// across instances. The log itself stays empty until the first
+    /// cell write — a record is created by its first entry.
+    #[unique]
+    pub record_id: uuid::Uuid,
+
     /// The lifecycle discriminant. Only [`CaseFileStateValue::Draft`]
     /// exists until the checkpoint machine lands (P1); the kernel
     /// record log then becomes authoritative and this column stays a
@@ -222,6 +230,7 @@ pub async fn create_case_file(
     }
     let case_file = CaseFile::create()
         .procedure_id(procedure_id)
+        .record_id(uuid::Uuid::now_v7())
         .exec(&mut tx)
         .await?;
     add_case_file_participant(&mut tx, case_file.id, creator_id).await?;

@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["sync"] }
 toasty = { version = "0.10.0", features = ["postgresql", "jiff", "migration"] }
 toasty-cli = { version = "0.10.0", optional = true }
 # `procedure`: draft element ids are minted here (v4 — no ordering to preserve).
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 # `tree`: the authored tree is stored as platform-owned JSON (P.4) —
 # it carries audiences and presentation nodes no kernel object holds.
 serde_json = "1"
