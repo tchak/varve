@@ -496,7 +496,9 @@ logs*, shipped before publication itself (the kernel edge).
    structured code **`INVALID_TRANSITION`**: distinct from
    `CONFLICT`, which stays the optimistic-concurrency answer
    (re-read and retry) and now covers lifecycle races as well as
-   draft races. `publishRevision` joins with the kernel edge and
+   draft races. **Amended 2026-08-27 (G.13):** the code widens to
+   any operation the subject's lifecycle state refuses —
+   `createCaseFile` on a `Closed` procedure answers it too. `publishRevision` joins with the kernel edge and
    lands in `Published` from any state (P.4).
 3. **`Procedure.events: [ProcedureEvent!]!`** — the audit trail,
    oldest first, an array not a connection: the log holds lifecycle
@@ -738,3 +740,64 @@ values, where a wrong call costs a redesign and not a migration.
    reviewer sees it) — a later slice over the same value bag; the
    fillable preview is the full-tree administrator's view with the
    audience badges.
+
+## G.13 The case-file catalog slice (settled 2026-08-27)
+
+The first `CaseFile` appears in the schema — the **platform catalog
+half only**. The kernel record log (cells, checkpoints, `updateCells`,
+`submitCaseFile`) waits for `varve-store`'s record-log persistence;
+this slice is the row an applicant creates, who is on it, and the two
+listings G.2 promised. Settled by design argument on G.2's recorded
+rules plus the P.4 membership pattern (participants: platform P.4,
+*Case-file catalog and participants*).
+
+1. **`createCaseFile(input: { procedureId })` → the full `CaseFile`.**
+   Any authenticated account may create on a `Published` procedure —
+   applicants need no prior relation to it, and nothing bounds how
+   many case files one account opens on one procedure (DN allows any
+   number). One transaction: the row, the creator's participant row,
+   and the `case_file_events` `created` entry (the P.4 event-log
+   shape, landing now with a one-word alphabet). Refusals: a `Closed`
+   procedure is `INVALID_TRANSITION` — the G.6.4 code's doc widens
+   from "a lifecycle transition the machine refuses" to "an operation
+   the subject's lifecycle state refuses", no tenth code — while a
+   `Draft` procedure is `FORBIDDEN` for everyone: a never-published
+   procedure does not exist for non-members (G.6's same-answer
+   discipline), and the one party who *can* see it, its
+   administrators, has the G.12 preview — a case file on an
+   unpublished schema is a contradiction, not a permission an
+   organization member is missing.
+2. **Root `caseFiles` is viewer-scoped — and the schema's first
+   connection** (G.2 rule 4: case files are the unbounded list).
+   G.2 rule 3 already gave its filter `organization:`, `procedure:`,
+   `team:` members, i.e. the recorded design reads "the case files
+   the viewer can see" — which today collapses to exactly
+   *participant-of*. Recorded as viewer-scoped so P1's team
+   assignment extends the scope instead of forking a second query.
+   Newest first (id descending — UUID v7 is creation order);
+   forward-only (`first` defaulting to 25 and capped at 100, `after`
+   an opaque cursor). `last`/`before` and the rule 3 filters land
+   with the reviewer table (P1), which stays its own designed read
+   model (`CaseFileRow`, rule 2) either way.
+3. **`caseFile(id)`: participants and the owning organization's
+   members; `null` otherwise.** Administering a procedure means
+   seeing its case files — at the metadata level, which is all this
+   slice has; cells arrive later gated by surfaces (DESIGN §2.9).
+   **`Procedure.caseFiles`** (same connection shape, all of the
+   procedure's files) inherits the full object's member gating and
+   needs no scoping of its own today; when applicant-facing
+   procedure reads arrive (the portal), viewer-scoping extends it
+   rather than forking it.
+4. **Shapes.** `CaseFile { id, state, createdAt, updatedAt,
+   procedure: ProcedureRef!, participants: [CaseFileParticipant!]! }`
+   — participants bounded → array (rule 4), each `{ account:
+   AccountRef!, joinedAt }`. `state` is the rule 5 union with one
+   member today, `CaseFileDraftState { createdAt }`, beside the
+   `CaseFileStateValue` filtering enum (`DRAFT`); both grow with the
+   checkpoint machine (P1), and until checkpoints exist the platform
+   state column is the only authority (then P.9 Q3's read-model rule
+   takes over). `CaseFileRef { id, state: CaseFileStateValue!,
+   createdAt, procedure: ProcedureRef! }` — scalars plus ancestor
+   Refs (rule 1); both connections' nodes are Refs. `deleteCaseFile`
+   (legal for a never-submitted draft, rule 8) is deferred until the
+   applicant home needs it.

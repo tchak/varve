@@ -227,6 +227,27 @@ platform contributes only the state *machine* — which checkpoint may
 follow which — and mirrors the current state as a read-model column
 (authority: P.9 Q3).
 
+**Case-file catalog and participants (settled 2026-08-27).** The
+platform half of a case file is a catalog row — procedure id, the
+state read-model columns on the `procedure_state` pattern
+(discriminant + `state_since`, `None` iff `Draft`), `#[version]` —
+plus **participants**: a plain account⟷case-file join table with no
+role column, the organizations/teams membership shape (membership
+*is* the right — here, seeing and later filling the applicant
+surface). The creator is the first participant, written in one
+transaction with the row and the `created` event. *Participant* over
+*member* — already claimed twice for staff-side rights (organization
+= administer, team = review); a third membership meaning
+applicant-side access would strain the word — and over *owner*:
+DN's invités arrive by invitation (G.5 Q2) and messaging's audience
+(P2, keyed by case-file id) is exactly this set. Roles on the join
+row are the anticipated extension if invités carry fewer rights —
+P.9 Q16; creator provenance needs no column either way (the
+`created` event's actor). The kernel record log joins the row with
+`varve-store`'s record-log persistence (cells, checkpoints,
+`submitCaseFile`); until then the state column is the only authority
+and only `Draft` exists. API shape: `design/graphql.md` G.13.
+
 **Principals**: applicant, reviewer, procedure administrator, plus API
 tokens as non-human principals. Teams are platform tables whose entire
 effect is surface assignment over a set of case files. **Routing rules
@@ -1006,6 +1027,15 @@ everything shipped exists in DN and nothing shipped that doesn't.
     carries `base` (set from `latest_revision` when a draft starts),
     and publication refuses a draft whose base is no longer the
     lineage head (`CONFLICT`).
+
+16. **Participant roles.** (opened 2026-08-27, with the case-file
+    catalog, G.13.) The participants join table has no role column —
+    membership is the right, the P.4 pattern. DN distinguishes the
+    demandeur from invités; if invités carry fewer rights
+    (submission, decision notification, erasure requests), a role
+    column joins the table when the invitation machinery lands
+    (G.5 Q2, P2). Decide there, with DN's actual invité rights in
+    hand.
 
 ## P.10 Blob storage: platform-side encryption at rest (settled 2026-08-19)
 
