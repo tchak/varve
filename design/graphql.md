@@ -851,3 +851,59 @@ append operation (platform P.4 *Case-file record log*).
    `DRAFT` — the only state today; `SUBMITTED` inherits per G.1 with
    the P.4 *Two-sided editing* caveat. Admissibility never refuses
    (the standing G.12 rule): findings are the output, not a gate.
+
+## G.15 `submitCaseFile` (settled 2026-08-28)
+
+The first checkpoint (dépôt): the record log gets its first lifecycle
+op, the case-file state machine its second state, and admissibility
+its one gate. The kernel machinery exists whole (§2.9 checkpoints,
+§2.8 expected resolutions); this slice is the platform composition.
+
+1. **`submitCaseFile(input: { caseFileId })` → the full `CaseFile`.**
+   Participants only. The use case, one transaction: evaluate
+   admissibility of the record through the **applicant surface**,
+   pending set from the fold — §2.8 is explicit that DN submits
+   incomplete records while resolutions are pending, so the gate is
+   "no applicant finding *that pending does not excuse*" (vacuously
+   the plain no-findings rule until resolvers exist); refuse as
+   **`INADMISSIBLE`** — a tenth G.6.4 code, minted because this is
+   the one place admissibility gates (G.12/G.14's "never refuses"
+   holds everywhere else): the message carries the finding count,
+   the findings themselves are already readable on the object. Then
+   the kernel **checkpoint entry** through the `varve-service`
+   checkpoint operation — name `submitted`, `reading_revision` the
+   head revision (the §2.9 `pinned` default, recorded at its
+   source), `expected` empty until resolvers, frozen sets **empty**:
+   dépôt does not lock the applicant form (P.4/Q12 — instruction
+   does, at P1). Then the platform state column mirrors
+   `Submitted { since }` in the same transaction — **P.9 Q3
+   confirmed**: the checkpoint is authoritative, the column a read
+   model maintained only by use-case services. **No
+   `case_file_events` row**: the record log holds the lifecycle fact
+   (the P.4 event-log split doing its job).
+2. **State shapes** (G.2 rule 5): the union grows
+   `CaseFileSubmittedState { submittedAt }`, the enum `SUBMITTED`.
+   Submitting a submitted case file is `INVALID_TRANSITION`.
+   `updateCells` stays legal in `SUBMITTED` unchanged — the §2.9
+   thesis: the case file is editable until instruction, and the
+   dépôt checkpoint froze nothing.
+3. **Refusals**: `FORBIDDEN` (non-participant or absent, one
+   answer), `INVALID_TRANSITION` (already submitted),
+   `INADMISSIBLE`, `CONFLICT` (the row race, as `updateCells`).
+4. **Reads stay head-lens at P0.** The checkpoint records the pin;
+   the API keeps folding through the head publication (G.14) until
+   the reviewer side lands mixed-revision reading (DESIGN §5.5) —
+   whether and where the `pinned` lens reaches the API is G.5 Q6.
+
+## G.5 Open questions (continued)
+
+6. **The pinned reading lens in the API.** DESIGN §2.9 settled the
+   default lens as `pinned` (at submission) per schema, and G.15's
+   checkpoint records the pinned revision — but the API reads
+   through the head publication (G.14), a deliberate P0
+   simplification: surfaces hang off *publications* while the
+   checkpoint pins a *revision*, and two publications may share a
+   revision (§2.13 decision 9), so "the surfaces the applicant
+   submitted under" needs the publication resolved from the log's
+   position, not the revision alone. Decide with the reviewer
+   table's mixed-revision reads (P1, DESIGN §5.5).

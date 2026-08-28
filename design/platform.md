@@ -883,11 +883,16 @@ everything shipped exists in DN and nothing shipped that doesn't.
    `platform-graphql` depends on it to provide that transport and
    mirrors `error::Code` in the client's own enum (a test keeps the
    two sets equal — five variants do not earn a shared crate).
-3. **Case-file state authority.** Derived from checkpoints alone, or also
+3. ~~**Case-file state authority.** Derived from checkpoints alone, or also
    mirrored as a platform column? Lean: checkpoints are authoritative
    and the column is a read model maintained only by the use-case
    services, never written independently. Confirm when the P1 state
-   machine lands.
+   machine lands.~~ **Resolved (2026-08-28, `graphql.md` G.15) as the
+   lean:** the first checkpoint (`submitted`) landed exactly so —
+   the log entry is the fact, the state column and `state_since` are
+   its mirror, written by `submit_case_file` in the transaction that
+   appends the checkpoint, and no `case_file_events` row duplicates
+   it. The P1 machine extends the same pattern.
 4. ~~**Draft autosave granularity.** An entry per autosave is the
    kernel-pure answer but may bloat logs; DESIGN §12.8 (post-submission
    edit profile) will size it. The alternative — a platform-side draft
