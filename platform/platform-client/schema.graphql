@@ -196,6 +196,23 @@ type CaseFile {
 	"""
 	procedure: ProcedureRef!
 	"""
+	Every written cell of the record, in address order (G.14:
+	the G.12 shapes unwrapped) — the fold of the record log read
+	through the head publication's applicant surface; stale cells
+	are inert.
+	"""
+	cells: [Cell!]!
+	"""
+	Every `many` group's ordered item list — the row identities a
+	write addresses; a freshly added item has no cells yet.
+	"""
+	items: [ItemList!]!
+	"""
+	Admissibility of the record per compiled surface (applicant /
+	reviewer), watched, never a gate (G.14).
+	"""
+	findings: [AdmissibilityFinding!]!
+	"""
 	The participants, oldest first — every one may see the case
 	file and later fill its applicant surface (bounded, G.2.4).
 	"""
@@ -823,6 +840,14 @@ type Mutation {
 	missing one `FORBIDDEN`.
 	"""
 	createCaseFile(input: CreateCaseFileInput!): CaseFile!
+	"""
+	Applies one batch of cell writes to a case file's record as
+	one kernel log entry (G.14): all-or-nothing, through the
+	applicant surface. Participants only. `INVALID_WRITE` refuses
+	the batch whole; `CONFLICT` answers a lost race — re-read and
+	retry.
+	"""
+	updateCells(input: UpdateCellsInput!): CaseFile!
 	"""
 	Closes a published procedure to new submissions (platform
 	P.4 *Procedure lifecycle*); `INVALID_TRANSITION` from any
@@ -1673,6 +1698,21 @@ input UnsetCellInput {
 	The row path; omitted = the root scope.
 	"""
 	path: [RowSegmentInput!]! = []
+}
+
+"""
+`updateCells` input (G.14).
+"""
+input UpdateCellsInput {
+	"""
+	The case file; the viewer must participate.
+	"""
+	caseFileId: ID!
+	"""
+	Applied in order, all-or-nothing, as **one** record-log
+	entry; must not be empty (no entry is minted for nothing).
+	"""
+	writes: [CellWriteInput!]!
 }
 
 """

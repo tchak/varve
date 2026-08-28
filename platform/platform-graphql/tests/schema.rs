@@ -434,6 +434,10 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "createCaseFile(input: CreateCaseFileInput!): CaseFile!",
         "union CaseFileState = CaseFileDraftState",
         "participants: [CaseFileParticipant!]!",
+        // G.14: the record read model and its write, the G.12 shapes.
+        "updateCells(input: UpdateCellsInput!): CaseFile!",
+        "cells: [Cell!]!",
+        "findings: [AdmissibilityFinding!]!",
     ] {
         assert!(sdl.contains(needle), "missing {needle:?} in\n{sdl}");
     }
@@ -2668,4 +2672,338 @@ async fn the_typed_client_walks_the_case_file_catalog() {
     assert_eq!(page.edges[0].node.id, created.id);
     assert_eq!(page.edges[0].node.state, CaseFileStateValue::Draft);
     assert!(!page.page_info.has_next_page);
+}
+
+// ---------------------------------------------------------------
+// Cells on the case file (G.14): the record read model and
+// updateCells over the kernel record log.
+// ---------------------------------------------------------------
+
+/// The record selection every cell write and read shares (G.14: the
+/// G.12 shapes, unwrapped onto the case file).
+const RECORD: &str = "id
+    cells { __typename
+        ... on TextCell { columnId path { groupId itemId } value }
+        ... on BooleanCell { columnId value }
+        ... on EmptyCell { columnId path { groupId itemId } }
+    }
+    items { groupId parent { groupId itemId } itemIds }
+    findings { __typename
+        ... on MissingRequiredFinding { surface columnId path { groupId itemId } }
+        ... on FormatViolationFinding { surface columnId path { groupId itemId } }
+    }";
+
+impl Api {
+    async fn write_cells(&self, who: &Principal, case_file_id: &str, writes: Value) -> Value {
+        let mut data = self
+            .data(
+                who,
+                &format!(
+                    "mutation($input: UpdateCellsInput!) {{
+                        updateCells(input: $input) {{ {RECORD} }}
+                    }}"
+                ),
+                json!({ "input": { "caseFileId": case_file_id, "writes": writes } }),
+            )
+            .await;
+        data["updateCells"].take()
+    }
+
+    async fn write_cells_error(
+        &self,
+        who: &Principal,
+        case_file_id: &str,
+        writes: Value,
+    ) -> String {
+        self.error_code(
+            who,
+            "mutation($input: UpdateCellsInput!) {
+                updateCells(input: $input) { id }
+            }",
+            json!({ "input": { "caseFileId": case_file_id, "writes": writes } }),
+        )
+        .await
+    }
+
+    async fn read_record(&self, who: &Principal, case_file_id: &str) -> Value {
+        let mut data = self
+            .data(
+                who,
+                &format!("query($id: ID!) {{ caseFile(id: $id) {{ {RECORD} }} }}"),
+                json!({ "id": case_file_id }),
+            )
+            .await;
+        data["caseFile"].take()
+    }
+
+    /// A published procedure with a required text column and a
+    /// `many` group holding one — the record journeys' fixture.
+    /// Returns `(procedure id, nom column id, group id, prénom id)`.
+    async fn published_family_procedure(
+        &self,
+        who: &Principal,
+        tag: &str,
+    ) -> (String, String, String, String) {
+        let org = self
+            .create_organization(who, &unique_slug(tag), "Org")
+            .await;
+        let pid = id_of(&self.create_procedure(who, &id_of(&org), "Bourse").await);
+        let p = self
+            .edit(
+                who,
+                "addColumn",
+                "AddColumnInput",
+                json!({ "procedureId": pid, "label": "Nom", "type": { "text": {} } }),
+            )
+            .await;
+        let nom = id_of(&p["revisionDraft"]["elements"][0]);
+        let p = self
+            .edit(
+                who,
+                "addGroup",
+                "AddGroupInput",
+                json!({ "procedureId": pid, "label": "Enfants", "cardinality": "MANY" }),
+            )
+            .await;
+        let enfants = id_of(&p["revisionDraft"]["elements"][1]);
+        let p = self
+            .edit(
+                who,
+                "addColumn",
+                "AddColumnInput",
+                json!({ "procedureId": pid, "label": "Prénom", "type": { "text": {} },
+                        "placement": { "parentId": enfants } }),
+            )
+            .await;
+        let prenom = id_of(&p["revisionDraft"]["elements"][2]);
+        let data = self
+            .data(
+                who,
+                "mutation($input: PublishRevisionInput!) {
+                    publishRevision(input: $input) { published }
+                }",
+                json!({ "input": { "procedureId": pid } }),
+            )
+            .await;
+        assert_eq!(data["publishRevision"]["published"], true, "{data}");
+        (pid, nom, enfants, prenom)
+    }
+}
+
+/// `(surface, columnId)` of every finding of a record read, sorted.
+fn record_finding_index(case_file: &Value) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = case_file["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .map(|f| {
+            (
+                f["surface"].as_str().expect("surface").to_owned(),
+                f["columnId"].as_str().expect("columnId").to_owned(),
+            )
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// The record log's stored entry count, straight off the kernel
+/// store — the one-entry-per-batch fact (P.9 Q4).
+async fn stored_entries(db: &mut toasty::Db, case_file_id: &str) -> u64 {
+    let case_file = platform_core::find_case_file(db, case_file_id.parse().unwrap())
+        .await
+        .expect("find")
+        .expect("stored");
+    let record = varve_core::RecordId::new(case_file.record_id.to_string());
+    let shared: platform_core::SharedExecutor =
+        tokio::sync::Mutex::new(db as &mut dyn toasty::Executor);
+    let store = platform_store::PlatformStore::new(&shared);
+    varve_store::RecordLogStore::version(&store, &record)
+        .await
+        .expect("version")
+}
+
+#[tokio::test]
+async fn case_file_cells_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await; // administers
+    let bob = account(&mut db, "bob").await; // applies
+    let carol = account(&mut db, "carol").await; // stranger
+    let (pid, nom, enfants, prenom) = api.published_family_procedure(&alice, "cells").await;
+    let cid = {
+        let data = api
+            .data(
+                &bob,
+                CREATE_CASE_FILE,
+                json!({ "input": { "procedureId": pid } }),
+            )
+            .await;
+        id_of(&data["createCaseFile"])
+    };
+
+    // The empty record: no cells, no items, the required column
+    // missing on both surfaces — and the organization's member reads
+    // the same record the participant does (metadata-level catalog
+    // visibility carries the record read, G.14).
+    for who in [&bob, &alice] {
+        let read = api.read_record(who, &cid).await;
+        assert_eq!(read["cells"], json!([]), "{read}");
+        assert_eq!(
+            record_finding_index(&read),
+            [
+                ("applicant".to_owned(), nom.clone()),
+                ("reviewer".to_owned(), nom.clone())
+            ],
+            "{read}"
+        );
+    }
+
+    // Filling the required cell clears its findings; the cell reads
+    // back typed.
+    let read = api
+        .write_cells(
+            &bob,
+            &cid,
+            json!([{ "set": { "columnId": nom, "state": { "text": "Ada" } } }]),
+        )
+        .await;
+    assert_eq!(record_finding_index(&read), [] as [(String, String); 0]);
+    assert_eq!(read["cells"][0]["__typename"], "TextCell", "{read}");
+    assert_eq!(read["cells"][0]["value"], "Ada", "{read}");
+
+    // An item joins the `many` group: its server-minted id comes
+    // back in `items`, the required column inside is missing on that
+    // row; writing through its path clears it.
+    let read = api
+        .write_cells(&bob, &cid, json!([{ "addItem": { "groupId": enfants } }]))
+        .await;
+    assert_eq!(read["items"][0]["groupId"], enfants.as_str(), "{read}");
+    let item = read["items"][0]["itemIds"][0]
+        .as_str()
+        .expect("minted id")
+        .to_owned();
+    assert_eq!(
+        record_finding_index(&read),
+        [
+            ("applicant".to_owned(), prenom.clone()),
+            ("reviewer".to_owned(), prenom.clone())
+        ],
+        "{read}"
+    );
+    let read = api
+        .write_cells(
+            &bob,
+            &cid,
+            json!([{ "set": { "columnId": prenom,
+                "path": [{ "groupId": enfants, "itemId": item }],
+                "state": { "text": "Sam" } } }]),
+        )
+        .await;
+    assert_eq!(record_finding_index(&read), [] as [(String, String); 0]);
+    assert_eq!(read["cells"].as_array().unwrap().len(), 2, "{read}");
+
+    // Removing the row cascades its cells; the whole removal is one
+    // batch with the reorder-free op set.
+    let read = api
+        .write_cells(
+            &bob,
+            &cid,
+            json!([{ "removeItem": { "groupId": enfants, "itemId": item } }]),
+        )
+        .await;
+    assert_eq!(read["cells"].as_array().unwrap().len(), 1, "{read}");
+    assert_eq!(read["items"], json!([]), "{read}");
+
+    // Refused batches store nothing, whole: an unknown column (not
+    // on the surface), a kind mismatch, an empty batch — and only
+    // participants write: the administrator and a stranger read the
+    // same FORBIDDEN.
+    for (writes, code) in [
+        (
+            json!([{ "set": { "columnId": "missing", "state": { "text": "x" } } }]),
+            "INVALID_WRITE",
+        ),
+        (
+            json!([{ "set": { "columnId": nom, "state": { "boolean": true } } }]),
+            "INVALID_WRITE",
+        ),
+        (json!([]), "INVALID_INPUT"),
+    ] {
+        assert_eq!(api.write_cells_error(&bob, &cid, writes).await, code);
+    }
+    for who in [&alice, &carol] {
+        let code = api
+            .write_cells_error(
+                who,
+                &cid,
+                json!([{ "set": { "columnId": nom, "state": { "text": "x" } } }]),
+            )
+            .await;
+        assert_eq!(code, "FORBIDDEN");
+    }
+
+    // One entry per accepted batch (P.9 Q4): four accepted, none of
+    // the refusals stored.
+    assert_eq!(stored_entries(&mut db, &cid).await, 4);
+}
+
+#[tokio::test]
+async fn the_typed_client_fills_a_case_file() {
+    use platform_client::case_file::{
+        CaseFileRecordQuery, CaseFileRecordVariables, CreateCaseFile, CreateCaseFileInput,
+        CreateCaseFileVariables, UpdateCells, UpdateCellsInput, UpdateCellsVariables,
+    };
+    use platform_client::preview::{Cell, CellStateInput, CellWriteInput};
+
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let bob = account(&mut db, "bob").await;
+    let (pid, nom, _, _) = api.published_family_procedure(&alice, "typed-cells").await;
+    let client = api.client(&bob);
+
+    let created = platform_client::run(
+        &client,
+        CreateCaseFile::build(CreateCaseFileVariables {
+            input: CreateCaseFileInput {
+                procedure_id: cynic::Id::new(&pid),
+            },
+        }),
+    )
+    .await
+    .expect("createCaseFile")
+    .create_case_file;
+
+    let updated = platform_client::run(
+        &client,
+        UpdateCells::build(UpdateCellsVariables {
+            input: UpdateCellsInput {
+                case_file_id: created.id.clone(),
+                writes: vec![CellWriteInput::set(
+                    cynic::Id::new(&nom),
+                    vec![],
+                    CellStateInput::text("Ada"),
+                )],
+            },
+        }),
+    )
+    .await
+    .expect("updateCells")
+    .update_cells;
+    assert!(updated.findings.is_empty());
+    assert!(matches!(&updated.cells[0], Cell::Text(c) if c.value == "Ada"));
+
+    let read = platform_client::run(
+        &client,
+        CaseFileRecordQuery::build(CaseFileRecordVariables {
+            id: created.id.clone(),
+        }),
+    )
+    .await
+    .expect("caseFile")
+    .case_file
+    .expect("visible to its participant");
+    assert_eq!(read.cells, updated.cells);
+    assert_eq!(read.findings, updated.findings);
 }

@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use varve_core::canonical::MAX_SAFE_INTEGER;
-use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId};
+use varve_core::{ColumnId, GroupId, NomenclatureId, OptionId, RowPath};
 use varve_schema::{
     Arity, Cardinality, CastError, NomenclatureTable, OptionRow, ScalarType, Schema, SchemaIndex,
     nomenclature_rows,
@@ -249,4 +249,60 @@ pub fn check(
     }
 
     errors
+}
+
+/// Drops whatever [`check`] names, to a fixpoint: the read-side
+/// answer to schema drift — stale cells (a removed column, a changed
+/// type) and their dependents are inert, never surfaced (platform
+/// G.12/G.14). A fixpoint that stops making progress resets to the
+/// empty bag: better no values than values conformance refuses.
+pub fn prune(values: &mut RecordValues, schema: &Schema, nomenclatures: &NomenclatureTable) {
+    loop {
+        let errors = check(values, schema, nomenclatures);
+        if errors.is_empty() {
+            return;
+        }
+        let before = (values.cells.len(), values.items.len());
+        for error in &errors {
+            cull(values, error);
+        }
+        if (values.cells.len(), values.items.len()) == before {
+            *values = RecordValues::default();
+            return;
+        }
+    }
+}
+
+fn cull(values: &mut RecordValues, error: &ConformanceError) {
+    use ConformanceError as E;
+    match error {
+        E::UnknownColumn(c)
+        | E::ScopeMismatch(c)
+        | E::UnknownItem(c, _)
+        | E::ArityMismatch(c)
+        | E::TypeMismatch(c)
+        | E::UnknownOption(c, _)
+        | E::UnknownNomenclature(c, _, _)
+        | E::DuplicateElement(c)
+        | E::EmptyList(c)
+        | E::AttachmentTypeNotAccepted(c, _)
+        | E::AttachmentTooLarge(c)
+        | E::AttachmentSizeUnrepresentable(c) => {
+            values.cells.retain(|addr, _| addr.column != *c);
+        }
+        E::UnknownGroup(g)
+        | E::MisplacedItems(g)
+        | E::DuplicateItem(g)
+        | E::OrphanItemList(g, _)
+        | E::EmptyItemList(g) => {
+            values
+                .items
+                .retain(|addr, _| addr.group != *g && !path_names(&addr.parent, g));
+            values.cells.retain(|addr, _| !path_names(&addr.path, g));
+        }
+    }
+}
+
+fn path_names(path: &RowPath, group: &GroupId) -> bool {
+    path.segments().iter().any(|seg| seg.group == *group)
 }

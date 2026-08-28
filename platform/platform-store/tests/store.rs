@@ -342,5 +342,12 @@ async fn record_log_contract() {
     rolled_back!(db, contract::check_log_roundtrip);
     rolled_back!(db, contract::check_log_seq_conflict);
     rolled_back!(db, contract::check_loader_enforces_chain);
-    rolled_back!(db, contract::check_record_enumeration);
+    {
+        let mut tx = db.transaction().await.unwrap();
+        let shared: platform_store::SharedExecutor = Mutex::new(&mut tx as &mut dyn Executor);
+        let store = PlatformStore::new(&shared);
+        // A unique namespace: the walk sees the shared database's
+        // committed records beside this run's rolled-back ones.
+        contract::check_record_enumeration(&store, &uuid_like()).await;
+    }
 }

@@ -221,3 +221,64 @@ mod tests {
         assert_eq!(document["variables"]["input"]["procedureId"], "abc");
     }
 }
+
+/// Variables of [`CaseFileRecordQuery`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct CaseFileRecordVariables {
+    pub id: cynic::Id,
+}
+
+/// `query($id: ID!) { caseFile(id: $id) { cells items findings } }`
+/// — the record read model (G.14: the G.12 shapes on the case
+/// file), separate from [`CaseFileQuery`] so catalog reads stay
+/// metadata-only.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Query", variables = "CaseFileRecordVariables")]
+pub struct CaseFileRecordQuery {
+    #[arguments(id: $id)]
+    pub case_file: Option<CaseFileRecord>,
+}
+
+/// The three record fields of the full case file.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "CaseFile")]
+pub struct CaseFileRecord {
+    pub cells: Vec<crate::preview::Cell>,
+    /// Every `many` group's ordered item list — a freshly added
+    /// item's server-minted id is read here.
+    pub items: Vec<crate::preview::ItemList>,
+    pub findings: Vec<crate::preview::AdmissibilityFinding>,
+}
+
+/// `updateCells` input: an ordered batch of writes (G.14).
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct UpdateCellsInput {
+    pub case_file_id: cynic::Id,
+    pub writes: Vec<crate::preview::CellWriteInput>,
+}
+
+/// Variables of [`UpdateCells`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct UpdateCellsVariables {
+    pub input: UpdateCellsInput,
+}
+
+/// `mutation($input: UpdateCellsInput!) { updateCells(input: $input)
+/// { … } }` — one record-log entry, all-or-nothing; `INVALID_WRITE`
+/// refuses the batch with the reason, `CONFLICT` a lost race.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "UpdateCellsVariables")]
+pub struct UpdateCells {
+    #[arguments(input: $input)]
+    pub update_cells: UpdatedCaseFile,
+}
+
+/// What `updateCells` answers with: the record after the batch.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "CaseFile")]
+pub struct UpdatedCaseFile {
+    pub id: cynic::Id,
+    pub cells: Vec<crate::preview::Cell>,
+    pub items: Vec<crate::preview::ItemList>,
+    pub findings: Vec<crate::preview::AdmissibilityFinding>,
+}

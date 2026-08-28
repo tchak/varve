@@ -140,30 +140,57 @@ pub async fn check_loader_enforces_chain(store: &impl RecordLogStore) {
 }
 
 /// `records` pages known ids ascending, strictly after the cursor.
-pub async fn check_record_enumeration(store: &impl RecordLogStore) {
-    for name in ["r1", "r2", "r3", "r4", "r5"] {
-        let record = RecordId::new(name);
+/// `tag` namespaces this run's ids: a shared database may hold other
+/// records (committed by other suites), so the check walks the full
+/// enumeration and asserts about its own subsequence — ordering and
+/// cursor semantics hold globally either way.
+pub async fn check_record_enumeration(store: &impl RecordLogStore, tag: &str) {
+    let names: Vec<RecordId> = (1..=5)
+        .map(|i| RecordId::new(format!("{tag}-r{i}")))
+        .collect();
+    for record in &names {
         store
-            .append(&record, &log_of(name, 1).entries()[0])
+            .append(record, &log_of(record.as_str(), 1).entries()[0])
             .await
             .unwrap();
     }
-    let page = store.records(None, 2).await.unwrap();
-    assert_eq!(page, vec![RecordId::new("r1"), RecordId::new("r2")]);
-    let rest = store.records(Some(&RecordId::new("r2")), 10).await.unwrap();
-    assert_eq!(
-        rest,
-        vec![
-            RecordId::new("r3"),
-            RecordId::new("r4"),
-            RecordId::new("r5")
-        ]
-    );
-    assert!(
-        store
-            .records(Some(&RecordId::new("r5")), 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let ours = |page: &[RecordId]| -> Vec<RecordId> {
+        page.iter()
+            .filter(|r| r.as_str().starts_with(tag))
+            .cloned()
+            .collect()
+    };
+
+    // A full walk in pages of 2: ascending, each page strictly after
+    // the cursor, and every id of this run seen exactly once, in
+    // order.
+    let mut seen = Vec::new();
+    let mut cursor: Option<RecordId> = None;
+    loop {
+        let page = store.records(cursor.as_ref(), 2).await.unwrap();
+        assert!(page.len() <= 2, "page overflows its limit");
+        for pair in page.windows(2) {
+            assert!(pair[0].as_str() < pair[1].as_str(), "page not ascending");
+        }
+        if let (Some(first), Some(cursor)) = (page.first(), &cursor) {
+            assert!(
+                first.as_str() > cursor.as_str(),
+                "page not strictly after the cursor"
+            );
+        }
+        match page.last() {
+            Some(last) => {
+                cursor = Some(last.clone());
+                seen.extend(page);
+            }
+            None => break,
+        }
+    }
+    assert_eq!(ours(&seen), names);
+
+    // Resuming strictly after the second id yields the last three.
+    let rest = store.records(Some(&names[1]), 10_000).await.unwrap();
+    assert_eq!(ours(&rest), names[2..]);
+    let past = store.records(Some(&names[4]), 10_000).await.unwrap();
+    assert!(ours(&past).is_empty());
 }

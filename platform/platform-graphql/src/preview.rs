@@ -307,28 +307,28 @@ impl CellWriteInput {
     /// malformed one is `INVALID_INPUT` before any use case runs
     /// (G.6.4) — a write refused *against the draft* is
     /// `INVALID_WRITE`, downstream.
-    pub fn into_write(self) -> async_graphql::Result<platform_core::PreviewWrite> {
+    pub fn into_write(self) -> async_graphql::Result<platform_core::CellWrite> {
         Ok(match self {
-            CellWriteInput::Set(set) => platform_core::PreviewWrite::Set {
+            CellWriteInput::Set(set) => platform_core::CellWrite::Set {
                 column: ColumnId::new(set.column_id.as_str()),
                 path: row_path(set.path),
                 state: set.state.into_state()?,
             },
-            CellWriteInput::Unset(unset) => platform_core::PreviewWrite::Unset {
+            CellWriteInput::Unset(unset) => platform_core::CellWrite::Unset {
                 column: ColumnId::new(unset.column_id.as_str()),
                 path: row_path(unset.path),
             },
-            CellWriteInput::AddItem(add) => platform_core::PreviewWrite::AddItem {
+            CellWriteInput::AddItem(add) => platform_core::CellWrite::AddItem {
                 group: GroupId::new(add.group_id.as_str()),
                 parent: row_path(add.parent),
                 before: add.before_item_id.map(|id| ItemId::new(id.as_str())),
             },
-            CellWriteInput::RemoveItem(remove) => platform_core::PreviewWrite::RemoveItem {
+            CellWriteInput::RemoveItem(remove) => platform_core::CellWrite::RemoveItem {
                 group: GroupId::new(remove.group_id.as_str()),
                 parent: row_path(remove.parent),
                 item: ItemId::new(remove.item_id.as_str()),
             },
-            CellWriteInput::Reorder(reorder) => platform_core::PreviewWrite::Reorder {
+            CellWriteInput::Reorder(reorder) => platform_core::CellWrite::Reorder {
                 group: GroupId::new(reorder.group_id.as_str()),
                 parent: row_path(reorder.parent),
                 order: reorder
@@ -391,7 +391,7 @@ fn row_path(segments: Vec<RowSegmentInput>) -> RowPath {
 
 /// The preview of a draft's values and findings, resolved server-side
 /// (`platform_core::preview_values` + `preview_findings`).
-pub fn preview(values: &RecordValues, findings: Vec<platform_core::PreviewFinding>) -> Preview {
+pub fn preview(values: &RecordValues, findings: Vec<platform_core::SurfaceFinding>) -> Preview {
     let mut cells = Vec::with_capacity(values.cells.len());
     for (addr, state) in &values.cells {
         let column_id = ID::from(addr.column.as_str());

@@ -34,6 +34,7 @@ pub mod account;
 pub mod api_token;
 pub mod case_file;
 pub mod case_file_event;
+pub mod case_file_record;
 pub mod db;
 pub mod organization;
 pub mod preview;
@@ -63,6 +64,9 @@ pub use case_file::{
     list_case_file_participants, list_procedure_case_files,
 };
 pub use case_file_event::{CaseFileEvent, CaseFileEventKind, list_case_file_events};
+pub use case_file_record::{
+    RecordRead, RecordReadError, UpdateCellsError, case_file_record, update_case_file_cells,
+};
 pub use db::{MIGRATIONS, connect, connect_with};
 pub use organization::{
     CreateOrganizationError, Member, Organization, OrganizationMembership, add_organization_member,
@@ -72,8 +76,8 @@ pub use organization::{
     organizations_by_ids, remove_organization_member,
 };
 pub use preview::{
-    PreviewBytes, PreviewDecodeError, PreviewError, PreviewFinding, PreviewWrite,
-    PreviewWriteError, preview_findings, preview_values, update_preview,
+    PreviewBytes, PreviewDecodeError, PreviewError, PreviewWriteError, preview_findings,
+    preview_values, update_preview,
 };
 pub use principal::Principal;
 pub use procedure::{
@@ -94,7 +98,13 @@ pub use session::{
     DEFAULT_SESSION_TTL, MAX_USER_AGENT_CHARS, Session, create_session, delete_account_sessions,
     delete_session, destroy_session, find_live_session, list_live_sessions, sweep_expired,
 };
-pub use surfaces::{APPLICANT_SURFACE, REVIEWER_SURFACE, SurfacePair, compile_surfaces};
+pub use surfaces::{
+    APPLICANT_SURFACE, REVIEWER_SURFACE, SurfaceFinding, SurfacePair, compile_surfaces,
+    surface_findings,
+};
+// The write batch `updateCells` and `updatePreview` share (G.14: the
+// G.12 shapes carried over) — the service's type, re-exported so the
+// schema layer names one crate.
 pub use team::{
     Team, TeamMembership, add_team_member, create_team, find_team, is_team_member,
     list_account_teams, list_organization_teams, list_team_members, remove_team_member,
@@ -108,3 +118,4 @@ pub use tree_edit::{
     new_node_id, new_option_id, remove_element, update_column, update_group, update_note,
     update_section,
 };
+pub use varve_service::CellWrite;

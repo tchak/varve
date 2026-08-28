@@ -89,7 +89,7 @@ async fn loader_enforces_chain() {
 
 #[tokio::test]
 async fn record_enumeration() {
-    contract::check_record_enumeration(&MemoryStore::new()).await;
+    contract::check_record_enumeration(&MemoryStore::new(), "en").await;
 }
 
 // ---- revisions ------------------------------------------------------

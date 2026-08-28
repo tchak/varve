@@ -5,7 +5,7 @@
 //! every handler re-implements the sequence, and the invariants are
 //! only as strong as the sloppiest one.
 //!
-//! First operation: **impact-gated publication** (§3,
+//! Two operations: **impact-gated publication** (§3,
 //! design/platform.md P.4 *Publication*): fork-point check → kernel
 //! validation (schema, then each surface against it) → `varve-impact`
 //! classification against the lineage head → gate on the report →
@@ -15,7 +15,10 @@
 //! calls land individually, which tests accept.
 //!
 //! Steps, not loops (§2.8): nothing here schedules or retries — a
-//! host calls an operation and owns the transaction around it.
+//! host calls an operation and owns the transaction around it. The
+//! second operation is the **surface-gated cell append**
+//! ([`append_cells`]): one batch, one record-log entry (platform
+//! P.4 *Case-file record log*, graphql.md G.14).
 
 #![forbid(unsafe_code)]
 
@@ -225,5 +228,244 @@ where
         revision,
         report,
         surface_report,
+    })
+}
+
+/// One write of an [`AppendCells`] batch: the kernel patch ops with
+/// item placement as a **sibling anchor**, never an index (`before:
+/// None` appends), and item ids minted by the operation — the host
+/// API argument (design/graphql.md G.7.3, G.14).
+#[derive(Debug, Clone)]
+pub enum CellWrite {
+    Set {
+        column: varve_core::ColumnId,
+        path: varve_core::RowPath,
+        state: varve_value::CellState,
+    },
+    /// Back to absent — distinct from `Set(Empty)` (§2.4).
+    Unset {
+        column: varve_core::ColumnId,
+        path: varve_core::RowPath,
+    },
+    AddItem {
+        group: varve_core::GroupId,
+        parent: varve_core::RowPath,
+        before: Option<varve_core::ItemId>,
+    },
+    RemoveItem {
+        group: varve_core::GroupId,
+        parent: varve_core::RowPath,
+        item: varve_core::ItemId,
+    },
+    Reorder {
+        group: varve_core::GroupId,
+        parent: varve_core::RowPath,
+        order: Vec<varve_core::ItemId>,
+    },
+}
+
+/// A surface-gated cell append (§13.2, platform P.4 *Case-file record
+/// log*): one batch, one entry. The writer's surface is resolved by
+/// the host (authorization is surface assignment, §2.9); the schema
+/// and revision are the head the batch authors against.
+#[derive(Debug)]
+pub struct AppendCells<'a> {
+    pub record: varve_core::RecordId,
+    /// The surface the writer writes through: cell ops must target
+    /// its writable columns, item ops its writable groups (§2.9
+    /// *surfaces absorb writability*).
+    pub surface: &'a Surface,
+    /// The schema the entry authors against — the head revision's.
+    pub schema: &'a Schema,
+    /// Its id, stamped on the entry envelope (§2.9: the record is
+    /// never "on" a revision; every entry names its lens).
+    pub revision: varve_core::RevisionId,
+    pub writes: Vec<CellWrite>,
+    pub actor: varve_record::Actor,
+    pub timestamp: varve_core::primitives::Instant,
+}
+
+/// What an accepted append answers: the new log version and the
+/// folded values after the entry — computed once here so the host
+/// does not refold to render the response.
+#[derive(Debug)]
+pub struct AppendOutcome {
+    pub version: u64,
+    pub values: varve_value::RecordValues,
+}
+
+/// A refused batch. The first four are the host's `INVALID_WRITE`
+/// family (design/graphql.md G.14): the client's mistake, nothing
+/// stored. `Append` beyond `DoesNotApply` and the store's
+/// `SeqConflict` are the concurrency answers.
+#[derive(Debug, thiserror::Error)]
+pub enum AppendCellsError {
+    /// A cell op on a column the surface does not write (§2.9).
+    #[error("column '{0}' is not writable through the surface")]
+    NotWritable(varve_core::ColumnId),
+    /// An item op on a group the surface does not write.
+    #[error("group '{0}' is not writable through the surface")]
+    GroupNotWritable(varve_core::GroupId),
+    /// `AddItem` anchored on an item absent from its group's list.
+    #[error("anchor item '{item}' is not in group '{group}'")]
+    UnknownAnchor {
+        group: varve_core::GroupId,
+        item: varve_core::ItemId,
+    },
+    /// The ops do not apply to the current state, or the written
+    /// values do not conform to the schema.
+    #[error("{0}")]
+    DoesNotApply(varve_value::ApplyError),
+    /// The applied values do not fit the schema.
+    #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))]
+    Conformance(Vec<varve_value::ConformanceError>),
+    /// The kernel appender refused (salt counts, base version, a
+    /// lifecycle op) — for a cells batch built here, a host bug.
+    #[error(transparent)]
+    Append(#[from] varve_record::AppendError),
+    #[error(transparent)]
+    Load(#[from] varve_store::load::LoadError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+/// Appends one batch of cell writes to a record log as one entry
+/// (§2.9, P.9 Q4): load and verify the log, gate every op on the
+/// writer's surface, resolve sibling anchors and mint item ids
+/// against the current fold, check the applied result conforms to
+/// the schema, then `RecordLog::append` (which re-validates
+/// applicability and the chain) and the conditional store append.
+/// `salts` and `mint_item` are the Tier 5 randomness inputs, passed
+/// in like timestamps (§2.13 decision 5); `salts` receives the op
+/// count. Checkpoint frozen-set violations are deliberately not a
+/// gate here — §2.9: a pure read over the log that append never
+/// refuses on. Admissibility is likewise a read beside this
+/// operation, never a gate (G.14).
+pub async fn append_cells<S>(
+    store: &S,
+    request: AppendCells<'_>,
+    salts: impl FnOnce(usize) -> varve_record::EntrySalts,
+    mut mint_item: impl FnMut() -> varve_core::ItemId,
+) -> Result<AppendOutcome, AppendCellsError>
+where
+    S: varve_store::RecordLogStore,
+{
+    let mut log = varve_store::load::load_log(store, &request.record).await?;
+    let fold = log.fold().map_err(varve_record::AppendError::Unfoldable)?;
+
+    // The surface gate (§2.9) before any translation: the refusal
+    // names the offending element, not a downstream symptom.
+    let writable_columns = request.surface.writable_columns();
+    let writable_groups = request.surface.writable_groups();
+    for write in &request.writes {
+        match write {
+            CellWrite::Set { column, .. } | CellWrite::Unset { column, .. } => {
+                if !writable_columns.contains(column) {
+                    return Err(AppendCellsError::NotWritable(column.clone()));
+                }
+            }
+            CellWrite::AddItem { group, .. }
+            | CellWrite::RemoveItem { group, .. }
+            | CellWrite::Reorder { group, .. } => {
+                if !writable_groups.contains(group) {
+                    return Err(AppendCellsError::GroupNotWritable(group.clone()));
+                }
+            }
+        }
+    }
+
+    // Translate against a working copy of the fold: sibling anchors
+    // become indices, minted item ids land in the ops, and each op
+    // must apply in batch order. The copy is pruned first (the
+    // G.12/G.14 rule): stale cells of an older revision are inert —
+    // without this, one removed column would refuse every later
+    // batch as non-conforming. The log itself keeps them; pruning is
+    // a property of this snapshot, never of history.
+    let nomenclatures = NomenclatureTable::new();
+    let mut values = fold.values.clone();
+    varve_value::prune(&mut values, request.schema, &nomenclatures);
+    let mut ops = Vec::with_capacity(request.writes.len());
+    for write in request.writes {
+        let op = match write {
+            CellWrite::Set {
+                column,
+                path,
+                state,
+            } => varve_value::Op::Set {
+                column,
+                path,
+                state,
+            },
+            CellWrite::Unset { column, path } => varve_value::Op::Unset { column, path },
+            CellWrite::AddItem {
+                group,
+                parent,
+                before,
+            } => {
+                let list = values.items.get(&varve_value::ItemsAddr {
+                    group: group.clone(),
+                    parent: parent.clone(),
+                });
+                let at = match &before {
+                    Some(item) => list
+                        .and_then(|l| l.iter().position(|i| i == item))
+                        .ok_or_else(|| AppendCellsError::UnknownAnchor {
+                            group: group.clone(),
+                            item: item.clone(),
+                        })?,
+                    None => list.map_or(0, Vec::len),
+                };
+                varve_value::Op::AddItem {
+                    group,
+                    parent,
+                    item: mint_item(),
+                    at,
+                }
+            }
+            CellWrite::RemoveItem {
+                group,
+                parent,
+                item,
+            } => varve_value::Op::RemoveItem {
+                group,
+                parent,
+                item,
+            },
+            CellWrite::Reorder {
+                group,
+                parent,
+                order,
+            } => varve_value::Op::Reorder {
+                group,
+                parent,
+                order,
+            },
+        };
+        varve_value::apply(&mut values, &op).map_err(AppendCellsError::DoesNotApply)?;
+        ops.push(op);
+    }
+    let errors = varve_value::check(&values, request.schema, &nomenclatures);
+    if !errors.is_empty() {
+        return Err(AppendCellsError::Conformance(errors));
+    }
+
+    let n = ops.len();
+    // Server-side concurrency (platform P.4): read, fold and append
+    // share one load, so the base is exact by construction.
+    let base_version = log.version();
+    let entry = log.append(varve_record::Draft {
+        actor: request.actor,
+        timestamp: request.timestamp,
+        revision: request.revision,
+        base_version,
+        origin: varve_record::Origin::Entered,
+        note: None,
+        ops: ops.into_iter().map(varve_record::EntryOp::Cell).collect(),
+        salts: salts(n),
+    })?;
+    store.append(&request.record, entry).await?;
+    Ok(AppendOutcome {
+        version: log.version(),
+        values,
     })
 }

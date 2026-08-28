@@ -15,6 +15,9 @@ varve-schema = { path = "../varve-schema" }
 varve-revision = { path = "../varve-revision" }
 varve-impact = { path = "../varve-impact" }
 varve-surface = { path = "../varve-surface" }
+# The cell-append operation (§2.9, platform P.4): entries and folds.
+varve-record = { path = "../varve-record" }
+varve-value = { path = "../varve-value" }
 varve-store = { path = "../varve-store" }
 thiserror.workspace = true
 

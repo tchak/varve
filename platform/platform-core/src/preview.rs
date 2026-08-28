@@ -22,19 +22,19 @@
 //! preview state.
 
 use varve_core::canonical::CanonicalValue;
-use varve_core::{ColumnId, GroupId, ItemId, RowPath};
+use varve_core::{ColumnId, GroupId, ItemId};
 use varve_logic::PendingSet;
 use varve_record::canon::{
     RecordDecodeError, path_canonical, path_from, state_canonical, state_from,
 };
 use varve_schema::{NomenclatureTable, Schema, revision_id};
-use varve_surface::Finding;
-use varve_value::{
-    ApplyError, CellState, ConformanceError, ItemsAddr, Op, RecordValues, apply, check,
-};
+use varve_service::CellWrite;
+use varve_value::{ApplyError, ConformanceError, ItemsAddr, Op, RecordValues, apply, check, prune};
 
 use crate::procedure::{Procedure, RevisionDraftError, WorkingTree, working_tree};
-use crate::surfaces::{APPLICANT_SURFACE, REVIEWER_SURFACE, compile_surfaces};
+use crate::surfaces::{
+    APPLICANT_SURFACE, REVIEWER_SURFACE, SurfaceFinding, compile_surfaces, surface_findings,
+};
 use crate::tree::Tree;
 
 /// A preview [`RecordValues`] as its stored JSON bytes (one `BYTEA`
@@ -203,35 +203,6 @@ fn json_to_canonical(v: &serde_json::Value) -> CanonicalValue {
     }
 }
 
-/// One preview write (G.12): the kernel op set with item placement as
-/// a **sibling anchor**, never an index (`before: None` appends), and
-/// item ids server-minted — both the G.7.3 argument.
-#[derive(Debug, Clone)]
-pub enum PreviewWrite {
-    Set {
-        column: ColumnId,
-        path: RowPath,
-        state: CellState,
-    },
-    /// Back to absent — distinct from `Set(Empty)` (§2.4).
-    Unset { column: ColumnId, path: RowPath },
-    AddItem {
-        group: GroupId,
-        parent: RowPath,
-        before: Option<ItemId>,
-    },
-    RemoveItem {
-        group: GroupId,
-        parent: RowPath,
-        item: ItemId,
-    },
-    Reorder {
-        group: GroupId,
-        parent: RowPath,
-        order: Vec<ItemId>,
-    },
-}
-
 /// A refused batch (G.12 `INVALID_WRITE`): a type-level mistake —
 /// the client's, never the values' admissibility. Nothing is stored.
 #[derive(Debug, thiserror::Error)]
@@ -283,7 +254,7 @@ pub enum PreviewError {
 pub async fn update_preview(
     db: &mut toasty::Db,
     procedure: &mut Procedure,
-    writes: Vec<PreviewWrite>,
+    writes: Vec<CellWrite>,
 ) -> Result<RecordValues, PreviewError> {
     let WorkingTree { tree, .. } = working_tree(procedure)?;
     let schema = tree.schema();
@@ -317,14 +288,6 @@ pub fn preview_values(
     Ok(values)
 }
 
-/// One admissibility finding of the preview, tagged with the compiled
-/// surface it holds on (`applicant` / `reviewer` — P.4's fixed pair).
-#[derive(Debug, Clone, PartialEq)]
-pub struct PreviewFinding {
-    pub surface: &'static str,
-    pub finding: Finding,
-}
-
 /// The preview's findings (G.12): admissibility of `values` evaluated
 /// per compiled surface — [`compile_surfaces`] over the draft tree,
 /// the pending set empty and eligibility unevaluated (no lifecycle in
@@ -332,25 +295,19 @@ pub struct PreviewFinding {
 pub fn preview_findings(
     tree: &Tree,
     values: &RecordValues,
-) -> Result<Vec<PreviewFinding>, varve_surface::SurfaceError> {
+) -> Result<Vec<SurfaceFinding>, varve_surface::SurfaceError> {
     let schema = tree.schema();
     let revision = revision_id(&schema);
     let pair = compile_surfaces(tree, &revision);
-    let nomenclatures = NomenclatureTable::new();
-    let pending = PendingSet::default();
-    let mut findings = Vec::new();
-    for (name, surface) in [
-        (APPLICANT_SURFACE, &pair.applicant),
-        (REVIEWER_SURFACE, &pair.reviewer),
-    ] {
-        let report =
-            varve_surface::admissibility(surface, &schema, &nomenclatures, values, &pending)?;
-        findings.extend(report.findings.into_iter().map(|finding| PreviewFinding {
-            surface: name,
-            finding,
-        }));
-    }
-    Ok(findings)
+    surface_findings(
+        &[
+            (APPLICANT_SURFACE, &pair.applicant),
+            (REVIEWER_SURFACE, &pair.reviewer),
+        ],
+        &schema,
+        values,
+        &PendingSet::default(),
+    )
 }
 
 /// The stored bag, undecoded stale cells and all; `None` stored means
@@ -368,11 +325,11 @@ fn stored_values(procedure: &Procedure) -> Result<RecordValues, PreviewDecodeErr
 
 fn apply_writes(
     values: &mut RecordValues,
-    writes: Vec<PreviewWrite>,
+    writes: Vec<CellWrite>,
 ) -> Result<(), PreviewWriteError> {
     for write in writes {
         let op = match write {
-            PreviewWrite::Set {
+            CellWrite::Set {
                 column,
                 path,
                 state,
@@ -381,8 +338,8 @@ fn apply_writes(
                 path,
                 state,
             },
-            PreviewWrite::Unset { column, path } => Op::Unset { column, path },
-            PreviewWrite::AddItem {
+            CellWrite::Unset { column, path } => Op::Unset { column, path },
+            CellWrite::AddItem {
                 group,
                 parent,
                 before,
@@ -407,7 +364,7 @@ fn apply_writes(
                     at,
                 }
             }
-            PreviewWrite::RemoveItem {
+            CellWrite::RemoveItem {
                 group,
                 parent,
                 item,
@@ -416,7 +373,7 @@ fn apply_writes(
                 parent,
                 item,
             },
-            PreviewWrite::Reorder {
+            CellWrite::Reorder {
                 group,
                 parent,
                 order,
@@ -442,63 +399,13 @@ fn new_item_id() -> ItemId {
 /// would block every future write. Terminates: every pass removes at
 /// least one cell or item list, with a full reset as the backstop
 /// should a refusal ever name nothing removable.
-fn prune(values: &mut RecordValues, schema: &Schema, nomenclatures: &NomenclatureTable) {
-    loop {
-        let errors = check(values, schema, nomenclatures);
-        if errors.is_empty() {
-            return;
-        }
-        let before = (values.cells.len(), values.items.len());
-        for error in &errors {
-            cull(values, error);
-        }
-        if (values.cells.len(), values.items.len()) == before {
-            *values = RecordValues::default();
-            return;
-        }
-    }
-}
-
-fn cull(values: &mut RecordValues, error: &ConformanceError) {
-    use ConformanceError as E;
-    match error {
-        E::UnknownColumn(c)
-        | E::ScopeMismatch(c)
-        | E::UnknownItem(c, _)
-        | E::ArityMismatch(c)
-        | E::TypeMismatch(c)
-        | E::UnknownOption(c, _)
-        | E::UnknownNomenclature(c, _, _)
-        | E::DuplicateElement(c)
-        | E::EmptyList(c)
-        | E::AttachmentTypeNotAccepted(c, _)
-        | E::AttachmentTooLarge(c)
-        | E::AttachmentSizeUnrepresentable(c) => {
-            values.cells.retain(|addr, _| addr.column != *c);
-        }
-        E::UnknownGroup(g)
-        | E::MisplacedItems(g)
-        | E::DuplicateItem(g)
-        | E::OrphanItemList(g, _)
-        | E::EmptyItemList(g) => {
-            values
-                .items
-                .retain(|addr, _| addr.group != *g && !path_names(&addr.parent, g));
-            values.cells.retain(|addr, _| !path_names(&addr.path, g));
-        }
-    }
-}
-
-fn path_names(path: &RowPath, group: &GroupId) -> bool {
-    path.segments().iter().any(|seg| seg.group == *group)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use varve_core::PathSeg;
+    use varve_core::{PathSeg, RowPath};
     use varve_schema::{Arity, Cardinality, ScalarType};
-    use varve_value::{CellAddr, CellValue, Scalar};
+    use varve_surface::Finding;
+    use varve_value::{CellAddr, CellState, CellValue, Scalar};
 
     use crate::tree::{Audience, TreeColumn, TreeElement, TreeGroup};
 
@@ -529,8 +436,8 @@ mod tests {
         }
     }
 
-    fn set(column: &str, path: RowPath, text: &str) -> PreviewWrite {
-        PreviewWrite::Set {
+    fn set(column: &str, path: RowPath, text: &str) -> CellWrite {
+        CellWrite::Set {
             column: ColumnId::new(column),
             path,
             state: CellState::Value(CellValue::One(Scalar::Text(text.into()))),
@@ -544,7 +451,7 @@ mod tests {
             &mut values,
             vec![
                 set("name", RowPath::root(), "Ada"),
-                PreviewWrite::AddItem {
+                CellWrite::AddItem {
                     group: GroupId::new("kids"),
                     parent: RowPath::root(),
                     before: None,
@@ -567,7 +474,7 @@ mod tests {
         let group = GroupId::new("kids");
         apply_writes(
             &mut values,
-            vec![PreviewWrite::AddItem {
+            vec![CellWrite::AddItem {
                 group: group.clone(),
                 parent: RowPath::root(),
                 before: None,
@@ -578,7 +485,7 @@ mod tests {
         // Anchored on the existing item: the new one lands in front.
         apply_writes(
             &mut values,
-            vec![PreviewWrite::AddItem {
+            vec![CellWrite::AddItem {
                 group: group.clone(),
                 parent: RowPath::root(),
                 before: Some(first.clone()),
@@ -591,7 +498,7 @@ mod tests {
         // A bogus anchor refuses the batch.
         let err = apply_writes(
             &mut values,
-            vec![PreviewWrite::AddItem {
+            vec![CellWrite::AddItem {
                 group,
                 parent: RowPath::root(),
                 before: Some(ItemId::new("missing")),
@@ -607,7 +514,7 @@ mod tests {
         let mut values = RecordValues::default();
         apply_writes(
             &mut values,
-            vec![PreviewWrite::Set {
+            vec![CellWrite::Set {
                 column: ColumnId::new("name"),
                 path: RowPath::root(),
                 state: CellState::Value(CellValue::One(Scalar::Boolean(true))),
@@ -629,7 +536,7 @@ mod tests {
             &mut values,
             vec![
                 set("name", RowPath::root(), "Ada"),
-                PreviewWrite::AddItem {
+                CellWrite::AddItem {
                     group: GroupId::new("kids"),
                     parent: RowPath::root(),
                     before: None,

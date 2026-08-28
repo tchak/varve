@@ -11,6 +11,7 @@ use async_graphql::{Context, ID, Object};
 use crate::error::{internal, invalid_input};
 use crate::member::AccountRef;
 use crate::organization::OrganizationRef;
+use crate::preview::{AdmissibilityFinding, Cell, ItemList, Preview, preview};
 use crate::procedure::ProcedureRef;
 use crate::session;
 
@@ -45,6 +46,29 @@ impl CaseFile {
     /// The procedure this case file was created on.
     async fn procedure(&self) -> &ProcedureRef {
         &self.procedure
+    }
+
+    /// Every written cell of the record, in address order (G.14:
+    /// the G.12 shapes unwrapped) — the fold of the record log read
+    /// through the head publication's applicant surface; stale cells
+    /// are inert.
+    async fn cells(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<Cell>> {
+        Ok(record_read(ctx, &self.case_file).await?.cells)
+    }
+
+    /// Every `many` group's ordered item list — the row identities a
+    /// write addresses; a freshly added item has no cells yet.
+    async fn items(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<ItemList>> {
+        Ok(record_read(ctx, &self.case_file).await?.items)
+    }
+
+    /// Admissibility of the record per compiled surface (applicant /
+    /// reviewer), watched, never a gate (G.14).
+    async fn findings(
+        &self,
+        ctx: &Context<'_>,
+    ) -> async_graphql::Result<Vec<AdmissibilityFinding>> {
+        Ok(record_read(ctx, &self.case_file).await?.findings)
     }
 
     /// The participants, oldest first — every one may see the case
@@ -278,4 +302,24 @@ pub(crate) async fn procedure_refs_of(
             Ok((procedure.id, ProcedureRef::of(&procedure, organization)))
         })
         .collect()
+}
+
+/// The record read behind the three G.14 fields: the kernel store
+/// scoped over the session's handle — a read needs no transaction.
+/// Each selected field loads independently; the head resolution and
+/// the log are small, and the full object is a point lookup (G.2).
+async fn record_read(
+    ctx: &Context<'_>,
+    case_file: &platform_core::CaseFile,
+) -> async_graphql::Result<Preview> {
+    let (_, mut db) = session(ctx)?;
+    let read = {
+        let shared: platform_core::SharedExecutor =
+            tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
+        let store = platform_store::PlatformStore::new(&shared);
+        platform_core::case_file_record(&store, case_file)
+            .await
+            .map_err(internal)?
+    };
+    Ok(preview(&read.values, read.findings))
 }

@@ -316,3 +316,34 @@ mod tests {
         }
     }
 }
+
+/// One admissibility finding tagged with the surface it holds on
+/// (`applicant` / `reviewer` — P.4's fixed pair). Shared by the
+/// preview (G.12, over compiled-from-draft surfaces) and the case
+/// file (G.14, over the head publication's stored surfaces).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceFinding {
+    pub surface: &'static str,
+    pub finding: varve_surface::Finding,
+}
+
+/// Admissibility of `values` evaluated per named surface, findings
+/// tagged. Never a gate (G.12/G.14): the output of a read.
+pub fn surface_findings(
+    surfaces: &[(&'static str, &varve_surface::Surface)],
+    schema: &varve_schema::Schema,
+    values: &varve_value::RecordValues,
+    pending: &varve_logic::PendingSet,
+) -> Result<Vec<SurfaceFinding>, varve_surface::SurfaceError> {
+    let nomenclatures = varve_schema::NomenclatureTable::new();
+    let mut findings = Vec::new();
+    for (name, surface) in surfaces {
+        let report =
+            varve_surface::admissibility(surface, schema, &nomenclatures, values, pending)?;
+        findings.extend(report.findings.into_iter().map(|finding| SurfaceFinding {
+            surface: name,
+            finding,
+        }));
+    }
+    Ok(findings)
+}

@@ -61,6 +61,16 @@ pub struct CreateCaseFileInput {
     pub procedure_id: ID,
 }
 
+/// `updateCells` input (G.14).
+#[derive(InputObject)]
+pub struct UpdateCellsInput {
+    /// The case file; the viewer must participate.
+    pub case_file_id: ID,
+    /// Applied in order, all-or-nothing, as **one** record-log
+    /// entry; must not be empty (no entry is minted for nothing).
+    pub writes: Vec<crate::preview::CellWriteInput>,
+}
+
 /// `closeProcedure` input.
 #[derive(InputObject)]
 pub struct CloseProcedureInput {
@@ -367,6 +377,22 @@ fn publish_error(error: PublishProcedureError) -> async_graphql::Error {
     }
 }
 
+fn update_cells_error(error: platform_core::UpdateCellsError) -> async_graphql::Error {
+    use platform_core::UpdateCellsError as E;
+    match error {
+        // The batch is the client's mistake: refused whole, nothing
+        // stored (G.14).
+        E::Write(e) => coded(Code::InvalidWrite, e.to_string()),
+        E::Conflict => coded(
+            Code::Conflict,
+            "the case file changed since it was read; re-read and retry",
+        ),
+        E::Read(e) => internal(e),
+        E::Db(e) => internal(e),
+        E::Random(e) => internal(e),
+    }
+}
+
 fn create_case_file_error(error: CreateCaseFileError) -> async_graphql::Error {
     match error {
         // A missing procedure and a never-published one answer the
@@ -495,6 +521,72 @@ impl Mutation {
             .await
             .map_err(internal)?
             .ok_or_else(|| internal("created case file's organization not found"))?;
+        Ok(CaseFile {
+            case_file,
+            procedure: ProcedureRef::of(&procedure, OrganizationRef::from(&organization)),
+        })
+    }
+
+    /// Applies one batch of cell writes to a case file's record as
+    /// one kernel log entry (G.14): all-or-nothing, through the
+    /// applicant surface. Participants only. `INVALID_WRITE` refuses
+    /// the batch whole; `CONFLICT` answers a lost race — re-read and
+    /// retry.
+    async fn update_cells(
+        &self,
+        ctx: &Context<'_>,
+        input: UpdateCellsInput,
+    ) -> async_graphql::Result<CaseFile> {
+        let (principal, mut db) = session(ctx)?;
+        let case_file_id = parse_id(&input.case_file_id)?;
+        if input.writes.is_empty() {
+            return Err(invalid_input("'writes' must not be empty"));
+        }
+        let writes = input
+            .writes
+            .into_iter()
+            .map(crate::preview::CellWriteInput::into_write)
+            .collect::<async_graphql::Result<Vec<_>>>()?;
+        let Some(mut case_file) = platform_core::find_case_file(&mut db, case_file_id)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(forbidden());
+        };
+        if !platform_core::is_case_file_participant(&mut db, case_file.id, principal.account_id)
+            .await
+            .map_err(internal)?
+        {
+            return Err(forbidden());
+        }
+        // The response's Refs, before the write — metadata only.
+        let procedure = platform_core::find_procedure(&mut db, case_file.procedure_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("case file's procedure not found"))?;
+        let organization = platform_core::find_organization(&mut db, procedure.organization_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("case file's organization not found"))?;
+        // The composition point (P.4): one transaction, the kernel
+        // store scoped over its shared executor, the row touch and
+        // the log append beside each other, one commit.
+        let mut tx = db.transaction().await.map_err(internal)?;
+        let outcome = {
+            let shared: platform_core::SharedExecutor =
+                tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
+            let store = platform_store::PlatformStore::new(&shared);
+            platform_core::update_case_file_cells(
+                &shared,
+                &store,
+                &mut case_file,
+                principal.account_id,
+                writes,
+            )
+            .await
+        };
+        outcome.map_err(update_cells_error)?;
+        tx.commit().await.map_err(internal)?;
         Ok(CaseFile {
             case_file,
             procedure: ProcedureRef::of(&procedure, OrganizationRef::from(&organization)),
