@@ -807,6 +807,20 @@ months after it; the secret's fixed `varve_` prefix exists for leak
 scanning. Per-procedure scoping (the DN shape above) is P2 work on
 top of the account-level token.
 
+**The principal grows an anonymous variant (settled 2026-08-28,
+G.16).** Pages outside the signed-in gates already resolve their
+session to "no principal"; the public catalog on `/` — the visitor's
+entry point — makes that a first-class execution identity instead of
+a dead end: the page executes the schema in-process as the anonymous
+principal, account-gated resolvers refuse it with `UNAUTHENTICATED`
+(G.16.2), and `/graphql` is untouched — bearer-only, so anonymous
+stays unreachable over HTTP by construction; whether it ever opens
+is a transport-policy decision deferred to integrator demand
+(G.16.1). P.1 rule 1 is why this is a schema fact and not an app
+shortcut: a page reading the catalog straight from `platform-core`
+was considered and rejected — it would carve the first private data
+path on the highest-traffic page.
+
 **Return-to after sign-in is a server-minted cookie, never a query
 parameter (settled 2026-08-28).** When a signed-in subtree's gate
 turns an anonymous request's 401 into the 303 to `/signin`, it first

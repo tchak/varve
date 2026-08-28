@@ -146,7 +146,8 @@ data (`platform-graphql` reads no headers, cookies, or tokens). The
 route authenticates with `Authorization: Bearer <api token>` only; the
 session cookie never authenticates the API and a token never
 authenticates a page (platform P.7). Attachments bypass the executor
-(G.1).
+(G.1). Anonymous execution exists in-process only (G.16): the
+bearer guard means every HTTP request executes as an account.
 
 The SDL is a checked-in artifact, `platform/platform-client/schema.graphql`
 — the contract integrators build against and the input `cynic`
@@ -207,6 +208,15 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    submitted under" needs the publication resolved from the log's
    position, not the revision alone. Decide with the reviewer
    table's mixed-revision reads (P1, DESIGN §5.5).
+7. **The portal slice.** G.16 gives the anonymous visitor the
+   catalog and nothing past the card. What comes next: a public
+   procedure detail page (which of `procedure(id)`'s fields are
+   public, or a separate `Published`-only lookup), the start flow
+   (catalog → sign-in gate → P.7 return-to → `createCaseFile`),
+   and catalog search — at DN scale (M0's 42,723 published
+   procedures) paging alone is a wall, and full-text search is a
+   platform concern, not a varve-logic filter. Decide with the
+   applicant portal, which is the catalog's whole reason to exist.
 
 ## G.6 The P0 slice (settled 2026-08-22)
 
@@ -904,3 +914,68 @@ its one gate. The kernel machinery exists whole (§2.9 checkpoints,
    the API keeps folding through the head publication (G.14) until
    the reviewer side lands mixed-revision reading (DESIGN §5.5) —
    whether and where the `pinned` lens reaches the API is G.5 Q6.
+
+## G.16 The anonymous viewer and the published catalog (settled 2026-08-28)
+
+The app's root page `/` is the visitor's front door: the catalog of
+published procedures, rendered with or without a session. P.1 rule 1
+makes that an API gap, never an internal route — the rejected
+alternative was the page calling `platform-core` directly, one
+"exceptional" bypass that would put the app's highest-traffic page
+outside the dogfooded schema and leave the catalog's read shapes
+unpinned in the SDL. What made the bypass tempting — reluctance to
+open an unauthenticated path into the API — dissolves by separating
+two decisions the architecture already keeps apart (the P.3 seam:
+`platform-app` owns transports and principal resolution): whether the
+*schema* can answer an anonymous viewer, and whether the *HTTP
+endpoint* accepts requests without a token. Only the first is needed,
+and only the first is settled here.
+
+1. **The principal grows an anonymous variant.** The executor keeps
+   receiving an already-resolved principal as request data
+   (`platform-graphql` reads no transport); the principal is now an
+   account principal *or* the anonymous one. The app already
+   resolves a page's session to "account or none" (P.7); a public
+   page builds its in-process transport with the anonymous principal
+   instead of having none to build. `/graphql` is untouched:
+   bearer-only (G.3, P.7), and every token resolves to an account,
+   so anonymous is unreachable over HTTP **by construction** — no
+   exclusion list, no flag. Opening anonymous HTTP access later is a
+   transport-policy decision needing no schema change, deliberately
+   deferred until an integrator need exists.
+2. **`UNAUTHENTICATED`, the eleventh G.6.4 code.** The shared
+   `session` helper — every account-gated resolver's one door to the
+   principal — refuses the anonymous principal with it, so the
+   existing schema closes to anonymous without any resolver
+   changing, non-null `viewer` included; a public field opts in by
+   reading the principal through an anonymous-tolerant sibling.
+   Distinct from `FORBIDDEN`, which presumes an account that lacks a
+   right: `UNAUTHENTICATED` says nobody is signed in and signing in
+   is the fix. The G.6.2 null discipline (absent and invisible are
+   one `null`) governs among authenticated viewers; anonymous gets
+   the uniform refusal and learns nothing about any id.
+3. **`publishedProcedures(first, after): ProcedureConnection!`** —
+   the catalog root field: every `Published` procedure of every
+   organization, answering any viewer, anonymous included. `Draft`
+   is never listed (a never-published procedure does not exist for
+   non-members — G.6.2 extended to the world); `Closed` leaves the
+   catalog while its case files live on, and re-publication re-lists
+   (P.4: publishing from `Closed` is the reopen). The pagination
+   shape is G.13.2's: forward-only, `first` defaulting to 25 and
+   capped at 100, opaque `after`, newest first (id descending —
+   UUID v7 is creation order); nodes are `ProcedureRef` (G.2
+   rule 1). The schema's second connection type.
+4. **`ProcedureRef` gains `description: String!`** — a scalar, so
+   rule-1 legal: the catalog card is title, organization, and
+   description, and a dedicated catalog node type would fork a
+   parallel Ref shape over one field. Catalog metadata is the live
+   platform row — title and description stay editable after
+   publication: the catalog names the procedure, the schema stays
+   behind publications.
+5. **The catalog stops at the card.** `procedure(id)` stays
+   member-only, and nothing else opens to anonymous in this slice.
+   What a visitor does next — the public procedure page, the
+   "commencer" flow into `createCaseFile` through the sign-in gate
+   and the P.7 return-to cookie, catalog search — is the portal
+   slice, opened as G.5 Q7; where a card links is that question's
+   first decision.
