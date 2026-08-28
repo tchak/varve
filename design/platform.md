@@ -290,10 +290,13 @@ because two of the choices cannot be retrofitted (§2.10):
   append", shaped like publication): `(record, ops, actor,
   timestamp, the writer's surface, base_version)` → ops checked
   against the surface's writable set (§2.9 *surfaces absorb
-  writability*), conformance via `varve-value`, checkpoint
-  validation via `validate_after_checkpoint` (vacuous until
-  `SUBMITTED` exists, wired from day one), then
-  `RecordLog::append` + store append. Admissibility is a read
+  writability*), conformance via `varve-value`, then
+  `RecordLog::append` + store append. Checkpoint frozen-set
+  violations are deliberately **not** an append gate — §2.9:
+  `validate_after_checkpoint` is a pure read over the log that
+  append never refuses on; the reviewer-side read reports them
+  when checkpoints exist (amended 2026-08-28 — an earlier wording
+  had the operation calling it vacuously). Admissibility is a read
   beside it, never a gate (the G.12 rule carried over).
 
 **Two-sided editing (recorded 2026-08-27, from DN direction).**

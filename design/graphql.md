@@ -801,3 +801,53 @@ rules plus the P.4 membership pattern (participants: platform P.4,
    Refs (rule 1); both connections' nodes are Refs. `deleteCaseFile`
    (legal for a never-submitted draft, rule 8) is deferred until the
    applicant home needs it.
+
+## G.14 Cells on the case file (settled 2026-08-28)
+
+The G.12 pilot pays out: the case file grows the record read model
+G.1 promised and the write mutation it reserved, both in the shapes
+the preview fixed — and everything new is underneath: the batch lands
+as **one entry in the kernel record log** through the `varve-service`
+append operation (platform P.4 *Case-file record log*).
+
+1. **Read shapes are the G.12 types, verbatim, unwrapped.**
+   `CaseFile.cells: [Cell!]!`, `items: [ItemList!]!`, `findings:
+   [AdmissibilityFinding!]!` directly on the full object — `Preview`
+   wrapped them only because they hung off `RevisionDraft`; the
+   record read model is the case file's own. Values are the fold of
+   the record log read through the **head publication**: schema by
+   revision id, surfaces by content hash from the publication's
+   surface map. Stale cells are inert at read (the G.12 rule; for a
+   record the pruning is read-time only — the log is append-only and
+   keeps history). `cells` renders through the **applicant surface's
+   column set** for every viewer at P0 — the only writing side today,
+   and the guard that reviewer-only cells (annotations privées) never
+   leak to applicants is in place from day one, vacuous or not;
+   per-audience reads arrive with reviewers (P1). `findings` stays
+   the surface-tagged pair (admissibility of both compiled surfaces
+   is what "can this submit" needs, and findings carry no cell
+   values), pending set from the fold (empty until resolvers),
+   eligibility unevaluated as in G.12.
+2. **`updateCells(input: { caseFileId, writes: [CellWriteInput!]! })`
+   → the full `CaseFile`.** The exact `updatePreview` write union —
+   set/unset/addItem/removeItem/reorder, sibling anchors,
+   server-minted item ids, `@oneOf` cell states per kind —
+   all-or-nothing as **one entry per batch** (P.9 Q4): origin
+   `entered`, actor the viewer's account, authored against the head
+   revision at write time. Participants only; writes go through the
+   applicant surface (P.4's fixed pair).
+3. **Refusals.** `INVALID_WRITE` for a batch the record refuses —
+   the G.12 set (unknown column, kind mismatch, bad anchor, bad
+   reorder, conformance) **plus the surface refusal new here**: a
+   cell op on a column not writable through the writer's surface, or
+   an item op on a group the surface does not carry (§2.9 *surfaces
+   absorb writability*); the message names the offender and nothing
+   is stored. An **empty batch is `INVALID_INPUT`** — no entry is
+   minted for nothing (`updatePreview` tolerates it because a bag
+   write of nothing writes nothing; a log is different). `CONFLICT`
+   for a lost race between co-participants (the store's next-seq
+   rule surfacing; server-side `base_version`, P.4). `FORBIDDEN` for
+   a non-participant or an absent case file, one answer. Legal in
+   `DRAFT` — the only state today; `SUBMITTED` inherits per G.1 with
+   the P.4 *Two-sided editing* caveat. Admissibility never refuses
+   (the standing G.12 rule): findings are the output, not a gate.
