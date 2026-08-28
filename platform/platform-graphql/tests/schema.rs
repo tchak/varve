@@ -432,10 +432,12 @@ fn sdl_has_the_slice_and_refs_carry_no_child_lists() {
         "caseFile(id: ID!): CaseFile",
         "caseFiles(first: Int, after: String): CaseFileConnection!",
         "createCaseFile(input: CreateCaseFileInput!): CaseFile!",
-        "union CaseFileState = CaseFileDraftState",
+        "union CaseFileState = CaseFileDraftState | CaseFileSubmittedState",
         "participants: [CaseFileParticipant!]!",
         // G.14: the record read model and its write, the G.12 shapes.
         "updateCells(input: UpdateCellsInput!): CaseFile!",
+        // G.15: the dépôt checkpoint.
+        "submitCaseFile(input: SubmitCaseFileInput!): CaseFile!",
         "cells: [Cell!]!",
         "findings: [AdmissibilityFinding!]!",
     ] {
@@ -3006,4 +3008,195 @@ async fn the_typed_client_fills_a_case_file() {
     .expect("visible to its participant");
     assert_eq!(read.cells, updated.cells);
     assert_eq!(read.findings, updated.findings);
+}
+
+// ---------------------------------------------------------------
+// submitCaseFile (G.15): the dépôt checkpoint.
+// ---------------------------------------------------------------
+
+const SUBMIT_CASE_FILE: &str = "mutation($input: SubmitCaseFileInput!) {
+    submitCaseFile(input: $input) {
+        id
+        state { __typename ... on CaseFileSubmittedState { submittedAt } }
+    }
+}";
+
+#[tokio::test]
+async fn submit_case_file_journey() {
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await; // administers
+    let bob = account(&mut db, "bob").await; // applies
+    let carol = account(&mut db, "carol").await; // stranger
+    let (pid, nom, _, _) = api.published_family_procedure(&alice, "submit").await;
+    let cid = {
+        let data = api
+            .data(
+                &bob,
+                CREATE_CASE_FILE,
+                json!({ "input": { "procedureId": pid } }),
+            )
+            .await;
+        id_of(&data["createCaseFile"])
+    };
+    let submit_input = json!({ "input": { "caseFileId": cid } });
+
+    // The one place admissibility gates (G.15): the required column
+    // is missing, so the dépôt refuses — and nothing changed.
+    let code = api
+        .error_code(&bob, SUBMIT_CASE_FILE, submit_input.clone())
+        .await;
+    assert_eq!(code, "INADMISSIBLE");
+    let read = api.read_record(&bob, &cid).await;
+    assert!(!record_finding_index(&read).is_empty());
+
+    // Only participants submit — the administrator reads, never
+    // submits; a stranger gets the same answer.
+    api.write_cells(
+        &bob,
+        &cid,
+        json!([{ "set": { "columnId": nom, "state": { "text": "Ada" } } }]),
+    )
+    .await;
+    for who in [&alice, &carol] {
+        let code = api
+            .error_code(who, SUBMIT_CASE_FILE, submit_input.clone())
+            .await;
+        assert_eq!(code, "FORBIDDEN");
+    }
+
+    // Admissible now: the dépôt lands, the union answers the fact.
+    let data = api.data(&bob, SUBMIT_CASE_FILE, submit_input.clone()).await;
+    let state = &data["submitCaseFile"]["state"];
+    assert_eq!(state["__typename"], "CaseFileSubmittedState", "{data}");
+    assert!(state["submittedAt"].as_str().unwrap().ends_with('Z'));
+
+    // The listing row carries the bare state.
+    let data = api.data(&bob, CASE_FILES, json!({})).await;
+    assert_eq!(data["caseFiles"]["edges"][0]["node"]["state"], "SUBMITTED");
+
+    // Submitting twice is a state-machine refusal.
+    let code = api
+        .error_code(&bob, SUBMIT_CASE_FILE, submit_input.clone())
+        .await;
+    assert_eq!(code, "INVALID_TRANSITION");
+
+    // The §2.9 thesis: submitted stays editable — dépôt froze
+    // nothing, so the applicant keeps writing.
+    let read = api
+        .write_cells(
+            &bob,
+            &cid,
+            json!([{ "set": { "columnId": nom, "state": { "text": "Grace" } } }]),
+        )
+        .await;
+    assert_eq!(read["cells"][0]["value"], "Grace", "{read}");
+
+    // The checkpoint is the authoritative fact, in the log itself:
+    // fill, checkpoint, post-submit fill — three entries, the
+    // checkpoint named and pinned. The platform event log still
+    // holds only `created` (P.4: the record log owns lifecycle).
+    let case_file = platform_core::find_case_file(&mut db, cid.parse().unwrap())
+        .await
+        .expect("find")
+        .expect("stored");
+    let record = varve_core::RecordId::new(case_file.record_id.to_string());
+    let log = {
+        let shared: platform_core::SharedExecutor =
+            tokio::sync::Mutex::new(&mut db as &mut dyn toasty::Executor);
+        let store = platform_store::PlatformStore::new(&shared);
+        varve_store::load::load_log(&store, &record)
+            .await
+            .expect("load log")
+    };
+    assert_eq!(log.entries().len(), 3);
+    let checkpoints = log.checkpoints();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].seq, 1);
+    assert_eq!(checkpoints[0].checkpoint.name, "submitted");
+    assert!(
+        !checkpoints[0]
+            .checkpoint
+            .reading_revision
+            .as_str()
+            .is_empty()
+    );
+    assert!(checkpoints[0].checkpoint.frozen_columns.is_empty());
+    let events = platform_core::list_case_file_events(&mut db, case_file.id)
+        .await
+        .expect("events");
+    assert_eq!(events.len(), 1, "{events:?}");
+}
+
+#[tokio::test]
+async fn the_typed_client_submits_a_case_file() {
+    use platform_client::case_file::{
+        CaseFileState, SubmitCaseFile, SubmitCaseFileInput, SubmitCaseFileVariables,
+    };
+    use platform_client::case_file::{
+        CreateCaseFile, CreateCaseFileInput, CreateCaseFileVariables, UpdateCells,
+        UpdateCellsInput, UpdateCellsVariables,
+    };
+    use platform_client::preview::{CellStateInput, CellWriteInput};
+
+    let Some(api) = api().await else { return };
+    let mut db = api.db.clone();
+    let alice = account(&mut db, "alice").await;
+    let bob = account(&mut db, "bob").await;
+    let (pid, nom, _, _) = api.published_family_procedure(&alice, "typed-submit").await;
+    let client = api.client(&bob);
+
+    let created = platform_client::run(
+        &client,
+        CreateCaseFile::build(CreateCaseFileVariables {
+            input: CreateCaseFileInput {
+                procedure_id: cynic::Id::new(&pid),
+            },
+        }),
+    )
+    .await
+    .expect("createCaseFile")
+    .create_case_file;
+
+    // INADMISSIBLE arrives as the typed error code.
+    let err = platform_client::run(
+        &client,
+        SubmitCaseFile::build(SubmitCaseFileVariables {
+            input: SubmitCaseFileInput {
+                case_file_id: created.id.clone(),
+            },
+        }),
+    )
+    .await
+    .expect_err("inadmissible");
+    assert_eq!(err.code(), Some(platform_client::Code::Inadmissible));
+
+    platform_client::run(
+        &client,
+        UpdateCells::build(UpdateCellsVariables {
+            input: UpdateCellsInput {
+                case_file_id: created.id.clone(),
+                writes: vec![CellWriteInput::set(
+                    cynic::Id::new(&nom),
+                    vec![],
+                    CellStateInput::text("Ada"),
+                )],
+            },
+        }),
+    )
+    .await
+    .expect("updateCells");
+
+    let submitted = platform_client::run(
+        &client,
+        SubmitCaseFile::build(SubmitCaseFileVariables {
+            input: SubmitCaseFileInput {
+                case_file_id: created.id.clone(),
+            },
+        }),
+    )
+    .await
+    .expect("submitCaseFile")
+    .submit_case_file;
+    assert!(matches!(submitted.state, CaseFileState::Submitted(_)));
 }

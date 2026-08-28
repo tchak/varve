@@ -149,6 +149,7 @@ impl CaseFileRef {
 #[derive(async_graphql::Union)]
 pub enum CaseFileState {
     Draft(CaseFileDraftState),
+    Submitted(CaseFileSubmittedState),
 }
 
 /// Being filled, never submitted. Its only fact is the row's
@@ -158,12 +159,20 @@ pub struct CaseFileDraftState {
     pub created_at: jiff::Timestamp,
 }
 
+/// Submitted (dépôt) — still editable by the applicant until
+/// instruction (G.15, DESIGN §2.9).
+#[derive(async_graphql::SimpleObject)]
+pub struct CaseFileSubmittedState {
+    pub submitted_at: jiff::Timestamp,
+}
+
 /// The bare state, for list rows and filters (G.2 rule 5's parallel
 /// enum, generated from the platform-core discriminant).
 #[derive(async_graphql::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 #[graphql(remote = "platform_core::CaseFileStateValue")]
 pub enum CaseFileStateValue {
     Draft,
+    Submitted,
 }
 
 /// The row's lifecycle columns as the union; a corrupt pair is an
@@ -176,6 +185,11 @@ pub(crate) fn case_file_state(
             platform_core::CaseFileState::Draft => CaseFileState::Draft(CaseFileDraftState {
                 created_at: case_file.created_at,
             }),
+            platform_core::CaseFileState::Submitted { since } => {
+                CaseFileState::Submitted(CaseFileSubmittedState {
+                    submitted_at: since,
+                })
+            }
         },
     )
 }

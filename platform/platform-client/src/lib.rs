@@ -116,13 +116,16 @@ pub enum Code {
     /// A preview cell write refused by the draft (G.12); the message
     /// says why and nothing was stored.
     InvalidWrite,
+    /// `submitCaseFile`: the record is not admissible through the
+    /// applicant surface (G.15); fix the form and retry.
+    Inadmissible,
     /// The platform failed, not the request.
     Internal,
 }
 
 impl Code {
     /// Every code, for the server-side set-equality test.
-    pub const ALL: [Code; 9] = [
+    pub const ALL: [Code; 10] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
@@ -131,6 +134,7 @@ impl Code {
         Code::InvalidTransition,
         Code::InvalidDraft,
         Code::InvalidWrite,
+        Code::Inadmissible,
         Code::Internal,
     ];
 
@@ -145,6 +149,7 @@ impl Code {
             Code::InvalidTransition => "INVALID_TRANSITION",
             Code::InvalidDraft => "INVALID_DRAFT",
             Code::InvalidWrite => "INVALID_WRITE",
+            Code::Inadmissible => "INADMISSIBLE",
             Code::Internal => "INTERNAL",
         }
     }

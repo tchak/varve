@@ -37,6 +37,10 @@ pub enum Code {
     /// The message carries the reason and the batch stored nothing.
     /// Minted here so `updateCells` inherits it.
     InvalidWrite,
+    /// `submitCaseFile`: the record is not admissible through the
+    /// applicant surface (G.15) — the one place admissibility gates.
+    /// The findings are readable on the case file; fix and retry.
+    Inadmissible,
     /// The platform failed, not the request: a store error or a
     /// wiring bug. The cause is logged server-side and never
     /// serialized — a client learns nothing about the database.
@@ -46,7 +50,7 @@ pub enum Code {
 impl Code {
     /// Every code; `platform-client` mirrors this set and a test
     /// keeps the two equal.
-    pub const ALL: [Code; 9] = [
+    pub const ALL: [Code; 10] = [
         Code::InvalidInput,
         Code::Forbidden,
         Code::SlugTaken,
@@ -55,6 +59,7 @@ impl Code {
         Code::InvalidTransition,
         Code::InvalidDraft,
         Code::InvalidWrite,
+        Code::Inadmissible,
         Code::Internal,
     ];
 
@@ -69,6 +74,7 @@ impl Code {
             Code::InvalidTransition => "INVALID_TRANSITION",
             Code::InvalidDraft => "INVALID_DRAFT",
             Code::InvalidWrite => "INVALID_WRITE",
+            Code::Inadmissible => "INADMISSIBLE",
             Code::Internal => "INTERNAL",
         }
     }

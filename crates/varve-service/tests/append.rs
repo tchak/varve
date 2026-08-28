@@ -308,3 +308,70 @@ async fn admissibility_never_gates_an_append() {
     .unwrap();
     assert_eq!(store.version(&RecordId::new("r1")).await.unwrap(), 1);
 }
+
+#[tokio::test]
+async fn a_checkpoint_entry_lands_and_reads_back() {
+    use varve_record::Checkpoint;
+    use varve_service::{AppendCheckpoint, append_checkpoint};
+
+    let store = MemoryStore::default();
+    let schema = schema();
+    let surface = surface(&schema, true);
+    let mut n = 0;
+    append_cells(
+        &store,
+        request(&schema, &surface, vec![set("name", "Ada")]),
+        salts,
+        minted(&mut n),
+    )
+    .await
+    .unwrap();
+
+    // The dépôt shape (G.15): nothing frozen, nothing expected.
+    let version = append_checkpoint(
+        &store,
+        AppendCheckpoint {
+            record: RecordId::new("r1"),
+            checkpoint: Checkpoint {
+                name: "submitted".into(),
+                reading_revision: revision_id(&schema),
+                expected: vec![],
+                frozen_columns: Default::default(),
+                frozen_groups: Default::default(),
+            },
+            revision: revision_id(&schema),
+            actor: Actor {
+                id: "a1".into(),
+                kind: ActorKind::Human,
+            },
+            timestamp: Instant::parse("2026-08-28T11:00:00Z").unwrap(),
+        },
+        salts,
+    )
+    .await
+    .unwrap();
+    assert_eq!(version, 2);
+
+    // The checkpoint reads back positioned, and cell writes after it
+    // still append — dépôt froze nothing (§2.9, Q12).
+    let record = RecordId::new("r1");
+    let log = load_log(&store, &record).await.unwrap();
+    let checkpoints = log.checkpoints();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].seq, 1);
+    assert_eq!(checkpoints[0].checkpoint.name, "submitted");
+    append_cells(
+        &store,
+        request(&schema, &surface, vec![set("name", "Grace")]),
+        salts,
+        minted(&mut n),
+    )
+    .await
+    .unwrap();
+    let log = load_log(&store, &record).await.unwrap();
+    assert_eq!(
+        varve_record::validate_after_checkpoint(&log, 1),
+        vec![],
+        "nothing frozen, nothing violated"
+    );
+}

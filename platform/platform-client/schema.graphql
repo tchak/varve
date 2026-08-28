@@ -272,7 +272,7 @@ The lifecycle state (G.2 rule 5): a union of state-specific
 objects, subject-prefixed. One member until the checkpoint
 machine lands (P1).
 """
-union CaseFileState = CaseFileDraftState
+union CaseFileState = CaseFileDraftState | CaseFileSubmittedState
 
 """
 The bare state, for list rows and filters (G.2 rule 5's parallel
@@ -280,6 +280,15 @@ enum, generated from the platform-core discriminant).
 """
 enum CaseFileStateValue {
 	DRAFT
+	SUBMITTED
+}
+
+"""
+Submitted (dépôt) — still editable by the applicant until
+instruction (G.15, DESIGN §2.9).
+"""
+type CaseFileSubmittedState {
+	submittedAt: DateTime!
 }
 
 """
@@ -848,6 +857,14 @@ type Mutation {
 	retry.
 	"""
 	updateCells(input: UpdateCellsInput!): CaseFile!
+	"""
+	Submits a case file — the dépôt checkpoint (G.15): pins the
+	reading revision, freezes nothing, and mirrors
+	`CaseFileSubmittedState`. Participants only. `INADMISSIBLE`
+	when the applicant surface has findings; `INVALID_TRANSITION`
+	when already submitted. The case file stays editable.
+	"""
+	submitCaseFile(input: SubmitCaseFileInput!): CaseFile!
 	"""
 	Closes a published procedure to new submissions (platform
 	P.4 *Procedure lifecycle*); `INVALID_TRANSITION` from any
@@ -1539,6 +1556,16 @@ URL/API handle of an organization: `[a-z0-9-]`, non-empty. Input
 is trimmed and lowercased before validation.
 """
 scalar Slug
+
+"""
+`submitCaseFile` input.
+"""
+input SubmitCaseFileInput {
+	"""
+	The case file; the viewer must participate.
+	"""
+	caseFileId: ID!
+}
 
 """
 One §3.1 surface change, named server-side like the column

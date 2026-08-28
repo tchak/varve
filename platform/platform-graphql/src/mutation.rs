@@ -71,6 +71,13 @@ pub struct UpdateCellsInput {
     pub writes: Vec<crate::preview::CellWriteInput>,
 }
 
+/// `submitCaseFile` input.
+#[derive(InputObject)]
+pub struct SubmitCaseFileInput {
+    /// The case file; the viewer must participate.
+    pub case_file_id: ID,
+}
+
 /// `closeProcedure` input.
 #[derive(InputObject)]
 pub struct CloseProcedureInput {
@@ -393,6 +400,22 @@ fn update_cells_error(error: platform_core::UpdateCellsError) -> async_graphql::
     }
 }
 
+fn submit_case_file_error(error: platform_core::SubmitCaseFileError) -> async_graphql::Error {
+    use platform_core::SubmitCaseFileError as E;
+    match error {
+        E::Transition(e) => coded(Code::InvalidTransition, e.to_string()),
+        E::Inadmissible(_) => coded(Code::Inadmissible, error.to_string()),
+        E::Conflict => coded(
+            Code::Conflict,
+            "the case file changed since it was read; re-read and retry",
+        ),
+        E::Corrupt(e) => internal(e),
+        E::Read(e) => internal(e),
+        E::Db(e) => internal(e),
+        E::Random(e) => internal(e),
+    }
+}
+
 fn create_case_file_error(error: CreateCaseFileError) -> async_graphql::Error {
     match error {
         // A missing procedure and a never-published one answer the
@@ -586,6 +609,54 @@ impl Mutation {
             .await
         };
         outcome.map_err(update_cells_error)?;
+        tx.commit().await.map_err(internal)?;
+        Ok(CaseFile {
+            case_file,
+            procedure: ProcedureRef::of(&procedure, OrganizationRef::from(&organization)),
+        })
+    }
+
+    /// Submits a case file — the dépôt checkpoint (G.15): pins the
+    /// reading revision, freezes nothing, and mirrors
+    /// `CaseFileSubmittedState`. Participants only. `INADMISSIBLE`
+    /// when the applicant surface has findings; `INVALID_TRANSITION`
+    /// when already submitted. The case file stays editable.
+    async fn submit_case_file(
+        &self,
+        ctx: &Context<'_>,
+        input: SubmitCaseFileInput,
+    ) -> async_graphql::Result<CaseFile> {
+        let (principal, mut db) = session(ctx)?;
+        let case_file_id = parse_id(&input.case_file_id)?;
+        let Some(mut case_file) = platform_core::find_case_file(&mut db, case_file_id)
+            .await
+            .map_err(internal)?
+        else {
+            return Err(forbidden());
+        };
+        if !platform_core::is_case_file_participant(&mut db, case_file.id, principal.account_id)
+            .await
+            .map_err(internal)?
+        {
+            return Err(forbidden());
+        }
+        let procedure = platform_core::find_procedure(&mut db, case_file.procedure_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("case file's procedure not found"))?;
+        let organization = platform_core::find_organization(&mut db, procedure.organization_id)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| internal("case file's organization not found"))?;
+        let mut tx = db.transaction().await.map_err(internal)?;
+        let outcome = {
+            let shared: platform_core::SharedExecutor =
+                tokio::sync::Mutex::new(&mut tx as &mut dyn toasty::Executor);
+            let store = platform_store::PlatformStore::new(&shared);
+            platform_core::submit_case_file(&shared, &store, &mut case_file, principal.account_id)
+                .await
+        };
+        outcome.map_err(submit_case_file_error)?;
         tx.commit().await.map_err(internal)?;
         Ok(CaseFile {
             case_file,

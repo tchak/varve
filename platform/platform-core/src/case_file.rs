@@ -88,15 +88,20 @@ pub struct CaseFile {
     pub version: u64,
 }
 
-/// A case file's lifecycle state with its fact. One state today; the
-/// checkpoint machine (P.4: `DRAFT` → `SUBMITTED` → …) grows here in
-/// the [`crate::procedure_state`] shape when the kernel record log
-/// lands.
+/// A case file's lifecycle state with its fact, on the
+/// [`crate::procedure_state`] shape. The states are **checkpoint
+/// mirrors** (P.9 Q3, resolved G.15): the record log's checkpoint
+/// entry is authoritative, these columns are the read model the
+/// use-case services maintain in the same transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaseFileState {
     /// Being filled, never submitted. No fact of its own —
     /// `created_at` already lives on the row.
     Draft,
+    /// Submitted (dépôt) at `since` — the `submitted` checkpoint's
+    /// mirror. Still editable by the applicant (§2.9, Q12:
+    /// instruction locks, submission does not).
+    Submitted { since: jiff::Timestamp },
 }
 
 /// The bare discriminant, as stored on the catalog row and mirrored
@@ -104,6 +109,7 @@ pub enum CaseFileState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, toasty::Embed)]
 pub enum CaseFileStateValue {
     Draft,
+    Submitted,
 }
 
 impl CaseFileState {
@@ -117,6 +123,7 @@ impl CaseFileState {
     ) -> Result<Self, CorruptCaseFileState> {
         match (value, since) {
             (CaseFileStateValue::Draft, None) => Ok(Self::Draft),
+            (CaseFileStateValue::Submitted, Some(since)) => Ok(Self::Submitted { since }),
             (value, since) => Err(CorruptCaseFileState { value, since }),
         }
     }
@@ -126,8 +133,26 @@ impl CaseFileState {
     pub fn columns(&self) -> (CaseFileStateValue, Option<jiff::Timestamp>) {
         match *self {
             Self::Draft => (CaseFileStateValue::Draft, None),
+            Self::Submitted { since } => (CaseFileStateValue::Submitted, Some(since)),
         }
     }
+
+    /// The dépôt transition (G.15): only from `Draft` — the P1
+    /// checkpoints extend this machine, never bypass it.
+    pub fn submit(self, now: jiff::Timestamp) -> Result<Self, CaseFileTransitionError> {
+        match self {
+            Self::Draft => Ok(Self::Submitted { since: now }),
+            other => Err(CaseFileTransitionError::NotDraft(other.columns().0)),
+        }
+    }
+}
+
+/// A transition the state machine refuses — `INVALID_TRANSITION` at
+/// the API.
+#[derive(Debug, thiserror::Error)]
+pub enum CaseFileTransitionError {
+    #[error("only a draft case file submits; this one is {0:?}")]
+    NotDraft(CaseFileStateValue),
 }
 
 /// A stored state whose columns disagree — see

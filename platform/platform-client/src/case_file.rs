@@ -39,6 +39,7 @@ pub struct CaseFile {
 #[cynic(graphql_type = "CaseFileState")]
 pub enum CaseFileState {
     Draft(CaseFileDraftState),
+    Submitted(CaseFileSubmittedState),
     /// A state this client predates.
     #[cynic(fallback)]
     Unknown,
@@ -51,11 +52,19 @@ pub struct CaseFileDraftState {
     pub created_at: jiff::Timestamp,
 }
 
+/// Submitted (dépôt) — still editable until instruction.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "CaseFileSubmittedState")]
+pub struct CaseFileSubmittedState {
+    pub submitted_at: jiff::Timestamp,
+}
+
 /// The bare state, as list rows carry it.
 #[derive(cynic::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 #[cynic(graphql_type = "CaseFileStateValue")]
 pub enum CaseFileStateValue {
     Draft,
+    Submitted,
 }
 
 /// A participation link: the account plus when it joined.
@@ -281,4 +290,34 @@ pub struct UpdatedCaseFile {
     pub cells: Vec<crate::preview::Cell>,
     pub items: Vec<crate::preview::ItemList>,
     pub findings: Vec<crate::preview::AdmissibilityFinding>,
+}
+
+/// `submitCaseFile` input.
+#[derive(cynic::InputObject, Debug, Clone)]
+pub struct SubmitCaseFileInput {
+    pub case_file_id: cynic::Id,
+}
+
+/// Variables of [`SubmitCaseFile`].
+#[derive(cynic::QueryVariables, Debug)]
+pub struct SubmitCaseFileVariables {
+    pub input: SubmitCaseFileInput,
+}
+
+/// `mutation($input: SubmitCaseFileInput!) { submitCaseFile(input: $input) { … } }`
+/// — the dépôt (G.15). Fails with `INADMISSIBLE` while the applicant
+/// surface has findings, `INVALID_TRANSITION` once submitted.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(graphql_type = "Mutation", variables = "SubmitCaseFileVariables")]
+pub struct SubmitCaseFile {
+    #[arguments(input: $input)]
+    pub submit_case_file: SubmittedCaseFile,
+}
+
+/// What a submission answers with: the state that now holds.
+#[derive(cynic::QueryFragment, Debug, Clone, PartialEq, Eq)]
+#[cynic(graphql_type = "CaseFile")]
+pub struct SubmittedCaseFile {
+    pub id: cynic::Id,
+    pub state: CaseFileState,
 }

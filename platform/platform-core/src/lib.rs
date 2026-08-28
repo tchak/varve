@@ -59,13 +59,14 @@ pub use api_token::{
 };
 pub use case_file::{
     CaseFile, CaseFilePage, CaseFileParticipant, CaseFileState, CaseFileStateValue,
-    CorruptCaseFileState, CreateCaseFileError, add_case_file_participant, create_case_file,
-    current_case_file_state, find_case_file, is_case_file_participant, list_account_case_files,
-    list_case_file_participants, list_procedure_case_files,
+    CaseFileTransitionError, CorruptCaseFileState, CreateCaseFileError, add_case_file_participant,
+    create_case_file, current_case_file_state, find_case_file, is_case_file_participant,
+    list_account_case_files, list_case_file_participants, list_procedure_case_files,
 };
 pub use case_file_event::{CaseFileEvent, CaseFileEventKind, list_case_file_events};
 pub use case_file_record::{
-    RecordRead, RecordReadError, UpdateCellsError, case_file_record, update_case_file_cells,
+    RecordRead, RecordReadError, SubmitCaseFileError, UpdateCellsError, case_file_record,
+    submit_case_file, update_case_file_cells,
 };
 pub use db::{MIGRATIONS, connect, connect_with};
 pub use organization::{

@@ -197,6 +197,16 @@ shapes; English-first vocabulary per platform P.4 (`procedure`,
    attachments stay permanently preview-inert, decide when real
    case-file uploads exist and the slot machinery has a shape to
    share. P2.
+6. **The pinned reading lens in the API.** DESIGN §2.9 settled the
+   default lens as `pinned` (at submission) per schema, and G.15's
+   checkpoint records the pinned revision — but the API reads
+   through the head publication (G.14), a deliberate P0
+   simplification: surfaces hang off *publications* while the
+   checkpoint pins a *revision*, and two publications may share a
+   revision (§2.13 decision 9), so "the surfaces the applicant
+   submitted under" needs the publication resolved from the log's
+   position, not the revision alone. Decide with the reviewer
+   table's mixed-revision reads (P1, DESIGN §5.5).
 
 ## G.6 The P0 slice (settled 2026-08-22)
 
@@ -894,16 +904,3 @@ its one gate. The kernel machinery exists whole (§2.9 checkpoints,
    the API keeps folding through the head publication (G.14) until
    the reviewer side lands mixed-revision reading (DESIGN §5.5) —
    whether and where the `pinned` lens reaches the API is G.5 Q6.
-
-## G.5 Open questions (continued)
-
-6. **The pinned reading lens in the API.** DESIGN §2.9 settled the
-   default lens as `pinned` (at submission) per schema, and G.15's
-   checkpoint records the pinned revision — but the API reads
-   through the head publication (G.14), a deliberate P0
-   simplification: surfaces hang off *publications* while the
-   checkpoint pins a *revision*, and two publications may share a
-   revision (§2.13 decision 9), so "the surfaces the applicant
-   submitted under" needs the publication resolved from the log's
-   position, not the revision alone. Decide with the reviewer
-   table's mixed-revision reads (P1, DESIGN §5.5).

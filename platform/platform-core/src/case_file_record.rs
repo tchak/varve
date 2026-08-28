@@ -315,3 +315,131 @@ fn random_salts() -> Result<impl FnOnce(usize) -> EntrySalts, UpdateCellsError> 
 fn mint_item_id() -> ItemId {
     ItemId::new(uuid::Uuid::new_v4().simple().to_string())
 }
+
+/// Failure modes of [`submit_case_file`].
+#[derive(Debug, thiserror::Error)]
+pub enum SubmitCaseFileError {
+    /// The state machine refuses (`INVALID_TRANSITION`): only a
+    /// draft submits.
+    #[error(transparent)]
+    Transition(#[from] crate::case_file::CaseFileTransitionError),
+    /// The record is not admissible through the applicant surface
+    /// (`INADMISSIBLE`, G.15): the one place admissibility gates.
+    /// The findings themselves are readable on the case file.
+    #[error("{0} finding(s) on the applicant surface; fix the form and retry")]
+    Inadmissible(usize),
+    /// The stored state columns disagree.
+    #[error(transparent)]
+    Corrupt(#[from] crate::case_file::CorruptCaseFileState),
+    /// Resolving the head or the log failed — `INTERNAL`.
+    #[error(transparent)]
+    Read(#[from] RecordReadError),
+    /// The row guard refused the race (`CONFLICT`): re-read, retry.
+    #[error("the case file changed since it was read; re-read and retry")]
+    Conflict,
+    #[error("database error: {0}")]
+    Db(toasty::Error),
+    /// Salt generation failed (OS randomness).
+    #[error("salt generation failed: {0}")]
+    Random(getrandom::Error),
+}
+
+/// Submits a case file (G.15, the dépôt): gate on admissibility of
+/// the applicant surface (pending set from the fold — §2.8: pending
+/// resolutions excuse what they cover), transition the state
+/// machine, mirror the columns under the row's version guard, and
+/// append the `submitted` checkpoint — reading revision pinned to
+/// the head (§2.9's `pinned` default), nothing frozen (Q12: dépôt
+/// does not lock the applicant form), nothing expected until
+/// resolvers. One transaction, the caller's (the `updateCells`
+/// pattern); the checkpoint entry is the authoritative fact and the
+/// columns its read model (P.9 Q3). On success the case file is
+/// updated in place.
+pub async fn submit_case_file<S>(
+    exec: &SharedExecutor<'_>,
+    store: &S,
+    case_file: &mut CaseFile,
+    actor_account_id: uuid::Uuid,
+) -> Result<(), SubmitCaseFileError>
+where
+    S: RevisionStore + SurfaceStore + RecordLogStore,
+{
+    let submitted = crate::case_file::current_case_file_state(case_file)?.submit(stored_now())?;
+
+    let head = head_context(store, case_file.procedure_id).await?;
+    let record = RecordId::new(case_file.record_id.to_string());
+    let log = load_log(store, &record)
+        .await
+        .map_err(RecordReadError::from)?;
+    let fold = log.fold().map_err(RecordReadError::from)?;
+    let pending = fold.pending_set();
+    let mut values = fold.values;
+    prune(&mut values, &head.schema, &NomenclatureTable::new());
+    let findings = surface_findings(
+        &[(APPLICANT_SURFACE, &head.applicant)],
+        &head.schema,
+        &values,
+        &pending,
+    )
+    .map_err(RecordReadError::from)?;
+    if !findings.is_empty() {
+        return Err(SubmitCaseFileError::Inadmissible(findings.len()));
+    }
+
+    let (state, state_since) = submitted.columns();
+    {
+        let mut guard = exec.lock().await;
+        case_file
+            .update()
+            .state(state)
+            .state_since(state_since)
+            .exec(&mut **guard)
+            .await
+            .map_err(|e| {
+                if e.is_condition_failed() {
+                    SubmitCaseFileError::Conflict
+                } else {
+                    SubmitCaseFileError::Db(e)
+                }
+            })?;
+    }
+
+    varve_service::append_checkpoint(
+        store,
+        varve_service::AppendCheckpoint {
+            record,
+            checkpoint: varve_record::Checkpoint {
+                name: "submitted".into(),
+                reading_revision: head.revision.clone(),
+                expected: vec![],
+                frozen_columns: Default::default(),
+                frozen_groups: Default::default(),
+            },
+            revision: head.revision,
+            actor: Actor {
+                id: actor_account_id.to_string(),
+                kind: ActorKind::Human,
+            },
+            timestamp: Instant::parse(&stored_now().to_string())
+                .expect("a jiff timestamp prints as strict RFC 3339"),
+        },
+        random_salts().map_err(|e| match e {
+            UpdateCellsError::Random(e) => SubmitCaseFileError::Random(e),
+            _ => unreachable!("random_salts fails only on randomness"),
+        })?,
+    )
+    .await
+    .map_err(|error| match error {
+        varve_service::AppendCheckpointError::Store(StoreError::SeqConflict { .. }) => {
+            SubmitCaseFileError::Conflict
+        }
+        varve_service::AppendCheckpointError::Load(e) => SubmitCaseFileError::Read(e.into()),
+        varve_service::AppendCheckpointError::Store(e) => SubmitCaseFileError::Read(e.into()),
+        varve_service::AppendCheckpointError::Append(e) => {
+            SubmitCaseFileError::Read(RecordReadError::Store(StoreError::Corrupt(format!(
+                "kernel appender refused a built checkpoint: {e}"
+            ))))
+        }
+    })?;
+    Ok(())
+}

@@ -469,3 +469,62 @@ where
         values,
     })
 }
+
+/// A checkpoint append (§2.9, graphql.md G.15): one lifecycle entry —
+/// the host builds the [`varve_record::Checkpoint`] (name, pinned
+/// revision, expected resolutions, frozen sets filled from the
+/// surface the checkpoint is taken through) and this operation lands
+/// it in the log. Deliberately no admissibility gate here: whether a
+/// checkpoint requires an admissible record is host policy (DN's
+/// dépôt does, a future `returnToApplicant` will not); the kernel
+/// only refuses what would poison the log — a checkpoint expecting
+/// what is not pending ([`varve_record::AppendError`]).
+#[derive(Debug)]
+pub struct AppendCheckpoint {
+    pub record: varve_core::RecordId,
+    pub checkpoint: varve_record::Checkpoint,
+    /// The entry envelope's authored-against revision — normally the
+    /// checkpoint's own `reading_revision`.
+    pub revision: varve_core::RevisionId,
+    pub actor: varve_record::Actor,
+    pub timestamp: varve_core::primitives::Instant,
+}
+
+/// A refused checkpoint append.
+#[derive(Debug, thiserror::Error)]
+pub enum AppendCheckpointError {
+    /// The kernel appender refused: an unfoldable log, or a
+    /// checkpoint whose expectations the fold does not hold.
+    #[error(transparent)]
+    Append(#[from] varve_record::AppendError),
+    #[error(transparent)]
+    Load(#[from] varve_store::load::LoadError),
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+/// Appends one checkpoint entry. `salts` is the Tier 5 randomness
+/// input (§2.13 decision 5), receiving the op count (always 1).
+pub async fn append_checkpoint<S>(
+    store: &S,
+    request: AppendCheckpoint,
+    salts: impl FnOnce(usize) -> varve_record::EntrySalts,
+) -> Result<u64, AppendCheckpointError>
+where
+    S: varve_store::RecordLogStore,
+{
+    let mut log = varve_store::load::load_log(store, &request.record).await?;
+    let base_version = log.version();
+    let entry = log.append(varve_record::Draft {
+        actor: request.actor,
+        timestamp: request.timestamp,
+        revision: request.revision,
+        base_version,
+        origin: varve_record::Origin::Entered,
+        note: None,
+        ops: vec![varve_record::EntryOp::Checkpoint(request.checkpoint)],
+        salts: salts(1),
+    })?;
+    store.append(&request.record, entry).await?;
+    Ok(log.version())
+}
