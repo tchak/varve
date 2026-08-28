@@ -807,6 +807,32 @@ months after it; the secret's fixed `varve_` prefix exists for leak
 scanning. Per-procedure scoping (the DN shape above) is P2 work on
 top of the account-level token.
 
+**Return-to after sign-in is a server-minted cookie, never a query
+parameter (settled 2026-08-28).** When a signed-in subtree's gate
+turns an anonymous request's 401 into the 303 to `/signin`, it first
+records the requested location — path + query, origin-relative only —
+in a short-lived (15 min) encrypted cookie with the flash jar's
+hardening (`__Host-`, `Secure`, `HttpOnly`, `SameSite=Lax`,
+AES-256-GCM); a successful sign-in or sign-up consumes it once and
+redirects there, falling back to home. Only GET navigations are
+recorded: a replayed POST cannot be reconstructed by a redirect, so
+the explicit POST answers to `signin_location` never record. The
+rejected alternative is the classic `?return_to=` parameter: a
+client-writable redirect target is a standing open-redirect/phishing
+surface that stays safe only by every consumption site validating
+forever, and it must be hand-threaded through every link and form on
+`/signin` and `/signup`; the private cookie is structurally
+unforgeable and survives the signin↔signup detour for free, at the
+cost of last-write-wins across tabs (the trade GitHub makes). The
+value is validated at both ends anyway (leading `/`, no `//`, no
+backslash, no control bytes, capped length) because it crosses time —
+key rotations read as absent. **Constraint for future flows: the
+return location is never client-writable, including inside emailed
+URLs.** A magic-link (or any cross-device / delayed) flow copies the
+cookie's value into its server-side token row at issuance and honors
+it — revalidated — at redemption; it never rides in the emailed link,
+which scanners rewrite and mail infrastructure logs.
+
 ## P.8 Milestones
 
 - **P0 — walking skeleton.** `varve-store` traits + Toasty impl

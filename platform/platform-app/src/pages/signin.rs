@@ -21,6 +21,7 @@ use crate::{
     },
     db,
     i18n::t,
+    return_to,
 };
 
 use super::redirect_to;
@@ -107,17 +108,21 @@ pub async fn page() -> Result {
     view! { signin_form(error: None, email: String::new()) }
 }
 
-/// Authenticates and starts a session. The failure message is the
-/// same for an unknown email and a wrong password —
-/// [`verify_credentials`] already collapses the two
-/// (including their timing), and the view must not reopen the leak.
+/// Authenticates and starts a session, then returns the browser to
+/// the location a gate remembered ([`return_to::take`]) or home. The
+/// failure message is the same for an unknown email and a wrong
+/// password — [`verify_credentials`] already collapses the two
+/// (including their timing), and the view must not reopen the leak;
+/// a failed submission also leaves the remembered location alone for
+/// the retry.
 #[page(POST)]
 async fn submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
     let mut db = db(cx);
     match verify_credentials(&mut db, &input.email, &input.password).await? {
         Some(account) => {
             sign_in(cx, &account).await?;
-            redirect_to(cx, href!(super::home).resolve(cx)).await
+            let location = return_to::take(cx).unwrap_or_else(|| href!(super::home).resolve(cx));
+            redirect_to(cx, location).await
         }
         None => {
             let error = t(cx, "signin.error.invalid-credentials").await?;

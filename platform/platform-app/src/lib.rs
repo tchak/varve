@@ -35,6 +35,7 @@ pub mod components;
 pub mod flash;
 pub mod i18n;
 pub mod pages;
+pub mod return_to;
 pub mod strings;
 pub mod ua;
 

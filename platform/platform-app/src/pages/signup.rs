@@ -21,6 +21,7 @@ use crate::{
     },
     db,
     i18n::{request_locale, t},
+    return_to,
 };
 
 use super::redirect_to;
@@ -114,7 +115,9 @@ pub async fn page() -> Result {
     view! { signup_form(error: None, name: String::new(), email: String::new()) }
 }
 
-/// Registers the account and logs it straight in. A duplicate email
+/// Registers the account and logs it straight in, then returns the
+/// browser to the location a gate remembered ([`return_to::take`])
+/// or home. A duplicate email
 /// re-renders with a message ([`platform_core::register`] settles
 /// the race on the database's unique index, so two concurrent
 /// submissions cannot both pass). An empty field is a 400: the form's
@@ -147,7 +150,8 @@ async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
     {
         Ok(account) => {
             sign_in(cx, &account).await?;
-            redirect_to(cx, href!(super::home).resolve(cx)).await
+            let location = return_to::take(cx).unwrap_or_else(|| href!(super::home).resolve(cx));
+            redirect_to(cx, location).await
         }
         Err(RegisterError::EmailTaken) => {
             let error = t(cx, "signup.error.email-taken").await?;

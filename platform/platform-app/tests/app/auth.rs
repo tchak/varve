@@ -1,6 +1,8 @@
 //! Subject: authentication as header-and-markup contracts — the
 //! signin page, failure re-renders, the signup/signout round trip,
-//! session freshness, duplicate signup, and the cross-origin guard.
+//! session freshness, duplicate signup, the cross-origin guard, and
+//! the return-to cookie (a gated GET is remembered; sign-in and
+//! sign-up land back on it).
 
 use platform_app::auth::encode_token_hash;
 use topcoat::{
@@ -258,4 +260,120 @@ async fn signup_with_an_unsupported_language_stores_the_fallback() {
     // English fallback; that resolved value is what lands in storage
     // — never a tag the catalogs cannot serve.
     assert_eq!(stored_locale(&mut db, &email).await.as_deref(), Some("en"));
+}
+
+/// The full `Set-Cookie` line for the return-to cookie, when the
+/// response set (or removed) one.
+fn return_to_set_cookie(response: &topcoat::router::response::Response) -> Option<String> {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with("__Host-return-to="))
+        .map(str::to_owned)
+}
+
+#[tokio::test]
+async fn gated_get_is_remembered_and_signin_returns_there() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("return-to-signin");
+    signup(&router, "Rémi", &email, "s3cret-enough").await;
+
+    // An anonymous GET to a gated page answers the usual 303 to
+    // /signin and parks the wanted location in the private cookie.
+    let response = router.handle(get("/settings/security", &[])).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/signin");
+    let set_cookie =
+        return_to_set_cookie(&response).expect("a gated GET sets the return-to cookie");
+    let cookie = set_cookie.split(';').next().unwrap().to_owned();
+
+    // Signing in with that cookie lands back on the gated page — not
+    // home — and queues the cookie's removal (read once).
+    let response = router
+        .handle(post(
+            "/signin",
+            &[("cookie", &cookie)],
+            form_body(&[("email", &email), ("password", "s3cret-enough")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings/security");
+    let removal = return_to_set_cookie(&response).expect("consumption clears the cookie");
+    assert!(removal.contains("Max-Age=0"), "{removal}");
+}
+
+#[tokio::test]
+async fn gated_post_is_not_remembered() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    // An anonymous POST through the same gate still redirects to
+    // /signin, but records nothing: a replayed POST cannot be
+    // reconstructed by a redirect (GET-only rule, P.7).
+    let response = router
+        .handle(post(
+            "/settings/account",
+            &[],
+            form_body(&[("name", "Nobody"), ("locale", "en")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/signin");
+    assert_eq!(return_to_set_cookie(&response), None);
+}
+
+#[tokio::test]
+async fn signup_honors_the_remembered_location() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let response = router.handle(get("/settings", &[])).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let set_cookie =
+        return_to_set_cookie(&response).expect("a gated GET sets the return-to cookie");
+    let cookie = set_cookie.split(';').next().unwrap().to_owned();
+
+    // The signin↔signup detour costs nothing: the cookie rides along
+    // and a fresh registration lands where the visit was headed.
+    let email = unique_email("return-to-signup");
+    let response = router
+        .handle(post(
+            "/signup",
+            &[("cookie", &cookie)],
+            form_body(&[
+                ("name", "Nadia"),
+                ("email", &email),
+                ("password", "s3cret-enough"),
+            ]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/settings");
+}
+
+#[tokio::test]
+async fn an_unreadable_return_cookie_falls_back_home() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    let email = unique_email("return-to-garbage");
+    signup(&router, "Gaspard", &email, "s3cret-enough").await;
+
+    // A value the server did not mint cannot decrypt: it reads as
+    // absent (303 home) and its removal is still queued.
+    let response = router
+        .handle(post(
+            "/signin",
+            &[("cookie", "__Host-return-to=garbage")],
+            form_body(&[("email", &email), ("password", "s3cret-enough")]),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers()[header::LOCATION], "/");
+    let removal = return_to_set_cookie(&response).expect("the stale cookie is cleared");
+    assert!(removal.contains("Max-Age=0"), "{removal}");
 }

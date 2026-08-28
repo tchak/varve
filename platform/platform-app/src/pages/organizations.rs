@@ -41,17 +41,21 @@ use crate::{
     },
     i18n::t,
     pages::{redirect_to, signin},
+    return_to,
 };
 
 use show::OrganizationId;
 
 /// The friendly face of the signed-in guard for the subtree: a page
 /// that failed closed with `UnauthorizedError` answers 303 to
-/// `/signin` instead of a bare 401.
+/// `/signin` instead of a bare 401 — remembering where a GET was
+/// headed ([`return_to::remember`]), so the sign-in that follows
+/// lands the user back here.
 #[layout]
 async fn gate(cx: &Cx, slot: Result) -> Result {
     match slot {
         Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
+            return_to::remember(cx)?;
             redirect_to(cx, href!(signin::page).resolve(cx)).await
         }
         other => other,

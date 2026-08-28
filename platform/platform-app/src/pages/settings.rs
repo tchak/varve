@@ -35,6 +35,7 @@ use crate::{
     },
     i18n::t,
     pages::{redirect_to, signin},
+    return_to,
 };
 
 /// Which settings tab a page renders under, for the shared shell's
@@ -53,11 +54,14 @@ pub(super) fn signin_location(cx: &Cx) -> String {
 /// The friendly face of the signed-in guard for every page in the
 /// `/settings` subtree (module docs): a page that failed closed with
 /// `UnauthorizedError` answers 303 to `/signin` instead of a bare
-/// 401. Any other outcome passes through untouched.
+/// 401 — remembering where a GET was headed
+/// ([`return_to::remember`]), so the sign-in that follows lands the
+/// user back here. Any other outcome passes through untouched.
 #[layout]
 async fn gate(cx: &Cx, slot: Result) -> Result {
     match slot {
         Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
+            return_to::remember(cx)?;
             redirect_to(cx, signin_location(cx)).await
         }
         other => other,
