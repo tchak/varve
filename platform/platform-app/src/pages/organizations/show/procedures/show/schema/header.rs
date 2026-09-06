@@ -48,13 +48,6 @@ use super::super::{ProcedureId, counts};
 use super::autosave::draft_of;
 use super::{page, preview, publish};
 
-/// Which tab is showing.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::pages) enum Tab {
-    Editor,
-    Preview,
-}
-
 /// The header. `offer_discard` (the discard link) and
 /// `offer_publish` (the publish button, posting the free phase of
 /// `publishRevision` — [`publish::submit`]) are the editor's actions
@@ -68,7 +61,6 @@ pub(in crate::pages) enum Tab {
 pub(in crate::pages) async fn header(
     cx: &Cx,
     procedure: ProcedureRevisionDraft,
-    tab: Tab,
     offer_discard: bool,
     offer_publish: bool,
     revision: &Signal<f64>,
@@ -99,6 +91,12 @@ pub(in crate::pages) async fn header(
         OrganizationId(organization_id),
         ProcedureId(procedure_id)
     );
+    // The showing tab is the one whose link points at the request:
+    // `is_current` compares the path and ignores the editor's
+    // `?selected=` / `?publish=confirm` queries, so neither page has
+    // to say which one it is.
+    let editor_current = editor_href.is_current(cx);
+    let preview_current = preview_href.is_current(cx);
     let procedure_href = href!(
         super::super::page,
         OrganizationId(organization_id),
@@ -172,12 +170,12 @@ pub(in crate::pages) async fn header(
         tabs(
             tabs_list(
                 tabs_trigger(
-                    active: tab == Tab::Editor,
+                    active: editor_current,
                     attrs: attributes! { href=(editor_href) },
                     (tab_editor)
                 )
                 tabs_trigger(
-                    active: tab == Tab::Preview,
+                    active: preview_current,
                     attrs: attributes! { href=(preview_href) },
                     (tab_preview)
                 )

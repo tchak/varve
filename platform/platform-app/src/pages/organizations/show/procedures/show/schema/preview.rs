@@ -341,7 +341,6 @@ async fn preview_page(
         <div class="flex flex-col gap-6">
             header::header(
                 procedure: procedure.clone(),
-                tab: header::Tab::Preview,
                 offer_discard: false,
                 offer_publish: false,
                 revision: revision

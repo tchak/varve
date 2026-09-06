@@ -212,6 +212,13 @@ async fn shell(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
     let settings_label = t(cx, "settings.title").await?;
     let sign_in_label = t(cx, "nav.sign-in").await?;
     let sign_up_label = t(cx, "nav.sign-up").await?;
+    // The signed-out links mark the auth page being shown, for
+    // assistive technology (`aria-current`) and the eye (the
+    // `aria-[current=page]:` classes below).
+    let signin_href = href!(signin::page);
+    let signin_current = signin_href.is_current(cx);
+    let signup_href = href!(signup::page);
+    let signup_current = signup_href.is_current(cx);
     let sign_out_label = t(cx, "nav.sign-out").await?;
     Ok(view! {
         <!DOCTYPE html>
@@ -275,16 +282,21 @@ async fn shell(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                         )
                     } else {
                         <a
-                            href=(href!(signin::page))
-                            class=(button_variants(ButtonVariant::Ghost, ButtonSize::Sm))
+                            href=(signin_href)
+                            aria-current=(signin_current.then_some("page"))
+                            class=(class!(
+                                button_variants(ButtonVariant::Ghost, ButtonSize::Sm),
+                                "aria-[current=page]:bg-foreground/5",
+                            ))
                         >
                             (sign_in_label)
                         </a>
                         <a
-                            href=(href!(signup::page))
-                            class=(button_variants(
-                                ButtonVariant::Primary,
-                                ButtonSize::Sm,
+                            href=(signup_href)
+                            aria-current=(signup_current.then_some("page"))
+                            class=(class!(
+                                button_variants(ButtonVariant::Primary, ButtonSize::Sm),
+                                "aria-[current=page]:bg-primary/80",
                             ))
                         >
                             (sign_up_label)

@@ -5,7 +5,7 @@
 
 use topcoat::router::StatusCode;
 
-use crate::harness::{body_text, get, signup, test_app, unique_email};
+use crate::harness::{body_text, get, link_tags, signup, test_app, unique_email};
 
 #[tokio::test]
 async fn home_signed_out_prompts_signin_in_english_by_default() {
@@ -18,6 +18,41 @@ async fn home_signed_out_prompts_signin_in_english_by_default() {
     assert!(html.contains("Please sign in to continue."), "{html}");
     assert!(html.contains("Sign in"), "{html}");
     assert!(html.contains(r#"lang="en""#), "{html}");
+}
+
+/// The signed-out header's auth links mark the page being shown:
+/// `aria-current="page"` on Sign in at `/signin`, on Sign up at
+/// `/signup`, on neither elsewhere.
+#[tokio::test]
+async fn signed_out_header_marks_the_current_auth_page() {
+    let Some((router, _db)) = test_app().await else {
+        return;
+    };
+    for (path, current, other) in [
+        ("/signin", "/signin", "/signup"),
+        ("/signup", "/signup", "/signin"),
+    ] {
+        let response = router.handle(get(path, &[])).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let html = body_text(response).await;
+        let nav_start = html.find("<nav").expect("the header renders a nav");
+        let nav_end = nav_start + html[nav_start..].find("</nav>").expect("the nav closes");
+        let nav = &html[nav_start..nav_end];
+        let [marked] = link_tags(nav, current)[..] else {
+            panic!("one {current} link in the nav of {path}: {nav}");
+        };
+        assert!(marked.contains(r#"aria-current="page""#), "{marked}");
+        let [unmarked] = link_tags(nav, other)[..] else {
+            panic!("one {other} link in the nav of {path}: {nav}");
+        };
+        assert!(!unmarked.contains("aria-current"), "{unmarked}");
+    }
+    let html = body_text(router.handle(get("/", &[])).await).await;
+    for href in ["/signin", "/signup"] {
+        for tag in link_tags(&html, href) {
+            assert!(!tag.contains("aria-current"), "{tag}");
+        }
+    }
 }
 
 #[tokio::test]

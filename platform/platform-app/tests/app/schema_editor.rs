@@ -19,7 +19,7 @@
 use topcoat::router::{Router, StatusCode, header};
 
 use crate::harness::{
-    body_text, form_body, get, post, session_cookie, signup, test_app, unique_email,
+    body_text, form_body, get, link_tags, post, session_cookie, signup, test_app, unique_email,
 };
 
 async fn member(router: &Router, tag: &str) -> String {
@@ -1266,12 +1266,23 @@ async fn the_preview_tab() {
     let response = router.handle(get(&preview, &[("cookie", &stranger)])).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    // The tabs link the two pages; with no draft the preview says so.
+    // The tabs link the two pages and mark the one showing — the
+    // editor's marker survives its query (`?publish=confirm`, the
+    // `?selected=` of a selection), which the tab's `href` ignores;
+    // with no draft the preview says so.
+    let tab = |html: &str, href: &str| {
+        let [tag] = link_tags(html, href)[..] else {
+            panic!("one tab link to {href}: {html}");
+        };
+        tag.contains("aria-current=\"page\"")
+    };
     let html = page(&router, &cookie, &editor).await;
     assert!(html.contains(">Preview<"), "{html}");
-    assert!(html.contains("/schema/preview\""), "{html}");
+    assert!(tab(&html, &editor) && !tab(&html, &preview), "{html}");
+    let html = page(&router, &cookie, &format!("{editor}?publish=confirm")).await;
+    assert!(tab(&html, &editor) && !tab(&html, &preview), "{html}");
     let html = page(&router, &cookie, &preview).await;
-    assert!(html.contains("aria-current=\"page\""), "{html}");
+    assert!(tab(&html, &preview) && !tab(&html, &editor), "{html}");
     assert!(html.contains(">Editor<"), "{html}");
     assert!(html.contains("data-preview-empty"), "{html}");
 

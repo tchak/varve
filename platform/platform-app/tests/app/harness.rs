@@ -279,6 +279,25 @@ pub fn a11y_baseline(html: &str) -> Vec<String> {
     out
 }
 
+/// The opening `<a …>` tags whose `href` is exactly `href`, in
+/// document order — for asserting a link's attributes (say
+/// `aria-current`) without matching the same attribute elsewhere.
+pub fn link_tags<'a>(html: &'a str, href: &str) -> Vec<&'a str> {
+    let needle = format!(r#"href="{href}""#);
+    let mut tags = Vec::new();
+    let mut from = 0;
+    while let Some(at) = html[from..].find(&needle) {
+        let at = from + at;
+        let start = html[..at]
+            .rfind("<a")
+            .expect("an href sits inside an <a> tag");
+        let end = at + html[at..].find('>').expect("the <a> tag closes");
+        tags.push(&html[start..=end]);
+        from = end;
+    }
+    tags
+}
+
 /// The `name=value` pair of the session cookie a response set.
 pub fn session_cookie(response: &Response) -> Option<String> {
     response

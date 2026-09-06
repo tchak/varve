@@ -531,7 +531,6 @@ async fn editor_chrome(
     Ok(view! {
         header::header(
             procedure: procedure,
-            tab: header::Tab::Editor,
             // Either confirmation replaces both header actions:
             // one pending decision at a time.
             offer_discard: !confirm_discard && !confirm_publish,
