@@ -19,7 +19,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{error::RouterErrorExt, href, page, path_param},
-    view::{component, view},
+    view::{View, component, view},
 };
 
 use crate::{
@@ -83,10 +83,10 @@ async fn procedure_events(cx: &Cx) -> Result<Vec<ProcedureEvent>> {
 }
 
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let procedure = procedure_draft(cx).await?;
     let events = procedure_events(cx).await?;
-    view! { procedure_page(procedure: procedure, events: events) }
+    Ok(view! { procedure_page(procedure: procedure, events: events) })
 }
 
 /// Title and description, the organization link, and the draft card:
@@ -97,7 +97,7 @@ async fn procedure_page(
     cx: &Cx,
     procedure: ProcedureRevisionDraft,
     events: Vec<ProcedureEvent>,
-) -> Result {
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
     let crumb_label = t(cx, "nav.breadcrumb").await?;
@@ -134,7 +134,7 @@ async fn procedure_page(
     } else {
         None
     };
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
                 breadcrumbs(label: crumb_label, crumbs: crumbs)
@@ -165,7 +165,7 @@ async fn procedure_page(
                                 href=(href!(
                                     schema::page,
                                     OrganizationId(organization_id),
-                                    ProcedureId(procedure_id)
+                                    ProcedureId(procedure_id),
                                 ))
                                 class=(button_variants(
                                     ButtonVariant::Primary,
@@ -184,5 +184,5 @@ async fn procedure_page(
                 events: events
             )
         </div>
-    }
+    })
 }

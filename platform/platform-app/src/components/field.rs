@@ -6,7 +6,7 @@
 use topcoat::{
     Result,
     context::Cx,
-    view::{Attributes, StaticClass, attributes, class, component, view},
+    view::{Attributes, StaticClass, View, attributes, class, component, view},
 };
 
 // The `label` component is aliased: `#[component]` defines a unit
@@ -60,14 +60,14 @@ pub async fn field(
     /// The field's error, as display text, rendered under the control.
     #[default]
     error: Option<String>,
-) -> Result {
+) -> Result<impl View> {
     let error_id = format!("{id}-error");
     attrs.insert(cx, "id", id.as_str());
     if error.is_some() {
         attrs.insert(cx, "aria-invalid", "true");
         attrs.insert(cx, "aria-describedby", error_id.as_str());
     }
-    view! {
+    Ok(view! {
         <div class=(FIELD)>
             field_label(attrs: attributes! { for=(id.as_str()) }, (label))
             input(attrs: attrs)
@@ -75,7 +75,7 @@ pub async fn field(
                 <p id=(error_id.as_str()) class=(FIELD_ERROR)>(error)</p>
             }
         </div>
-    }
+    })
 }
 
 #[cfg(test)]
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn links_label_to_input_and_forwards_attrs() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 field(
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn without_error_renders_no_error_wiring() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! { cx => field(id: "signin-email", label: "Email address") }
         });
 
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn with_error_wires_aria_and_renders_the_message() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 field(

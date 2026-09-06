@@ -5,7 +5,7 @@
 
 use topcoat::{
     Result,
-    view::{Attributes, StaticClass, View, class, component, view},
+    view::{Attributes, Child, StaticClass, View, class, component, view},
 };
 
 /// The classes for the [`page_title`] heading.
@@ -25,8 +25,13 @@ const PAGE_TITLE: StaticClass = class!("text-2xl font-semibold tracking-tight te
 /// }
 /// ```
 #[component]
-pub async fn page_title(#[default] mut attrs: Attributes, #[default] child: View) -> Result {
-    view! { <h1 class=(class!(PAGE_TITLE, attrs.remove("class"))) (attrs)>(child)</h1> }
+pub async fn page_title(
+    #[default] mut attrs: Attributes,
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
+        <h1 class=(class!(PAGE_TITLE, attrs.remove("class"))) (attrs)>(child)</h1>
+    })
 }
 
 #[cfg(test)]
@@ -38,7 +43,7 @@ mod tests {
 
     #[test]
     fn renders_the_heading_text_in_an_h1() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! { cx => page_title("Sign in") }
         });
         assert!(html.contains("<h1"), "{html}");

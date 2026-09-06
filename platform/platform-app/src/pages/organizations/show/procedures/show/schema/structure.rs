@@ -31,7 +31,7 @@ use topcoat::{
         href,
     },
     runtime::shard,
-    view::{attributes, class, component, view},
+    view::{View, ViewExt, attributes, class, component, view},
 };
 
 use crate::{
@@ -67,7 +67,7 @@ pub(in crate::pages) async fn panel(
     procedure_id: String,
     selected: String,
     revision: f64,
-) -> Result {
+) -> Result<impl View> {
     let _ = revision;
     let client = client(cx).await?;
     let Ok(procedure_id) = procedure_id.parse::<uuid::Uuid>() else {
@@ -83,7 +83,7 @@ pub(in crate::pages) async fn panel(
     .procedure
     .ok_or_not_found()?;
     let selected = (!selected.is_empty()).then_some(selected);
-    view! { panel_body(procedure: procedure, selected: selected) }
+    Ok(view! { panel_body(procedure: procedure, selected: selected) })
 }
 
 /// The panel's body: the empty notice, or the tree.
@@ -92,7 +92,7 @@ async fn panel_body(
     cx: &Cx,
     procedure: ProcedureRevisionDraft,
     selected: Option<String>,
-) -> Result {
+) -> Result<impl View> {
     let elements = procedure.revision_draft.elements.clone();
     let empty = t(cx, "schema.structure.empty").await?;
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
@@ -105,13 +105,13 @@ async fn panel_body(
         procedure_id,
         labels,
     };
-    view! {
+    Ok(view! {
         if tree.elements.is_empty() {
             <p class="text-sm text-muted-foreground" data-schema-empty="">(empty)</p>
         } else {
             tree_list(tree: &tree, parent: None, depth: 0)
         }
-    }
+    })
 }
 
 /// Everything the tree rows need, loaded once.
@@ -211,11 +211,11 @@ impl Tree {
 }
 
 /// One level of the tree as an ordered list; groups nest their own.
-#[component(boxed)]
-async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result {
+#[component]
+async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result<impl View> {
     let children = tree.children(parent.as_deref());
     let count = children.len();
-    view! {
+    Ok(view! {
         <ol
             class=(class!(
                 "flex flex-col gap-2",
@@ -234,6 +234,7 @@ async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result 
             }
         </ol>
     }
+    .boxed())
 }
 
 /// One element: its row (link, badges, actions), then its children.
@@ -241,7 +242,7 @@ async fn tree_list(tree: &Tree, parent: Option<String>, depth: usize) -> Result 
 /// nesting level, and an unboxed row's render frame is large enough
 /// (badges, menus, facets) that a handful of levels overflow the
 /// stack in debug builds — a section inside a section did.
-#[component(boxed)]
+#[component]
 async fn tree_row(
     cx: &Cx,
     tree: &Tree,
@@ -249,7 +250,7 @@ async fn tree_row(
     first: bool,
     last: bool,
     depth: usize,
-) -> Result {
+) -> Result<impl View> {
     let id = id_of(&element).to_owned();
     let is_selected = tree.selected.as_deref() == Some(id.as_str());
     let text = label_of(&element).to_owned();
@@ -276,20 +277,20 @@ async fn tree_row(
         _ => (String::new(), false),
     };
     let actions_name = t_args(cx, "schema.actions.for", &one_arg("label", text.clone())).await?;
-    let select_query = [("selected", id.clone())];
     let select_href = href!(
         page,
         OrganizationId(tree.organization_id),
         ProcedureId(tree.procedure_id)
     )
-    .query(&select_query);
+    .query(&[("selected", id.as_str())])
+    .resolve(cx);
     let reviewer_only = tree.reviewer_only(&id);
     // A section reads as a heading bar, a note as an aside; groups
     // and columns keep the plain data-carrying row.
     let is_section = matches!(element, Element::Section(_));
     let is_note = matches!(element, Element::Note(_));
     let current_parent = parent_of(&element);
-    view! {
+    Ok(view! {
         <li
             data-element-id=(id.as_str())
             data-element-kind=(element_kind(&element))
@@ -341,6 +342,7 @@ async fn tree_row(
             }
         </li>
     }
+    .boxed())
 }
 
 /// One row's placement facts, bundled for [`row_actions`].
@@ -357,8 +359,8 @@ struct RowFacts {
 /// [`tree_row`]/[`tree_list`] pair keeps each nesting level's render
 /// frame small (the stack-overflow regression
 /// `deeply_nested_containers_render` pins).
-#[component(boxed)]
-async fn row_actions(tree: &Tree, facts: RowFacts) -> Result {
+#[component]
+async fn row_actions(tree: &Tree, facts: RowFacts) -> Result<impl View> {
     let RowFacts {
         id,
         actions_name,
@@ -366,13 +368,16 @@ async fn row_actions(tree: &Tree, facts: RowFacts) -> Result {
         last,
         current_parent,
     } = facts;
-    let relocate_href = || {
-        href!(
-            elements::element::relocate::submit,
-            OrganizationId(tree.organization_id),
-            ProcedureId(tree.procedure_id),
-            ElementId(id.clone())
-        )
+    let relocate_href = {
+        let id = id.clone();
+        move || {
+            href!(
+                elements::element::relocate::submit,
+                OrganizationId(tree.organization_id),
+                ProcedureId(tree.procedure_id),
+                ElementId(id.clone())
+            )
+        }
     };
     let remove_href = href!(
         elements::element::remove::submit,
@@ -396,7 +401,7 @@ async fn row_actions(tree: &Tree, facts: RowFacts) -> Result {
         .filter(|e| id_of(e) != id)
         .map(|e| (id_of(e).to_owned(), label_of(e).to_owned()))
         .collect();
-    view! {
+    Ok(view! {
         dropdown_menu(
             dropdown_menu_trigger(
                 attrs: attributes! {
@@ -509,6 +514,7 @@ async fn row_actions(tree: &Tree, facts: RowFacts) -> Result {
             )
         )
     }
+    .boxed())
 }
 
 /// A column's type in a word or two; a group's "group".

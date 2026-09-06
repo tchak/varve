@@ -11,7 +11,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::bad_request, href, page},
-    view::view,
+    view::{View, ViewExt, view},
 };
 
 use crate::{auth::require_account, db, flash, i18n::t, pages::redirect_to};
@@ -37,7 +37,7 @@ pub(super) struct Creation {
 /// input's `maxlength` keeps browsers from sending one, so it can
 /// only come from a forged request.
 #[page(POST)]
-pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
+pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result<impl View> {
     let account_id = require_account(cx).await?.id;
     let mut db = db(cx);
     match platform_core::create_api_token(&mut db, account_id, &input.name, jiff::Timestamp::now())
@@ -52,7 +52,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
                     secret: issued.secret,
                 },
             )?;
-            redirect_to(cx, href!(super::page).resolve(cx)).await
+            redirect_to(cx, href!(super::page).resolve(cx))
         }
         Err(CreateApiTokenError::EmptyName) => {
             let error = t(cx, "settings.security.tokens.error.name-required").await?;
@@ -61,7 +61,7 @@ pub async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
                 name_error: Some(error),
                 issued: None,
             };
-            view! { security_cards(tokens_form: form) }
+            Ok(view! { security_cards(tokens_form: form) }.boxed())
         }
         Err(CreateApiTokenError::NameTooLong) => {
             Err(bad_request("the token name is too long").into())

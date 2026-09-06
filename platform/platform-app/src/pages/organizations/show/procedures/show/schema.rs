@@ -85,7 +85,8 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::not_found, href, page, path_param, query_params},
-    view::{attributes, component, view},
+    runtime::Signal,
+    view::{BoxView, View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -133,11 +134,11 @@ pub(super) const NOTICE: &str = "schema-notice";
 
 /// The editor page.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let procedure = procedure_draft(cx).await?;
     let query = query_params::<EditorQuery>(cx)?;
     let notice = flash::take::<Notice>(cx, NOTICE);
-    view! {
+    Ok(view! {
         editor_page(
             procedure: procedure,
             selected: query.selected.clone(),
@@ -145,7 +146,7 @@ pub async fn page(cx: &Cx) -> Result {
             confirm_publish: query.publish.as_deref() == Some("confirm"),
             notice: notice
         )
-    }
+    })
 }
 
 /// Where a POST lands: the editor, with `selected` and a notice.
@@ -153,7 +154,7 @@ pub(super) async fn back_to_editor(
     cx: &Cx,
     selected: Option<&str>,
     notice: Option<Notice>,
-) -> Result {
+) -> Result<BoxView<'static>> {
     let organization = path_param::<OrganizationId>(cx)?;
     let procedure = path_param::<ProcedureId>(cx)?;
     if let Some(notice) = notice {
@@ -164,7 +165,7 @@ pub(super) async fn back_to_editor(
         Some(id) => href.query(&[("selected", id)]).resolve(cx),
         None => href.resolve(cx),
     };
-    crate::pages::redirect_to(cx, location).await
+    crate::pages::redirect_to(cx, location)
 }
 
 /// A refused client operation, mapped the editor's way: `FORBIDDEN`
@@ -237,7 +238,7 @@ pub(super) mod add {
     /// A blank label lands back with an alert — the add form is the
     /// detail panel's, and the notice is how it reports.
     #[page(POST)]
-    pub(super) async fn submit(cx: &Cx, Form(input): Form<Addition>) -> Result {
+    pub(super) async fn submit(cx: &Cx, Form(input): Form<Addition>) -> Result<impl View> {
         let client = client(cx).await?;
         let procedure = procedure_draft(cx).await?;
         let new_label = input.label.trim().to_owned();
@@ -379,7 +380,7 @@ pub(super) mod discard {
 
     /// `discardRevisionDraft`, after the confirmation state.
     #[page(POST)]
-    pub(super) async fn submit(cx: &Cx) -> Result {
+    pub(super) async fn submit(cx: &Cx) -> Result<impl View> {
         let client = client(cx).await?;
         let procedure = path_param::<ProcedureId>(cx)?;
         let result = platform_client::run(
@@ -406,31 +407,30 @@ pub(super) mod discard {
 
 // ---------------------------------------------------------------- views
 
-/// The page: header with the draft state, the notice, the structure
-/// shard, and the detail form — one `view!`, because the autosave
-/// handlers bump the `revision` signal the shard reads, and a runtime
-/// closure reaches signals declared in its own `view!` only.
+/// The page: the editor's chrome (header, confirmations, notice), the
+/// structure shard and the detail column. It declares the one signal
+/// the shard watches, `revision`, and hands it down (module docs:
+/// signals are the seam).
+///
+/// The page's own `view!` stays thin on purpose. A lazy view's poll
+/// frame stays on the stack while its children render, and this
+/// template is an ancestor of every row of the structure tree, so
+/// its size is paid once per request but *under* the whole
+/// recursion; the heavy markup lives in the sibling components
+/// [`editor_chrome`], [`structure_heading`] and [`editor_detail`],
+/// whose frames are not on that path (the stack budget
+/// `deeply_nested_containers_render` pins).
 #[component]
 async fn editor_page(
-    cx: &Cx,
     procedure: ProcedureRevisionDraft,
     selected: Option<String>,
     confirm_discard: bool,
     confirm_publish: bool,
     notice: Option<Notice>,
-) -> Result {
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
-    let elements = procedure.revision_draft.elements.clone();
-    // Pristine (G.7 virtual draft) means nothing to publish, so
-    // `?publish=confirm` shows no confirmation on it.
-    let in_progress = procedure.revision_draft.in_progress;
-    let report = procedure.revision_draft.report.clone();
-    let discard_question = t(cx, "schema.discard.question").await?;
-    let discard_confirm = t(cx, "schema.discard.confirm").await?;
-    let discard_keep = t(cx, "schema.discard.keep").await?;
-    let structure_heading = t(cx, "schema.structure.title").await?;
-    let add_element_label = t(cx, "schema.add.title").await?;
+    let elements = &procedure.revision_draft.elements;
     let selected_element = selected
         .as_deref()
         .and_then(|id| elements.iter().find(|e| id_of(e) == id).cloned());
@@ -442,26 +442,23 @@ async fn editor_page(
     let audience_locked = selected_element
         .as_ref()
         .and_then(parent_of)
-        .is_some_and(|parent| effectively_reviewer(&elements, &parent));
+        .is_some_and(|parent| effectively_reviewer(elements, &parent));
     let container_reviewer = selected_id
         .as_deref()
-        .is_some_and(|id| effectively_reviewer(&elements, id));
-    let page_href = || {
-        href!(
-            page,
-            OrganizationId(organization_id),
-            ProcedureId(procedure_id)
-        )
+        .is_some_and(|id| effectively_reviewer(elements, id));
+    let at = detail::At {
+        organization_id,
+        procedure_id,
     };
-    let discard_href = href!(
-        discard::submit,
-        OrganizationId(organization_id),
-        ProcedureId(procedure_id)
-    );
+    let offers = detail::Offers {
+        audience: !audience_locked,
+        audience_below: !container_reviewer,
+    };
+    let has_selection = selected_id.is_some();
     let procedure_id_string = procedure_id.to_string();
-    let selected_string = selected_id.clone().unwrap_or_default();
+    let selected_string = selected_id.unwrap_or_default();
 
-    view! {
+    Ok(view! {
         // The one signal the page itself reads: the structure shard
         // below is re-rendered when an autosave bumps it. Everything
         // else the detail panel needs it declares itself.
@@ -470,105 +467,16 @@ async fn editor_page(
         signal eid = selected_string.clone();
 
         <div class="flex flex-col gap-6">
-            header::header(
-                procedure: procedure.clone(),
-                tab: header::Tab::Editor,
-                // Either confirmation replaces both header actions:
-                // one pending decision at a time.
-                offer_discard: !confirm_discard && !confirm_publish,
-                offer_publish: !confirm_publish && !confirm_discard,
+            editor_chrome(
+                procedure: procedure,
+                confirm_discard: confirm_discard,
+                confirm_publish: confirm_publish,
+                notice: notice,
                 revision: revision
             )
-            if confirm_publish && in_progress {
-                publish::confirmation(
-                    organization_id: organization_id,
-                    procedure_id: procedure_id,
-                    report: report.clone()
-                )
-            }
-            if confirm_discard {
-                alert(
-                    variant: AlertVariant::Destructive,
-                    attrs: attributes! { role="alertdialog" aria-labelledby="discard-question" },
-                    alert_description(
-                        <p id="discard-question" class="mb-3">(discard_question)</p>
-                        <div class="flex gap-2">
-                            <form method="post" action=(discard_href)>
-                                button(
-                                    variant: ButtonVariant::Destructive,
-                                    size: ButtonSize::Sm,
-                                    attrs: attributes! { type="submit" },
-                                    (discard_confirm)
-                                )
-                            </form>
-                            <a
-                                href=(page_href())
-                                class=(button_variants(
-                                    ButtonVariant::Outline,
-                                    ButtonSize::Sm,
-                                ))
-                            >
-                                (discard_keep)
-                            </a>
-                        </div>
-                    )
-                )
-            }
-            // The notice slot is always there, at one height, so the
-            // panels below never move when a notice comes or goes.
-            <div class="min-h-12" aria-live="polite" data-schema-notices="">
-                if let Some(notice) = &notice {
-                    notice_box(
-                        tone: match notice.kind {
-                            NoticeKind::Status => NoticeTone::Success,
-                            NoticeKind::Alert => NoticeTone::Error,
-                        },
-                        // A confirmation fades once read (the `class`
-                        // below, animated in app.css); a refusal stays
-                        // until the next action. The comment sits outside
-                        // the `attributes!` block on purpose: `topcoat fmt`
-                        // 0.6.2 re-emits any comment written *inside* one
-                        // into the enclosing call's children, growing the
-                        // file by a copy on every run.
-                        attrs: attributes! {
-                            role=(match notice.kind {
-                                NoticeKind::Status => "status",
-                                NoticeKind::Alert => "alert",
-                            })
-                            class=(match notice.kind {
-                                NoticeKind::Status => {
-                                    "motion-safe:animate-[varve-notice-fade_0.8s_ease-in_6s_forwards]"
-                                }
-                                NoticeKind::Alert => "",
-                            })
-                            data-schema-notice=""
-                        },
-                        (notice.text.as_str())
-                    )
-                }
-            </div>
             <div class="grid gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
                 <section aria-labelledby="schema-structure-heading" class="min-w-0">
-                    <div class="mb-3 flex items-center justify-between gap-3">
-                        <h2 id="schema-structure-heading" class="text-sm font-semibold">
-                            (structure_heading)
-                        </h2>
-                        // The add form lives in the detail panel's unselected
-                        // state; this is the way back to it once a row is
-                        // selected.
-                        if selected_id.is_some() {
-                            <a
-                                href=(page_href())
-                                class=(button_variants(
-                                    ButtonVariant::Outline,
-                                    ButtonSize::Sm,
-                                ))
-                                data-schema-add=""
-                            >
-                                (add_element_label.as_str())
-                            </a>
-                        }
-                    </div>
+                    structure_heading(at: at, has_selection: has_selection)
                     structure::panel(
                         procedure_id: $(pid.get()),
                         selected: $(eid.get()),
@@ -576,35 +484,186 @@ async fn editor_page(
                     )
                 </section>
                 <section aria-labelledby="schema-detail-heading" class="min-w-0">
-                    if let Some(element) = &selected_element {
-                        detail::panel(
-                            editing: detail::Editing {
-                                at: detail::At {
-                                    organization_id,
-                                    procedure_id,
-                                },
-                                element: element.clone(),
-                            },
-                            offers: detail::Offers {
-                                audience: !audience_locked,
-                                audience_below: !container_reviewer,
-                            },
-                            revision: revision
-                        )
-                    } else {
-                        add_form::form(
-                            procedure_id: procedure_id,
-                            organization_id: organization_id,
-                            facts: AddFacts {
-                                parent: None,
-                                section_parent: false,
-                                audience_offered: true,
-                                heading_level_top: true,
-                            }
-                        )
-                    }
+                    editor_detail(
+                        at: at,
+                        selected: selected_element,
+                        offers: offers,
+                        revision: revision
+                    )
                 </section>
             </div>
         </div>
     }
+    .boxed())
+}
+
+/// The chrome above the panels: the header with the draft state, the
+/// publish or discard confirmation, and the notice slot.
+#[component]
+async fn editor_chrome(
+    cx: &Cx,
+    procedure: ProcedureRevisionDraft,
+    confirm_discard: bool,
+    confirm_publish: bool,
+    notice: Option<Notice>,
+    revision: &Signal<f64>,
+) -> Result<impl View> {
+    let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
+    let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
+    // Pristine (G.7 virtual draft) means nothing to publish, so
+    // `?publish=confirm` shows no confirmation on it.
+    let in_progress = procedure.revision_draft.in_progress;
+    let report = procedure.revision_draft.report.clone();
+    let discard_question = t(cx, "schema.discard.question").await?;
+    let discard_confirm = t(cx, "schema.discard.confirm").await?;
+    let discard_keep = t(cx, "schema.discard.keep").await?;
+    let page_href = href!(
+        page,
+        OrganizationId(organization_id),
+        ProcedureId(procedure_id)
+    );
+    let discard_href = href!(
+        discard::submit,
+        OrganizationId(organization_id),
+        ProcedureId(procedure_id)
+    );
+
+    Ok(view! {
+        header::header(
+            procedure: procedure,
+            tab: header::Tab::Editor,
+            // Either confirmation replaces both header actions:
+            // one pending decision at a time.
+            offer_discard: !confirm_discard && !confirm_publish,
+            offer_publish: !confirm_publish && !confirm_discard,
+            revision: revision
+        )
+        if confirm_publish && in_progress {
+            publish::confirmation(
+                organization_id: organization_id,
+                procedure_id: procedure_id,
+                report: report
+            )
+        }
+        if confirm_discard {
+            alert(
+                variant: AlertVariant::Destructive,
+                attrs: attributes! { role="alertdialog" aria-labelledby="discard-question" },
+                alert_description(
+                    <p id="discard-question" class="mb-3">(discard_question)</p>
+                    <div class="flex gap-2">
+                        <form method="post" action=(discard_href)>
+                            button(
+                                variant: ButtonVariant::Destructive,
+                                size: ButtonSize::Sm,
+                                attrs: attributes! { type="submit" },
+                                (discard_confirm)
+                            )
+                        </form>
+                        <a
+                            href=(page_href)
+                            class=(button_variants(
+                                ButtonVariant::Outline,
+                                ButtonSize::Sm,
+                            ))
+                        >
+                            (discard_keep)
+                        </a>
+                    </div>
+                )
+            )
+        }
+        // The notice slot is always there, at one height, so the
+        // panels below never move when a notice comes or goes.
+        <div class="min-h-12" aria-live="polite" data-schema-notices="">
+            if let Some(notice) = &notice {
+                notice_box(
+                    tone: match notice.kind {
+                        NoticeKind::Status => NoticeTone::Success,
+                        NoticeKind::Alert => NoticeTone::Error,
+                    },
+                    // A confirmation fades once read (the `class`
+                    // below, animated in app.css); a refusal stays
+                    // until the next action.
+                    attrs: attributes! {
+                        role=(match notice.kind {
+                            NoticeKind::Status => "status",
+                            NoticeKind::Alert => "alert",
+                        })
+                        class=(match notice.kind {
+                            NoticeKind::Status => {
+                                "motion-safe:animate-[varve-notice-fade_0.8s_ease-in_6s_forwards]"
+                            }
+                            NoticeKind::Alert => "",
+                        })
+                        data-schema-notice=""
+                    },
+                    (notice.text.as_str())
+                )
+            }
+        </div>
+    }
+    .boxed())
+}
+
+/// The structure column's heading bar: the title and, once a row is
+/// selected, the way back to the add form (which lives in the detail
+/// panel's unselected state).
+#[component]
+async fn structure_heading(cx: &Cx, at: detail::At, has_selection: bool) -> Result<impl View> {
+    let structure_heading = t(cx, "schema.structure.title").await?;
+    let add_element_label = t(cx, "schema.add.title").await?;
+    let page_href = href!(
+        page,
+        OrganizationId(at.organization_id),
+        ProcedureId(at.procedure_id)
+    );
+    Ok(view! {
+        <div class="mb-3 flex items-center justify-between gap-3">
+            <h2 id="schema-structure-heading" class="text-sm font-semibold">
+                (structure_heading)
+            </h2>
+            if has_selection {
+                <a
+                    href=(page_href)
+                    class=(button_variants(ButtonVariant::Outline, ButtonSize::Sm))
+                    data-schema-add=""
+                >
+                    (add_element_label.as_str())
+                </a>
+            }
+        </div>
+    })
+}
+
+/// The detail column: the selected element's panel, or the add form
+/// when nothing is selected.
+#[component]
+async fn editor_detail(
+    at: detail::At,
+    selected: Option<Element>,
+    offers: detail::Offers,
+    revision: &Signal<f64>,
+) -> Result<impl View> {
+    Ok(view! {
+        if let Some(element) = selected {
+            detail::panel(
+                editing: detail::Editing { at, element },
+                offers: offers,
+                revision: revision
+            )
+        } else {
+            add_form::form(
+                procedure_id: at.procedure_id,
+                organization_id: at.organization_id,
+                facts: AddFacts {
+                    parent: None,
+                    section_parent: false,
+                    audience_offered: true,
+                    heading_level_top: true,
+                }
+            )
+        }
+    }
+    .boxed())
 }

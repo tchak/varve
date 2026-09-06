@@ -1,11 +1,11 @@
 # Mail (topcoat-mail)
 
 Sources: `crates/topcoat/docs/mail.md`, `crates/topcoat-mail/macro/docs/mail.md`.
-Verified at `topcoat-v0.6.2`. Features: `mail` (+ `mail-smtp` for SMTP).
+Verified at `v0.7.0`. Features: `mail` (+ `mail-smtp` for SMTP).
 
 ```toml
 [dependencies]
-topcoat = { version = "0.6.2", features = ["mail", "mail-smtp"] }
+topcoat = { version = "0.7.0", features = ["mail", "mail-smtp"] }
 ```
 
 ## Setup
@@ -58,7 +58,8 @@ async fn welcome(cx: &Cx) -> Result<&'static str> {
 
 Fields (any order, each at most once): `from` (single address), `to`/`cc`/
 `bcc`/`reply_to` (address or collection), `subject`, `html` (braced `view!`
-body or a `View` expression), `text` (default: derived from HTML; declare your
+body, or unbraced: any expression implementing the `View` trait — a prebuilt
+`view! { … }` value, lazy since 0.7, passed as-is), `text` (default: derived from HTML; declare your
 own, or `TextBody::None` for HTML-only), `attachments`, `headers`
 (`(name, value)` pair or collection), `in_reply_to`/`references` (threading;
 feed them a stored `Receipt`'s message id), `date`/`message_id` (generated at

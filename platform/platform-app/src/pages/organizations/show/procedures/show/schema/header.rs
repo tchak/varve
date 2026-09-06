@@ -25,7 +25,7 @@ use topcoat::{
     context::Cx,
     router::{error::RouterErrorExt, href},
     runtime::{Signal, shard},
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -64,7 +64,7 @@ pub(in crate::pages) enum Tab {
 /// Boxed: the editor page's `view!` is deep enough that an unboxed
 /// header frame overflows the stack in debug builds, the same reason
 /// `structure::tree_row` and `detail::panel` are boxed.
-#[component(boxed)]
+#[component]
 pub(in crate::pages) async fn header(
     cx: &Cx,
     procedure: ProcedureRevisionDraft,
@@ -72,7 +72,7 @@ pub(in crate::pages) async fn header(
     offer_discard: bool,
     offer_publish: bool,
     revision: &Signal<f64>,
-) -> Result {
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
     let title = t_args(
@@ -136,7 +136,7 @@ pub(in crate::pages) async fn header(
         OrganizationId(organization_id),
         ProcedureId(procedure_id)
     );
-    view! {
+    Ok(view! {
         signal pid = procedure_id_string.clone();
 
         <div class="flex flex-col gap-2">
@@ -162,10 +162,7 @@ pub(in crate::pages) async fn header(
                 if in_progress && offer_discard {
                     <a
                         href=(discard_href)
-                        class=(button_variants(
-                            ButtonVariant::Ghost,
-                            ButtonSize::Sm,
-                        ))
+                        class=(button_variants(ButtonVariant::Ghost, ButtonSize::Sm))
                     >
                         (discard_label)
                     </a>
@@ -187,6 +184,7 @@ pub(in crate::pages) async fn header(
             )
         )
     }
+    .boxed())
 }
 
 /// The draft-state line as a shard: how much the draft holds and
@@ -196,14 +194,14 @@ pub(in crate::pages) async fn header(
 /// date it carries is *now* afterwards. Authorizes itself through
 /// the client; an unreadable procedure is the 404.
 #[shard]
-async fn state(cx: &Cx, procedure_id: String, revision: f64) -> Result {
+async fn state(cx: &Cx, procedure_id: String, revision: f64) -> Result<impl View> {
     let _ = revision;
     let client = client(cx).await?;
     let procedure = draft_of(cx, &client, &procedure_id)
         .await?
         .ok_or_not_found()?;
     let line = state_line(cx, &procedure).await?;
-    view! { <span data-schema-state="">(line.as_str())</span> }
+    Ok(view! { <span data-schema-state="">(line.as_str())</span> })
 }
 
 /// The draft-state line's text.

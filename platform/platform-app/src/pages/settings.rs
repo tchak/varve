@@ -23,8 +23,8 @@ mod security;
 use topcoat::{
     Result,
     context::Cx,
-    router::{error::UnauthorizedError, href, layout, page},
-    view::{View, attributes, component, view},
+    router::{Slot, error::UnauthorizedError, href, layout, page},
+    view::{Child, View, attributes, component, error_boundary, view},
 };
 
 use crate::{
@@ -58,22 +58,27 @@ pub(super) fn signin_location(cx: &Cx) -> String {
 /// ([`return_to::remember`]), so the sign-in that follows lands the
 /// user back here. Any other outcome passes through untouched.
 #[layout]
-async fn gate(cx: &Cx, slot: Result) -> Result {
-    match slot {
-        Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
-            return_to::remember(cx)?;
-            redirect_to(cx, signin_location(cx)).await
-        }
-        other => other,
-    }
+async fn gate(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
+    Ok(view! {
+        error_boundary(
+            fallback: |error| {
+                if error.downcast_ref::<UnauthorizedError>().is_none() {
+                    return Err(error);
+                }
+                return_to::remember(cx)?;
+                redirect_to(cx, signin_location(cx))
+            },
+            (slot)
+        )
+    })
 }
 
 /// `/settings` has no content of its own: 303 to the account tab.
 /// `pub` so the shell's account menu can link here with `href!`.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     require_account(cx).await?;
-    redirect_to(cx, href!(account::page).resolve(cx)).await
+    redirect_to(cx, href!(account::page).resolve(cx))
 }
 
 /// The shared settings shell: the page title, the Account | Security
@@ -87,7 +92,7 @@ pub async fn page(cx: &Cx) -> Result {
 /// selected tab already shows the name; a screen reader's heading
 /// navigation still lands on it.
 #[component]
-async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
+async fn settings_shell(cx: &Cx, active: Tab, #[default] child: Child<'_>) -> Result<impl View> {
     let title = t(cx, "settings.title").await?;
     let account_label = t(cx, "settings.tab.account").await?;
     let security_label = t(cx, "settings.tab.security").await?;
@@ -95,7 +100,7 @@ async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
         Tab::Account => account_label.clone(),
         Tab::Security => security_label.clone(),
     };
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             page_title((title))
             tabs(
@@ -117,5 +122,5 @@ async fn settings_shell(cx: &Cx, active: Tab, child: View) -> Result {
                 )
             )
         </div>
-    }
+    })
 }

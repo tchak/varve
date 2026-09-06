@@ -27,8 +27,8 @@ use serde::Deserialize;
 use topcoat::{
     Result,
     context::Cx,
-    router::{content::Form, error::UnauthorizedError, href, layout, page},
-    view::{attributes, component, view},
+    router::{Slot, content::Form, error::UnauthorizedError, href, layout, page},
+    view::{View, ViewExt, attributes, component, error_boundary, view},
 };
 
 use crate::{
@@ -52,14 +52,19 @@ use show::OrganizationId;
 /// headed ([`return_to::remember`]), so the sign-in that follows
 /// lands the user back here.
 #[layout]
-async fn gate(cx: &Cx, slot: Result) -> Result {
-    match slot {
-        Err(error) if error.downcast_ref::<UnauthorizedError>().is_some() => {
-            return_to::remember(cx)?;
-            redirect_to(cx, href!(signin::page).resolve(cx)).await
-        }
-        other => other,
-    }
+async fn gate(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
+    Ok(view! {
+        error_boundary(
+            fallback: |error| {
+                if error.downcast_ref::<UnauthorizedError>().is_none() {
+                    return Err(error);
+                }
+                return_to::remember(cx)?;
+                redirect_to(cx, href!(signin::page).resolve(cx))
+            },
+            (slot)
+        )
+    })
 }
 
 /// A creation submission.
@@ -85,7 +90,7 @@ struct CreationForm {
 /// re-render. Card headings are `<h2>` (not the vendored `card_title`,
 /// an `<h3>`) so the outline never skips a level under the `<h1>`.
 #[component]
-async fn organizations_page(cx: &Cx, form: CreationForm) -> Result {
+async fn organizations_page(cx: &Cx, form: CreationForm) -> Result<impl View> {
     let client = client(cx).await?;
     let organizations = platform_client::run(&client, OrganizationsQuery::build(()))
         .await?
@@ -98,7 +103,7 @@ async fn organizations_page(cx: &Cx, form: CreationForm) -> Result {
     let slug_label = t(cx, "form.slug").await?;
     let slug_hint = t(cx, "form.slug.hint").await?;
     let create_label = t(cx, "organizations.create.submit").await?;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             page_title((title))
             card(
@@ -157,16 +162,16 @@ async fn organizations_page(cx: &Cx, form: CreationForm) -> Result {
                 </form>
             )
         </div>
-    }
+    })
 }
 
 /// One list row: the name as the link to the organization, the slug
 /// beside it. The id is the schema's `ID` — a UUID — parsed here for
 /// `href!`; one the server minted always parses.
 #[component]
-async fn organization_row(organization: OrganizationRef) -> Result {
+async fn organization_row(organization: OrganizationRef) -> Result<impl View> {
     let id: uuid::Uuid = organization.id.inner().parse()?;
-    view! {
+    Ok(view! {
         <li
             data-organization-id=(organization.id.inner())
             class="flex items-center gap-3 border-b border-border py-4 first:pt-0 \
@@ -182,13 +187,13 @@ async fn organization_row(organization: OrganizationRef) -> Result {
                 (organization.slug.0.as_str())
             </code>
         </li>
-    }
+    })
 }
 
 /// The list and the creation form.
 #[page]
-pub async fn page(_cx: &Cx) -> Result {
-    view! { organizations_page(form: CreationForm::default()) }
+pub async fn page() -> Result<impl View> {
+    Ok(view! { organizations_page(form: CreationForm::default()) })
 }
 
 /// Creates an organization through the schema's `createOrganization`
@@ -200,7 +205,7 @@ pub async fn page(_cx: &Cx) -> Result {
 /// shape), `SLUG_TAKEN`, and an invalid slug. Anything else is the
 /// platform's failure and surfaces as a 500.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result<impl View> {
     let client = client(cx).await?;
     let name = input.name.trim().to_owned();
     let slug = input.slug.trim().to_owned();
@@ -216,7 +221,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
         form.slug_error = Some(t(cx, "organizations.create.error.slug-required").await?);
     }
     if form.name_error.is_some() || form.slug_error.is_some() {
-        return view! { organizations_page(form: form) };
+        return Ok(view! { organizations_page(form: form) }.boxed());
     }
     let operation = CreateOrganization::build(CreateOrganizationVariables {
         input: CreateOrganizationInput {
@@ -227,7 +232,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
     match platform_client::run(&client, operation).await {
         Ok(created) => {
             let id: uuid::Uuid = created.create_organization.id.inner().parse()?;
-            redirect_to(cx, href!(show::page, OrganizationId(id)).resolve(cx)).await
+            redirect_to(cx, href!(show::page, OrganizationId(id)).resolve(cx))
         }
         Err(error @ Error::GraphQl(_)) => {
             form.slug_error = Some(match error.code() {
@@ -237,7 +242,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
                 }
                 _ => return Err(error.into()),
             });
-            view! { organizations_page(form: form) }
+            Ok(view! { organizations_page(form: form) }.boxed())
         }
         Err(error) => Err(error.into()),
     }

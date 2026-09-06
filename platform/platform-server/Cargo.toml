@@ -18,4 +18,4 @@ platform-store = { version = "0.1.0", path = "../platform-store" }
 thiserror.workspace = true
 toasty = "0.10.0"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
-topcoat = "0.6.2"
+topcoat = "0.7.0"

@@ -7,7 +7,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, href, page},
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -38,13 +38,13 @@ struct Credentials {
 /// back): a [`page_title`], the [`alert`] when the previous
 /// submission failed, and a [`card`] holding the [`field`]s.
 #[component]
-async fn signin_form(cx: &Cx, error: Option<String>, email: String) -> Result {
+async fn signin_form(cx: &Cx, error: Option<String>, email: String) -> Result<impl View> {
     let title = t(cx, "signin.title").await?;
     let email_label = t(cx, "form.email").await?;
     let password_label = t(cx, "form.password").await?;
     let submit_label = t(cx, "signin.submit").await?;
     let signup_link = t(cx, "signin.signup-link").await?;
-    view! {
+    Ok(view! {
         <div class="mx-auto flex w-full max-w-sm flex-col gap-6">
             page_title((title))
             if let Some(error) = &error {
@@ -99,13 +99,13 @@ async fn signin_form(cx: &Cx, error: Option<String>, email: String) -> Result {
                 )
             )
         </div>
-    }
+    })
 }
 
 /// The sign-in form.
 #[page]
-pub async fn page() -> Result {
-    view! { signin_form(error: None, email: String::new()) }
+pub async fn page() -> Result<impl View> {
+    Ok(view! { signin_form(error: None, email: String::new()) })
 }
 
 /// Authenticates and starts a session, then returns the browser to
@@ -116,17 +116,17 @@ pub async fn page() -> Result {
 /// a failed submission also leaves the remembered location alone for
 /// the retry.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<Credentials>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<Credentials>) -> Result<impl View> {
     let mut db = db(cx);
     match verify_credentials(&mut db, &input.email, &input.password).await? {
         Some(account) => {
             sign_in(cx, &account).await?;
             let location = return_to::take(cx).unwrap_or_else(|| href!(super::home).resolve(cx));
-            redirect_to(cx, location).await
+            redirect_to(cx, location)
         }
         None => {
             let error = t(cx, "signin.error.invalid-credentials").await?;
-            view! { signin_form(error: Some(error), email: input.email) }
+            Ok(view! { signin_form(error: Some(error), email: input.email) }.boxed())
         }
     }
 }

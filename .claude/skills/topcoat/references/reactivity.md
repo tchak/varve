@@ -2,7 +2,7 @@
 
 Sources: `crates/topcoat/docs/runtime.md`,
 `crates/topcoat-runtime/macro/docs/{expr,procedure,shard}.md`. Verified at
-`topcoat-v0.6.2`.
+`v0.7.0`.
 
 **Upstream calls the runtime "highly experimental and fairly limited"** —
 expect breaking changes; the expression vocabulary is small. No wasm bundle, no
@@ -16,14 +16,14 @@ Interactive pages need the browser script in the head, and the script is a
 topcoat asset, so the asset bundle must be on the router:
 
 ```rust
-view! {
+Ok(view! {
     <html>
         <head>
             topcoat::runtime::script()
         </head>
         <body></body>
     </html>
-}
+})
 
 // router: .discover() also registers procedure/shard endpoints
 Router::builder()
@@ -44,12 +44,12 @@ Declared with a `signal` **statement inside a `view!` body**; initial value is
 ordinary Rust, evaluated at server render and serialized into the page:
 
 ```rust
-view! {
+Ok(view! {
     signal count = 0.0;
 
     <button @click=$(|_e| count.increment())>"+1"</button>
     <p>"Count: " $(count.get())</p>
-}
+})
 ```
 
 Signal methods (inside expressions): `.get()`, `.set(v)`; shorthands:
@@ -64,10 +64,10 @@ a closure, run in the browser; the closure receives an `Event`
 `e.client_x`, `e.prevent_default()`, …
 
 ```rust
-view! {
+Ok(view! {
     signal query = String::new();
     <input @input=$(|e: Event| query.set(e.target.value))>
-}
+})
 ```
 
 Escape hatch: the value may be a raw-JS string literal: `@click="alert('hi')"`.
@@ -133,7 +133,7 @@ async fn search(cx: &Cx, query: String) -> Result<String> {
   calls inside closures that never run server-side.
 - An `Err` fails the awaiting expression without an observable error value;
   return outcome-as-data (`Result<String, String>` as the `Ok` type) if the
-  client must react.
+  client must react. (0.7 fixed `bool` results being lost on the way back.)
 - Registration: `.discover()`, or
   `Router::builder().procedure(double)` (`RouterBuilderProcedureExt`).
 
@@ -145,20 +145,20 @@ endpoint, the function re-runs on the server, and the returned HTML is swapped
 in place:
 
 ```rust
-use topcoat::{Result, context::Cx, runtime::shard, view::view};
+use topcoat::{Result, context::Cx, runtime::shard, view::{View, view}};
 
 #[shard]
-async fn search_results(cx: &Cx, query: String) -> Result {
+async fn search_results(cx: &Cx, query: String) -> Result<impl View> {
     let products = search_products(cx, &query).await?;
-    view! { for product in products { <div>(product)</div> } }
+    Ok(view! { for product in products { <div>(product)</div> } })
 }
 
 // usage inside a view:
-view! {
+Ok(view! {
     signal query = String::new();
     <input :value=$(query.get()) @input=$(|e: Event| query.set(e.target.value))>
     search_results(query: $(query.get()))
-}
+})
 ```
 
 - Initial page render runs the shard inline (no extra request). Changes
@@ -168,6 +168,6 @@ view! {
 - **Guards on the page/layout do NOT cover the shard endpoint** — a shard
   rendering private content must authorize itself (`require_auth(cx).await?`)
   and validate its arguments (caller-controlled).
-- Args must be vocabulary types; return is `Result` (a view); `cx` special as
-  usual. Registration: `.discover()` or `.shard(search_results)`
+- Args must be vocabulary types; return is `Result<impl View>`, like a
+  component's; `cx` special as usual. Registration: `.discover()` or `.shard(search_results)`
   (`RouterBuilderShardExt`).

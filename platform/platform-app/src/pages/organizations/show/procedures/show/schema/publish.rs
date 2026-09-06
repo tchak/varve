@@ -25,7 +25,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::not_found, href, page, path_param},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::{
@@ -56,7 +56,7 @@ pub(super) struct Confirmation {
 /// with a status notice; a report worse than `SAFE` without confirm
 /// lands on `?publish=confirm`, which shows it.
 #[page(POST)]
-pub(super) async fn submit(cx: &Cx, Form(input): Form<Confirmation>) -> Result {
+pub(super) async fn submit(cx: &Cx, Form(input): Form<Confirmation>) -> Result<impl View> {
     let client = client(cx).await?;
     let organization = path_param::<OrganizationId>(cx)?;
     let procedure = path_param::<ProcedureId>(cx)?;
@@ -83,7 +83,7 @@ pub(super) async fn submit(cx: &Cx, Form(input): Form<Confirmation>) -> Result {
             )
             .query(&[("publish", "confirm")])
             .resolve(cx);
-            crate::pages::redirect_to(cx, location).await
+            crate::pages::redirect_to(cx, location)
         }
         Err(error) => {
             let notice = refused_publication(cx, error).await?;
@@ -125,7 +125,7 @@ pub(super) async fn confirmation(
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
     report: ImpactReport,
-) -> Result {
+) -> Result<impl View> {
     let question = t(cx, "schema.publish.question").await?;
     let confirm_label = t(cx, "schema.publish.confirm").await?;
     let keep = t(cx, "schema.publish.keep").await?;
@@ -145,7 +145,7 @@ pub(super) async fn confirmation(
         ChangeClass::Safe => AlertVariant::Neutral,
         _ => AlertVariant::Destructive,
     };
-    view! {
+    Ok(view! {
         alert(
             variant: variant,
             attrs: attributes! { role="alertdialog" aria-labelledby="publish-question" },
@@ -172,15 +172,12 @@ pub(super) async fn confirmation(
                     </form>
                     <a
                         href=(editor_href)
-                        class=(button_variants(
-                            ButtonVariant::Outline,
-                            ButtonSize::Sm,
-                        ))
+                        class=(button_variants(ButtonVariant::Outline, ButtonSize::Sm))
                     >
                         (keep)
                     </a>
                 </div>
             )
         )
-    }
+    })
 }

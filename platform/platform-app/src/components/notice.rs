@@ -16,7 +16,7 @@
 
 use topcoat::{
     Result,
-    view::{Attributes, StaticClass, View, class, component, view},
+    view::{Attributes, Child, StaticClass, View, class, component, view},
 };
 
 /// What the notice reports.
@@ -52,13 +52,13 @@ const BASE: StaticClass = class!("w-full rounded-lg border px-4 py-3 text-sm");
 pub async fn notice(
     #[default] tone: NoticeTone,
     #[default] mut attrs: Attributes,
-    #[default] child: View,
-) -> Result {
-    view! {
+    #[default] child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
         <div class=(class!(BASE, tone.classes(), attrs.remove("class"))) (attrs)>
             (child)
         </div>
-    }
+    })
 }
 
 #[cfg(test)]
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn tones_and_forwarded_role() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 notice(
@@ -85,7 +85,7 @@ mod tests {
         assert!(html.contains("mt-2"), "{html}");
         assert!(html.contains("Saved your changes."), "{html}");
 
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 notice(

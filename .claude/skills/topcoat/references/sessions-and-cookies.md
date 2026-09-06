@@ -1,8 +1,9 @@
 # Sessions and cookies — the platform's auth layer
 
 Sources: `crates/topcoat/docs/session.md`, `crates/topcoat/docs/cookie.md`,
-`examples/session/src/main.rs`, `demos/coffee-shop/src/customer.rs`. Verified
-at `topcoat-v0.6.2`.
+`examples/session/src/main.rs`, `demos/coffee-shop/src/customer.rs`,
+`crates/topcoat-router/src/content/view.rs`, `crates/topcoat-cookie/src/router.rs`.
+Verified at `v0.7.0`.
 
 ## Cookies (topcoat-cookie, feature `cookie`, on by default)
 
@@ -82,7 +83,51 @@ fn cookies(cx: &Cx) -> impl Cookies {
   `signed_cookies(cx)` / `private_cookies(cx)` — they panic without a
   registered `Key`. **Persist the key**; regenerating on boot invalidates all
   existing signed/encrypted cookies.
-- 0.6.0: the jar is protected from writes after the response is sent.
+- The jar is sealed once its changes are written to the response; see
+  "Writes must happen before the response" below.
+
+### Writes must happen before the response (0.7)
+
+Cookies are set as part of the response headers, so it is impossible to set
+one after the response body has begun streaming — WebSockets, `live!`
+regions, `suspense` children. Reading always works; a write after the seal
+panics with `cannot add a cookie after the response headers have been sent`.
+When exactly is the seal? The router converts a page's view into the
+`Response` **inside the handler**: it awaits the view's whole first phase
+(every non-live part and each live region's *first* emission —
+`content/view.rs`'s `stream` awaits `poll_first`), then the cookie layer
+(`topcoat-cookie/src/router.rs`) appends `Set-Cookie` and seals the jar, and
+only then do later emissions stream. So writes are legal:
+
+- in the handler/page/layout body before `Ok(view! { … })` — the documented
+  place;
+- inside components rendered in the first phase, including an
+  `error_boundary` fallback that replaces a page's first content (e.g.
+  remembering a return-to location while turning `UnauthorizedError` into a
+  redirect);
+
+and illegal (panic) inside a `live!` body after its first emission, in a
+`suspense` child, or in anything spawned past the handler.
+
+```rust
+#[page("/report")]
+async fn report(cx: &Cx) -> Result<impl View> {
+    // Runs while the handler is still in charge of the response.
+    cookies(cx).add(("last_report", "sales"));
+
+    Ok(view! {
+        suspense(
+            fallback: view! { <p>"Loading..."</p> },
+            // Streams in later, so it must not touch the jar.
+            figures()
+        )
+    })
+}
+```
+
+The same applies to sessions: `session::start/stop/refresh/rotate` set
+cookies, so call them in handler bodies (or first-phase content), never from
+streaming regions.
 
 ### Typed cookies: CookieStore<T>
 

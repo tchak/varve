@@ -24,7 +24,7 @@ use topcoat::{
         href, page, route,
     },
     session,
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::{
@@ -105,7 +105,7 @@ fn browser_icon(family: &str) -> IconData {
     } else if family.contains("Opera") {
         iconify_icon!("simple-icons:opera")
     } else {
-        iconify_icon!("feather:globe")
+        iconify_icon!("lucide:globe")
     }
 }
 
@@ -135,7 +135,7 @@ async fn current_session_id(cx: &Cx, db: &mut toasty::Db) -> Result<Option<uuid:
 /// `data-current="true|false"` so tests and styling can address the
 /// current row without parsing the badge text.
 #[component]
-async fn sessions_card(cx: &Cx) -> Result {
+async fn sessions_card(cx: &Cx) -> Result<impl View> {
     let account = require_account(cx).await?;
     let mut db = db(cx);
     let sessions =
@@ -176,7 +176,7 @@ async fn sessions_card(cx: &Cx) -> Result {
         });
     }
 
-    view! {
+    Ok(view! {
         card(
             card_header(card_title((sessions_title)))
             card_content(
@@ -233,7 +233,7 @@ async fn sessions_card(cx: &Cx) -> Result {
                 </ul>
             )
         )
-    }
+    })
 }
 
 /// The flash a successful [`tokens::submit`] leaves for [`page`]:
@@ -281,7 +281,7 @@ struct TokenRow {
 /// after the token for assistive tech. Each row carries
 /// `data-token-id` for tests.
 #[component]
-async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
+async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result<impl View> {
     let account = require_account(cx).await?;
     let mut db = db(cx);
     let tokens =
@@ -310,7 +310,7 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
                 &one_arg("name", name.as_str()),
             )
             .await?,
-            secret.as_str(),
+            secret.clone(),
         )),
         None => None,
     };
@@ -344,7 +344,7 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
         });
     }
 
-    view! {
+    Ok(view! {
         card(
             card_header(
                 card_title((title))
@@ -364,7 +364,7 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
                                     class="mt-2 block rounded-md bg-foreground/5 px-2 py-1 \
                                            font-mono text-sm break-all select-all"
                                 >
-                                    (*secret)
+                                    (secret.as_str())
                                 </code>
                             )
                         )
@@ -384,8 +384,9 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
                                     name="name"
                                     value=(form.name.as_str())
                                     required=""
-                                    maxlength=(platform_core::MAX_API_TOKEN_NAME_CHARS
-                                        .to_string())
+                                    maxlength=(platform_core::MAX_API_TOKEN_NAME_CHARS.to_string(
+
+                                    ))
                                     autocomplete="off"
                                 }
                             )
@@ -437,18 +438,18 @@ async fn api_tokens_card(cx: &Cx, form: TokensForm) -> Result {
                 </div>
             )
         )
-    }
+    })
 }
 
 /// The security tab's cards inside the settings shell: sessions, then
 /// API tokens. Shared by the GET [`page`] and [`tokens::submit`]'s
 /// re-render.
 #[component]
-async fn security_cards(cx: &Cx, tokens_form: TokensForm) -> Result {
+async fn security_cards(cx: &Cx, tokens_form: TokensForm) -> Result<impl View> {
     // Guard here too, so the composition fails closed even before
     // the cards' own guards run (the layout maps it to the redirect).
     require_account(cx).await?;
-    view! {
+    Ok(view! {
         settings_shell(
             active: Tab::Security,
             <div class="flex flex-col gap-6">
@@ -456,19 +457,19 @@ async fn security_cards(cx: &Cx, tokens_form: TokensForm) -> Result {
                 api_tokens_card(form: tokens_form)
             </div>
         )
-    }
+    })
 }
 
 /// The security tab. Consumes the issued-token flash when one is
 /// present, so the secret shows on exactly this response.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let form = TokensForm {
         issued: flash::take::<IssuedFlash>(cx, ISSUED_FLASH)
             .map(|flash| (flash.name, flash.secret)),
         ..TokensForm::default()
     };
-    view! { security_cards(tokens_form: form) }
+    Ok(view! { security_cards(tokens_form: form) })
 }
 
 /// Revokes one session. The destroy is the *scoped*

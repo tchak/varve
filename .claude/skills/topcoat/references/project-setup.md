@@ -1,21 +1,22 @@
 # Project setup, CLI, assets, testing
 
 Sources: `crates/topcoat/docs/{getting_started,asset,tailwind,font,icon,ui}.md`,
-`crates/topcoat-cli/docs/fmt.md`, `demos/coffee-shop/`, framework test code.
-Verified at `topcoat-v0.6.2`.
+`crates/topcoat-cli/docs/fmt.md`, `demos/coffee-shop/`, framework test code
+(`crates/topcoat-view/macro/tests/render.rs`). Verified at `v0.7.0`. Needs
+Rust **1.98**.
 
 ## New project
 
 ```sh
 cargo new my-app && cd my-app
-cargo add topcoat                                   # 0.6.2
+cargo add topcoat                                   # 0.7.0
 cargo add tokio --features rt-multi-thread,macros
 # platform extras for this repo:
 cargo add topcoat --features mail,mail-smtp,multipart,tower
 ```
 
 ```rust
-use topcoat::{Result, router::{Router, RouterBuilderDiscoverExt, page}, view::{component, view}};
+use topcoat::{Result, router::{Router, RouterBuilderDiscoverExt, page}, view::{View, component, view}};
 
 #[tokio::main]
 async fn main() {
@@ -23,8 +24,8 @@ async fn main() {
 }
 
 #[page("/")]
-async fn home() -> Result {
-    view! {
+async fn home() -> Result<impl View> {
+    Ok(view! {
         <!DOCTYPE html>
         <html>
             <head>
@@ -33,12 +34,12 @@ async fn home() -> Result {
             </head>
             <body>hello(name: "World")</body>
         </html>
-    }
+    })
 }
 
 #[component]
-async fn hello(name: &str) -> Result {
-    view! { <h1>"Hello, " (name) "!"</h1> }
+async fn hello(name: &str) -> Result<impl View> {
+    Ok(view! { <h1>"Hello, " (name) "!"</h1> })
 }
 ```
 
@@ -49,11 +50,14 @@ async fn hello(name: &str) -> Result {
 - **`topcoat dev`** — builds, bundles assets, serves; watches sources and
   rebuilds/rebundles/restarts. Pages including `topcoat::dev::script()` reload
   automatically; press `r` for a manual rebuild. `HOST=0.0.0.0 PORT=8080
-  topcoat dev` overrides the bind (defaults `127.0.0.1:3000`). Plain
-  `cargo run` also works, minus assets/reload.
-- **`topcoat fmt`** — formats topcoat macro bodies (`view!` etc.) in place,
-  complementing `rustfmt` (which leaves macro bodies alone). Args: files/dirs;
-  `--stdin` for editors; `--macros view,class` to restrict. A repo-root
+  topcoat dev` overrides the bind (defaults `127.0.0.1:3000`). 0.7: retries
+  the port while the previous instance releases it, and a reconnect no longer
+  reloads over an in-flight navigation. Plain `cargo run` also works, minus
+  assets/reload.
+- **`topcoat fmt`** — formats topcoat macro bodies (`view!`, `live!`, `emit!`,
+  `attributes!`, `class!`, `font!`, `mail!`, …) in place, complementing
+  `rustfmt` (which leaves macro bodies alone). Args: files/dirs; `--stdin` for
+  editors; `--macros view,class,live,emit` to restrict. A repo-root
   **`Topcoat.toml` is just a marker file for `topcoat fmt` editor
   integration** — it is not an app config file.
 - **`topcoat asset list | bundle | clean`** — manual bundling; `--bin`/
@@ -65,7 +69,9 @@ async fn hello(name: &str) -> Result {
   `ui` + `tailwind` (+ `font-fontsource` for the themes' fonts). Feature `ui`
   exposes `topcoat_ui::Registry` for tests that pin vendored components to the
   registry (see `demos/coffee-shop/tests/registry_sync.rs`).
-- 0.6.0+: the CLI warns on a version mismatch between `topcoat` and the CLI.
+- The CLI warns on a version mismatch between `topcoat` and the CLI
+  (`this project depends on topcoat 0.6.2, but the topcoat CLI is 0.7.0 —
+  install a matching CLI with cargo install topcoat-cli@0.6 --locked`).
 
 ## Feature flags (facade crate `topcoat`)
 
@@ -90,7 +96,7 @@ const FERRIS: Asset = asset!("./ferris.png");       // relative to this source f
 // "https://…" → downloaded and cached at build time.
 // Options: rename:, extension:, checksum: "sha256:…", content_type:.
 
-view! { <img src=(FERRIS)> }   // renders /_topcoat/assets/ferris-<hash>.png
+Ok(view! { <img src=(FERRIS)> })   // renders /_topcoat/assets/ferris-<hash>.png
 ```
 
 Load the bundle on the router (or rendering an `Asset` panics — treat as
@@ -117,9 +123,9 @@ build-dependency:
 
 ```toml
 [dependencies]
-topcoat = { version = "0.6.2", features = ["tailwind"] }
+topcoat = { version = "0.7.0", features = ["tailwind"] }
 [build-dependencies]
-topcoat = { version = "0.6.2", default-features = false, features = ["tailwind"] }
+topcoat = { version = "0.7.0", default-features = false, features = ["tailwind"] }
 ```
 
 ```rust
@@ -129,7 +135,7 @@ fn main() { topcoat::tailwind::BuildConfig::new().render().unwrap(); }
 // .executable("tailwindcss") / .executable_env("TAILWIND_CLI")
 
 // layout:
-view! { <link rel="stylesheet" href=(tailwind::stylesheet!())> }
+Ok(view! { <link rel="stylesheet" href=(tailwind::stylesheet!())> })
 // stylesheet!() == asset!(concat!(env!("OUT_DIR"), "/tailwind.css"))
 ```
 
@@ -151,16 +157,19 @@ class strings are invisible.
   `icon(data: TRASH, label: "trash")` (inline `<svg>`, 1em, currentColor;
   `size:` fixes dimensions, `attrs:` forwards attributes; no `label` = hidden
   from assistive tech). Feature `icon-iconify` vendors sets from Iconify at
-  build time.
+  build time (`iconify_icon!("lucide:chevron-right")`); the topcoat-ui
+  registry uses the **`lucide:`** set since 0.7 (was `feather:`).
 
 ## Testing
 
-Two levels, both used by upstream:
+Three levels, all used by upstream:
 
 **1. Router-level** — `Router::handle` needs no listener. Topcoat re-exports
 the `http` types it uses (`topcoat::router::{Method, StatusCode, HeaderMap,
 HeaderName, HeaderValue, Uri, header}`; `request::Request<T = Body>` is
-`http::Request<T>`), so tests need no direct `http` dependency:
+`http::Request<T>`), so tests need no direct `http` dependency. Page bodies
+may be streamed (0.7); `to_bytes` drains the whole stream, so assertions see
+the final markup with any inline swap script:
 
 ```rust
 use topcoat::router::{Body, Method, Router, StatusCode, request::Request, to_bytes};
@@ -180,7 +189,36 @@ async fn health_works() {
 }
 ```
 
-**2. Cx-level** — unit-test `cx` functions with `CxTestBuilder`
+**2. Component-level** — render a view to a string without a router, the way
+`crates/topcoat-view/macro/tests/render.rs` does: `view.single().await` gives
+the `ViewHandle` (panics if the view is live — `.first()` for those), and
+`.render(&cx)` the HTML. Views are lazy, so *building* one is synchronous
+and *resolving* it (`single()`) is the async burst that runs the component
+futures — a noop-waker poll loop drives it in a plain `#[test]`:
+
+```rust
+use std::{future::Future, pin::pin, task::{Context, Poll, Waker}};
+use topcoat::{context::{Cx, CxTestBuilder}, view::{View, ViewExt}};
+
+fn render<V: View>(build: impl FnOnce(&Cx) -> V) -> String {
+    let cx = CxTestBuilder::new().build();
+    let handle = block_on(build(&cx).single()).expect("render the view");
+    handle.render(&cx)
+}
+// render(|cx| view! { cx => badge(label: "New") })
+
+fn block_on<F: Future>(fut: F) -> F::Output {
+    let mut fut = pin!(fut);
+    let mut task = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(output) = fut.as_mut().poll(&mut task) { return output; }
+    }
+}
+
+// let html = render(async |cx| Ok(view! { cx => badge(label: "New") }));
+```
+
+**3. Cx-level** — unit-test `cx` functions with `CxTestBuilder`
 (`topcoat::context::CxTestBuilder`): `.app_context(v)`, `.request_context(v)`,
 `.build()` → `Cx`. Pair with `MemoryTransport` for mail assertions (see
 `references/mail.md`) and in-memory app-context fakes for storage.
@@ -202,13 +240,22 @@ sources; `demos/coffee-shop/tests/` holds integration tests. Examples in
   `references/routing.md` § Tower interop.
 
 
-## Field notes: tailwind + `topcoat ui` mechanics (verified 2026-08-21)
+## Field notes: tailwind + `topcoat ui` mechanics (verified 2026-08-21, re-checked at 0.7.0)
 
 The skill's original pass summarized these to command names; here is
-how they actually work at 0.6.2:
+how they actually work:
 
-- **CLI**: `cargo install topcoat-cli --version 0.6.2 --locked` —
+- **CLI**: `cargo install topcoat-cli --version 0.7.0 --locked` —
   pin to the runtime dep's version (the CLI warns on mismatch).
+- **Re-vendoring after a registry change** (every topcoat minor
+  touches the registry — 0.7 rewrote each component for lazy views
+  and swapped `feather:` icons for `lucide:`): bump `topcoat` in
+  `Cargo.toml` first (the CLI reads the registry through `cargo
+  metadata`), then `topcoat ui add <name> --overwrite --package <pkg>`
+  per vendored component. The theme has no `--overwrite`: delete
+  `styles.css` and `components.toml`, run `topcoat ui init --theme
+  neutral --package <pkg>`, then re-add every component. A
+  registry-sync test tells you which files drifted.
 - **`topcoat ui` is shadcn-style vendoring, not a crate**:
   `topcoat ui init --package <pkg> --theme neutral` writes
   `components.toml` (install state: theme + per-component sha256) and
@@ -229,6 +276,15 @@ how they actually work at 0.6.2:
   catalog. Gotcha: `#[component]` defines a unit struct per component,
   so a parameter named like an imported component collides — alias the
   import (`label as field_label`).
+- **Iconify sets are staged in `build.rs`** (`BuildConfig::new()
+  .icon_set("lucide").icon_set("simple-icons").stage()`): the 0.7 registry
+  components use `lucide:` ids, so a project that staged only `feather`
+  fails to build after `topcoat ui add --overwrite` ("the Iconify icon set
+  `lucide` is not staged") until the build script stages it. lucide renamed
+  a few glyphs (`check-square` → `square-check`, `more-horizontal` →
+  `ellipsis`, `alert-triangle` → `triangle-alert`); a wrong id is a build
+  error. `topcoat ui add <name> --overwrite` rewrites the file and
+  `components.toml` without duplicating the `pub mod` line.
 - **Tailwind**: runtime dep features `["tailwind", "ui"]` plus a
   build-dep `topcoat { default-features = false, features =
   ["tailwind"] }`; `build.rs` is

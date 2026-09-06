@@ -5,7 +5,7 @@
 
 use topcoat::{
     Result,
-    view::{Attributes, StaticClass, View, class, component, view},
+    view::{Attributes, Child, StaticClass, View, class, component, view},
 };
 
 /// The classes for the [`site_header`] bar.
@@ -46,9 +46,10 @@ pub async fn site_header(
     mut attrs: Attributes,
     /// The navigation items, laid out right-aligned.
     #[default]
-    child: View,
-) -> Result {
-    view! {
+    #[default]
+    child: Child<'_>,
+) -> Result<impl View> {
+    Ok(view! {
         <header class=(class!(HEADER, attrs.remove("class"))) (attrs)>
             <nav class=(NAV)>
                 <a href=(brand_href) class="font-semibold text-foreground">
@@ -57,7 +58,7 @@ pub async fn site_header(
                 <div class="ml-auto flex flex-wrap items-center gap-2">(child)</div>
             </nav>
         </header>
-    }
+    })
 }
 
 #[cfg(test)]
@@ -74,7 +75,7 @@ mod tests {
 
     #[test]
     fn renders_landmarks_brand_link_and_children() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 site_header(
@@ -97,7 +98,7 @@ mod tests {
 
     #[test]
     fn forwards_attrs_and_merges_class_onto_the_header() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 site_header(

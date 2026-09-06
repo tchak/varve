@@ -2,14 +2,15 @@
 
 Sources: `crates/topcoat/docs/router.md`, `crates/topcoat-router/docs/`
 (`module_router.md`, `error.md`, `tower.md`, `content.md`, `content/*.md`),
-`crates/topcoat-router/macro/docs/` (one page per macro). All verified against
-tag `topcoat-v0.6.2`.
+`crates/topcoat-router/macro/docs/` (one page per macro), `examples/suspense`.
+All verified against tag `v0.7.0`.
 
 Contents: [Basics](#basics) · [Paths](#path-syntax) · [Pages](#pages) ·
 [Layouts](#layouts) · [Layers](#layers) · [API routes](#api-routes) ·
 [module_router!](#module_router) · [Path params](#path-parameters) ·
 [Query params](#query-parameters) · [href!](#building-urls-with-href) ·
-[Errors](#errors) · [Origin policy](#cross-origin-requests-originpolicy) ·
+[Errors](#errors) · [Streaming & commit](#streaming-and-commit) ·
+[Origin policy](#cross-origin-requests-originpolicy) ·
 [Bodies & responses](#request-bodies-and-responses) · [Uploads](#multipart-uploads) ·
 [Tower/axum interop](#tower-interop-the-escape-hatch)
 
@@ -54,45 +55,50 @@ missing type, not a compile error.
 ## Pages
 
 ```rust
-use topcoat::{Result, router::page, view::view};
+use topcoat::{Result, router::page, view::{View, view}};
 
 #[page("/")]
-async fn home() -> Result {
-    view! { <h1>"Home"</h1> }
+async fn home() -> Result<impl View> {
+    Ok(view! { <h1>"Home"</h1> })
 }
 ```
 
 - `GET` by default; override with `#[page(POST "/signup")]`, `[GET, POST]`, or `*`.
-- Signature: async, returns `Result` (= `Result<View>`); may take `cx: &Cx`
-  and/or **one** body param implementing `FromRequest` (e.g.
-  `Form(input): Form<Signup>`), in either order.
+- Signature: async, returns `Result<impl View>` (the `View` **trait**; the
+  body ends with `Ok(view! { … })` — views are lazy, see
+  views-and-components.md); may take `cx: &Cx` and/or **one** body param
+  implementing `FromRequest` (e.g. `Form(input): Form<Signup>`), in either
+  order.
 - A page doubles as a component: `contact(body: Form(query))` renders it inline
   with the already-parsed body as a `body:` prop.
 
 ## Layouts
 
 A layout wraps every page whose path starts with the layout's path; multiple
-matches nest least-specific outermost. It receives the inner render as
-`slot: Result` (i.e. `Result<View>`) — so it can inspect/replace errors before
-they become responses:
+matches nest least-specific outermost. It receives the inner page (or nested
+layout) as `slot: Slot<'_>` (`topcoat::router::Slot`, an alias of
+`topcoat::view::Child` — a lazy view) and decides where and when it renders by
+interpolating `(slot)`:
 
 ```rust
-use topcoat::{Result, router::layout, view::view};
+use topcoat::{Result, router::{Slot, layout}, view::{View, view}};
 
 #[layout("/")]
-async fn root_layout(slot: Result) -> Result {
-    view! {
+async fn root_layout(slot: Slot<'_>) -> Result<impl View> {
+    Ok(view! {
         <!DOCTYPE html>
         <html><body>
             <nav><a href="/">"Home"</a></nav>
-            (slot?)
+            (slot)
         </body></html>
-    }
+    })
 }
 ```
 
-Only `slot` and optional `cx: &Cx` params are accepted. A layout also doubles as
-a component: `root_layout(slot: Ok(content))`.
+Only `slot` and optional `cx: &Cx` params are accepted. The slot is no longer
+a `Result` (0.7): a layout catches a page's error by wrapping `(slot)` in an
+`error_boundary` (see [Errors](#errors)). A layout also doubles as a
+component: `root_layout(slot: Slot::new(view! { <p>"content"</p> }))`.
 
 ## Layers
 
@@ -134,9 +140,11 @@ async fn create_user(Json(input): Json<CreateUser>) -> Result<Json<User>> { /* �
 
 - Method(s) first: `GET`, `[GET, POST]`, or `*` (specific method beats `*` at
   the same path). Path string optional (module-derived otherwise).
-- Returns `Result<T>` where `T: IntoResponse`. **Values are not auto-JSON** —
-  wrap in `Json<T>` to opt in. This is where the varve platform mounts
-  `POST /graphql` and download handlers.
+- Returns `Result<T>` where `T: AsyncIntoResponse`
+  (`topcoat::router::response::AsyncIntoResponse`); every `IntoResponse` type
+  is one, and views are the async case (a route may return `impl View`).
+  **Values are not auto-JSON** — wrap in `Json<T>` to opt in. This is where
+  the varve platform mounts `POST /graphql` and download handlers.
 
 ## module_router!
 
@@ -185,14 +193,14 @@ type (`path_param!(post_id: u64)` → `struct PostId(u64)`); read it with the
 declaration also turns that module's segment into the parameter.
 
 ```rust
-use topcoat::{Result, context::Cx, router::{page, path_param}, view::view};
+use topcoat::{Result, context::Cx, router::{page, path_param}, view::{View, view}};
 
 path_param!(post_id: u64, error = bad_request);
 
 #[page("/posts/{post_id}")]
-async fn post(cx: &Cx) -> Result {
+async fn post(cx: &Cx) -> Result<impl View> {
     let post_id = path_param::<PostId>(cx)?;   // &u64; memoized per request
-    view! { <h1>"Post " (post_id)</h1> }
+    Ok(view! { <h1>"Post " (post_id)</h1> })
 }
 ```
 
@@ -210,7 +218,7 @@ async fn post(cx: &Cx) -> Result {
 ## Query parameters
 
 ```rust
-use topcoat::{Result, context::Cx, router::{page, query_params}, view::view};
+use topcoat::{Result, context::Cx, router::{page, query_params}, view::{View, view}};
 
 #[query_params(error = bad_request)]
 struct PostsQuery {
@@ -219,9 +227,9 @@ struct PostsQuery {
 }
 
 #[page("/posts")]
-async fn posts(cx: &Cx) -> Result {
+async fn posts(cx: &Cx) -> Result<impl View> {
     let query = query_params::<PostsQuery>(cx)?;  // &PostsQuery; memoized
-    view! { <p>"page: " (query.page.unwrap_or(1))</p> }
+    Ok(view! { <p>"page: " (query.page.unwrap_or(1))</p> })
 }
 ```
 
@@ -239,11 +247,11 @@ async fn posts(cx: &Cx) -> Result {
 ```rust
 use topcoat::router::href;
 
-view! {
+Ok(view! {
     <a href=(href!(post, PostId(1)))>"The first post"</a>              // /posts/1
     <a href=(href!(document, DocPath(["guides", "getting started"])))>"Guides"</a>
     <a href=(href!(menu::page))>"Menu"</a>
-}
+})
 // Outside a view: a String, resolved against the request
 Ok(see_other(href!(page).resolve(cx)))
 ```
@@ -252,7 +260,26 @@ Params match by declared type/name (wrong type panics, never a wrong URL);
 segments are `Display`-formatted and percent-encoded. The `Href` value also has
 `.query(item)`, `.fragment(f)`, `.relative()`/`.absolute()`/`.form(...)`; the
 plain function `href(target, (params,))` exists too. Empty/`.`/`..` segments
-panic.
+panic. `HrefTarget` is implemented for `&T` where `T: HrefTarget` (0.7), so
+`dyn` targets work.
+
+### Marking the current link (0.7)
+
+- `href.is_current(cx) -> bool` — true when the href resolves to the request's
+  path **and** query: the encoded path is compared byte-for-byte (`a/b` ≠
+  `a%2Fb`), the query as decoded key/value pairs sorted (order/encoding
+  independent), fragments ignored. Panics on params that don't fit the path.
+
+```rust
+let link = href!(posts);
+let current = link.is_current(cx);
+Ok(view! { <a href=(link) aria-current=(current.then_some("page"))>"Posts"</a> })
+```
+
+- `Route::is_current(&self, cx)` / `Page::is_current` / `ModulePage::is_current`
+  (traits in `topcoat::router`) compare handlers only: current for every value
+  of the path params, whatever the query. **Panics if the request matched no
+  route** (404/405) — so not inside a `not_found!` page.
 
 ## Errors
 
@@ -268,9 +295,49 @@ Module `topcoat::router::error` (`crates/topcoat-router/docs/error.md`):
 - `RouterErrorExt` on `Option`/`Result`: `.ok_or_not_found()?`,
   `.ok_or_unauthorized()?`, `.ok_or_redirect("/login")?`, `.ok_or_forbidden()?`, …
 - Any other error → 500, message never leaked.
-- **Catching**: errors keep their type; an outer layout matches on
-  `slot` and `error.downcast_ref::<NotFoundError>()`, replacing the view (add
-  `(StatusCode::NOT_FOUND)` in the replacement view or it becomes a 200).
+- **Catching** (0.7): errors keep their type on the way out; wrap the content
+  that may fail in an `error_boundary` (`topcoat::view`) whose fallback
+  downcasts and either rethrows or returns the replacement view. A layout
+  branding a page's 404 (`crates/topcoat/docs/router.md`):
+
+  ```rust
+  use topcoat::{
+      Result,
+      router::{Slot, StatusCode, error::NotFoundError, layout},
+      view::{View, error_boundary, view},
+  };
+
+  #[layout("/")]
+  async fn root(slot: Slot<'_>) -> Result<impl View> {
+      Ok(view! {
+          <html>
+              <body>
+                  error_boundary(
+                      fallback: |error| {
+                          if error.downcast_ref::<NotFoundError>().is_none() {
+                              // Any other error type is rethrown.
+                              return Err(error);
+                          }
+                          Ok(view! {
+                              (StatusCode::NOT_FOUND)
+                              <h1>"Page not found"</h1>
+                          })
+                      },
+                      (slot)
+                  )
+              </body>
+          </html>
+      })
+  }
+  ```
+
+  The `StatusCode` keeps the response a 404; without it the replacement is a
+  200. The fallback is a sync `FnOnce(Error) -> Result<V> + Send` — anything
+  async goes inside the lazy view it returns (a component call), and anything
+  that must happen before the response commits (a cookie write such as
+  remembering a return-to location) is fine here because the boundary runs in
+  the first phase when the page failed before emitting. `live!`/`emit!` are
+  the general form (`match emit! { (child) } { Err(e) => …, ok => ok }`).
 - **Branded 404s**: unmatched URLs skip layouts since 0.6.0. `not_found!("/")`
   registers a catch-all page (named `not_found`) resolving every unmatched URL
   under the prefix to `NotFoundError`, so layouts see it. Bare `not_found!()`
@@ -280,6 +347,30 @@ Module `topcoat::router::error` (`crates/topcoat-router/docs/error.md`):
   state discarded, layers rerun). Handler sees the rewritten `uri(cx)`;
   `request::original_uri(cx)` is what the client asked. Max 8 rewrites, no
   revisiting a path.
+
+## Streaming and commit (0.7)
+
+A page response is produced in two phases. The router awaits the view's
+**first content** inside the handler — every non-live part plus each `live!`
+region's first emission — and turns it into the `Response` (status, headers,
+`Set-Cookie` from the jar); the body then **streams** later emissions as
+in-place swaps (a small inline script, no client library). Consequences:
+
+- Status codes, headers, cookie and session writes are honoured only during
+  the handler body and the first phase. After commit a cookie/session write
+  **panics** (`cannot add a cookie after the response headers have been
+  sent`); a status/header declaration is ignored.
+- An error inside a streaming region after commit renders in place (or through
+  its `error_boundary`), never as a 500.
+- A **redirect thrown after commit** (e.g. a session check inside `suspense`
+  that returns `Err(redirect(...))`) can no longer become a 3xx: it streams to
+  the browser as a **client-side navigation** to the target (see
+  `examples/suspense` `/profile`). Thrown before commit — straight from a
+  page handler, or from a boundary in the first phase — it is a real HTTP
+  redirect. Guards that must redirect belong in the handler body or in
+  non-live content.
+- Layouts, layers, and `Router::handle` in tests are unaffected: a test drains
+  the whole stream with `to_bytes(body, usize::MAX)`.
 
 ## Cross-origin requests (OriginPolicy)
 
@@ -308,11 +399,13 @@ let router = Router::builder()
   else 413. Raise per subtree:
   `.layer(BodyLimit::max(32 * 1024 * 1024).at("/upload"))`. Taking `Body`
   directly streams and is not limited.
-- Responses: `T: IntoResponse` — strings, byte buffers, `StatusCode`,
-  `Json<T>`, tuples `(StatusCode, Json<T>)` / `(headers, body)` (last element =
-  body, leading `StatusCode` = status, middle = headers/extensions). `Js` and
-  `Wasm` wrappers force the exact media types browsers verify. Implement
-  `IntoResponse` for full control (downloads: set your own headers/body).
+- Responses: `T: AsyncIntoResponse` — every `IntoResponse` (strings, byte
+  buffers, `StatusCode`, `Json<T>`, tuples `(StatusCode, Json<T>)` /
+  `(headers, body)` — last element = body, leading `StatusCode` = status,
+  middle = headers/extensions) plus views (`BoxView<'static>` and `view!`
+  values, which stream). `Js` and `Wasm` wrappers force the exact media types
+  browsers verify. Implement `IntoResponse` for full control (downloads: set
+  your own headers/body); `IntoResponse::into_response(self, cx)` is sync.
 - Behind features: `multipart` (below), `websocket` (`WebSocketUpgrade`
   extractor, `content/websocket.md`), `sse` (`Sse` + `Event` stream,
   `content/sse.md`), `sitemap` (`Sitemap` response, `content/sitemap.md`).

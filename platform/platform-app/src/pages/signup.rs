@@ -7,7 +7,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::bad_request, href, page},
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -37,14 +37,19 @@ struct Registration {
 /// The signup form, shared by the GET page and the duplicate-email
 /// re-render; same composition as [`signin_form`](super::signin).
 #[component]
-async fn signup_form(cx: &Cx, error: Option<String>, name: String, email: String) -> Result {
+async fn signup_form(
+    cx: &Cx,
+    error: Option<String>,
+    name: String,
+    email: String,
+) -> Result<impl View> {
     let title = t(cx, "signup.title").await?;
     let name_label = t(cx, "form.name").await?;
     let email_label = t(cx, "form.email").await?;
     let password_label = t(cx, "form.password").await?;
     let submit_label = t(cx, "signup.submit").await?;
     let signin_link = t(cx, "signup.signin-link").await?;
-    view! {
+    Ok(view! {
         <div class="mx-auto flex w-full max-w-sm flex-col gap-6">
             page_title((title))
             if let Some(error) = &error {
@@ -106,13 +111,13 @@ async fn signup_form(cx: &Cx, error: Option<String>, name: String, email: String
                 )
             )
         </div>
-    }
+    })
 }
 
 /// The signup form.
 #[page]
-pub async fn page() -> Result {
-    view! { signup_form(error: None, name: String::new(), email: String::new()) }
+pub async fn page() -> Result<impl View> {
+    Ok(view! { signup_form(error: None, name: String::new(), email: String::new()) })
 }
 
 /// Registers the account and logs it straight in, then returns the
@@ -136,7 +141,7 @@ pub async fn page() -> Result {
 /// the browser's language changes later, until the account picks
 /// another on `/settings/account`.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result<impl View> {
     let mut db = db(cx);
     let locale = request_locale(cx).await?.to_string();
     match platform_core::register(
@@ -151,13 +156,14 @@ async fn submit(cx: &Cx, Form(input): Form<Registration>) -> Result {
         Ok(account) => {
             sign_in(cx, &account).await?;
             let location = return_to::take(cx).unwrap_or_else(|| href!(super::home).resolve(cx));
-            redirect_to(cx, location).await
+            redirect_to(cx, location)
         }
         Err(RegisterError::EmailTaken) => {
             let error = t(cx, "signup.error.email-taken").await?;
-            view! {
+            Ok(view! {
                 signup_form(error: Some(error), name: input.name, email: input.email)
             }
+            .boxed())
         }
         Err(RegisterError::EmptyField) => {
             Err(bad_request("email, name, and password are required").into())

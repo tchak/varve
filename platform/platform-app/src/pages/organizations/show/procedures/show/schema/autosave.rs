@@ -33,7 +33,7 @@ use topcoat::{
     Result,
     context::Cx,
     runtime::{Event, Signal, procedure},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::{
@@ -206,9 +206,9 @@ pub(in crate::pages) struct Autosave<'a> {
 
 /// The line every detail form reports its saves on.
 #[component]
-pub(in crate::pages) async fn status_line(save: Autosave<'_>) -> Result {
+pub(in crate::pages) async fn status_line(save: Autosave<'_>) -> Result<impl View> {
     let Autosave { status, .. } = save;
-    view! {
+    Ok(view! {
         <p
             role="status"
             class="min-h-5 text-sm text-muted-foreground"
@@ -216,19 +216,19 @@ pub(in crate::pages) async fn status_line(save: Autosave<'_>) -> Result {
         >
             $(status.get())
         </p>
-    }
+    })
 }
 
 /// The submit button for the script-less path only: with the runtime
 /// every field saves itself, but without it a `<select>` cannot
 /// submit on its own, so the whole form needs a button.
 #[component]
-pub(in crate::pages) async fn noscript_save(text: String) -> Result {
-    view! {
+pub(in crate::pages) async fn noscript_save(text: String) -> Result<impl View> {
+    Ok(view! {
         <noscript>
             card_footer(button(attrs: attributes! { type="submit" }, (text.as_str())))
         </noscript>
-    }
+    })
 }
 
 /// One control's identity and current value, bundled so every field
@@ -253,7 +253,7 @@ pub(in crate::pages) async fn text_field(
     required: bool,
     help: Option<String>,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let Field {
         id,
         name,
@@ -270,7 +270,7 @@ pub(in crate::pages) async fn text_field(
         heading,
     } = save;
     let help_id = help.as_ref().map(|_| format!("{id}-help"));
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-2">
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))
             <input
@@ -285,12 +285,11 @@ pub(in crate::pages) async fn text_field(
                 @change=$(async |e: Event| {
                     status.set(saving.get());
                     let outcome = save_field(
-                            pid.get(),
-                            eid.get(),
-                            name.to_owned(),
-                            e.target.value,
-                        )
-                        .await;
+                        pid.get(),
+                        eid.get(),
+                        name.to_owned(),
+                        e.target.value,
+                    ).await;
                     if outcome.is_ok() {
                         status.set(saved_text.get());
                         heading.set(outcome.unwrap());
@@ -307,7 +306,7 @@ pub(in crate::pages) async fn text_field(
                 </p>
             }
         </div>
-    }
+    })
 }
 
 /// One autosaving `<textarea>` (a note's body).
@@ -316,7 +315,7 @@ pub(in crate::pages) async fn textarea_field(
     field: Field,
     required: bool,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let Field {
         id,
         name,
@@ -332,7 +331,7 @@ pub(in crate::pages) async fn textarea_field(
         saved_text,
         heading,
     } = save;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-2">
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))
             <textarea
@@ -344,12 +343,11 @@ pub(in crate::pages) async fn textarea_field(
                 @change=$(async |e: Event| {
                     status.set(saving.get());
                     let outcome = save_field(
-                            pid.get(),
-                            eid.get(),
-                            name.to_owned(),
-                            e.target.value,
-                        )
-                        .await;
+                        pid.get(),
+                        eid.get(),
+                        name.to_owned(),
+                        e.target.value,
+                    ).await;
                     if outcome.is_ok() {
                         status.set(saved_text.get());
                         heading.set(outcome.unwrap());
@@ -362,12 +360,12 @@ pub(in crate::pages) async fn textarea_field(
                 (value.as_str())
             </textarea>
         </div>
-    }
+    })
 }
 
 /// One autosaving whole-number input (an attachment's size cap).
 #[component]
-pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> Result {
+pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> Result<impl View> {
     let Field {
         id,
         name,
@@ -383,7 +381,7 @@ pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> 
         saved_text,
         heading,
     } = save;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-2">
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))
             <input
@@ -396,12 +394,11 @@ pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> 
                 @change=$(async |e: Event| {
                     status.set(saving.get());
                     let outcome = save_field(
-                            pid.get(),
-                            eid.get(),
-                            name.to_owned(),
-                            e.target.value,
-                        )
-                        .await;
+                        pid.get(),
+                        eid.get(),
+                        name.to_owned(),
+                        e.target.value,
+                    ).await;
                     if outcome.is_ok() {
                         status.set(saved_text.get());
                         heading.set(outcome.unwrap());
@@ -412,7 +409,7 @@ pub(in crate::pages) async fn number_field(field: Field, save: Autosave<'_>) -> 
                 })
             >
         </div>
-    }
+    })
 }
 
 /// One option of a [`select_field`]: the value posted, the text
@@ -433,7 +430,7 @@ pub(in crate::pages) async fn select_field(
     field: Field,
     choices: Vec<Choice>,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let Field {
         id,
         name,
@@ -449,7 +446,7 @@ pub(in crate::pages) async fn select_field(
         saved_text,
         heading,
     } = save;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-2">
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))
             <select
@@ -459,12 +456,11 @@ pub(in crate::pages) async fn select_field(
                 @change=$(async |e: Event| {
                     status.set(saving.get());
                     let outcome = save_field(
-                            pid.get(),
-                            eid.get(),
-                            name.to_owned(),
-                            e.target.value,
-                        )
-                        .await;
+                        pid.get(),
+                        eid.get(),
+                        name.to_owned(),
+                        e.target.value,
+                    ).await;
                     if outcome.is_ok() {
                         status.set(saved_text.get());
                         heading.set(outcome.unwrap());
@@ -481,7 +477,7 @@ pub(in crate::pages) async fn select_field(
                 }
             </select>
         </div>
-    }
+    })
 }
 
 /// The audience select, on all four kinds. Absent inside an
@@ -494,7 +490,7 @@ pub(in crate::pages) async fn audience_field(
     cx: &Cx,
     current: Audience,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let choices = vec![
         Choice {
             value: "ALL",
@@ -508,7 +504,7 @@ pub(in crate::pages) async fn audience_field(
         },
     ];
     let audience_label = t(cx, "schema.audience").await?;
-    view! {
+    Ok(view! {
         select_field(
             field: Field {
                 id: "element-audience".to_owned(),
@@ -519,7 +515,7 @@ pub(in crate::pages) async fn audience_field(
             choices: choices,
             save: save
         )
-    }
+    })
 }
 
 /// The *required* toggle: a checkbox with `role="switch"`, preceded
@@ -530,7 +526,7 @@ pub(in crate::pages) async fn switch_field(
     field: Field,
     checked: bool,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let Field {
         id,
         name,
@@ -546,7 +542,7 @@ pub(in crate::pages) async fn switch_field(
         saved_text,
         heading,
     } = save;
-    view! {
+    Ok(view! {
         <div
             class="flex items-center gap-2"
             data-required=(if checked { "true" } else { "false" })
@@ -569,12 +565,11 @@ pub(in crate::pages) async fn switch_field(
                             "false".to_owned()
                         };
                         let outcome = save_field(
-                                pid.get(),
-                                eid.get(),
-                                name.to_owned(),
-                                value,
-                            )
-                            .await;
+                            pid.get(),
+                            eid.get(),
+                            name.to_owned(),
+                            value,
+                        ).await;
                         if outcome.is_ok() {
                             status.set(saved_text.get());
                             heading.set(outcome.unwrap());
@@ -589,5 +584,5 @@ pub(in crate::pages) async fn switch_field(
             </span>
             label(attrs: attributes! { for=(id.as_str()) }, (label_text.as_str()))
         </div>
-    }
+    })
 }

@@ -21,7 +21,7 @@ use topcoat::{
         error::{RouterErrorExt, not_found},
         href, page, path_param,
     },
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -81,7 +81,7 @@ async fn procedures_page(
     cx: &Cx,
     organization: OrganizationProcedures,
     form: CreationForm,
-) -> Result {
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = organization.id.inner().parse()?;
     let title = t(cx, "procedures.title").await?;
     let crumb_label = t(cx, "nav.breadcrumb").await?;
@@ -99,7 +99,7 @@ async fn procedures_page(
     let title_label = t(cx, "form.title").await?;
     let description_label = t(cx, "form.description").await?;
     let create_label = t(cx, "procedures.create.submit").await?;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
                 breadcrumbs(label: crumb_label, crumbs: crumbs)
@@ -121,7 +121,7 @@ async fn procedures_page(
                                         href=(href!(
                                             show::page,
                                             OrganizationId(organization_id),
-                                            show::ProcedureId(procedure.id.inner().parse()?)
+                                            show::ProcedureId(procedure.id.inner().parse()?),
                                         ))
                                         class="underline-offset-4 hover:underline"
                                     >
@@ -184,21 +184,23 @@ async fn procedures_page(
                 </form>
             )
         </div>
-    }
+    })
 }
 
 /// The list and the creation form.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let organization = organization_procedures(cx).await?;
-    view! { procedures_page(organization: organization, form: CreationForm::default()) }
+    Ok(view! {
+        procedures_page(organization: organization, form: CreationForm::default())
+    })
 }
 
 /// Creates a procedure through `createProcedure` and answers 303
 /// back to [`page`]. A blank title re-renders with the error in the
 /// field (the description kept); `FORBIDDEN` is the 404.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result<impl View> {
     let id = path_param::<OrganizationId>(cx)?;
     let client = client(cx).await?;
     let title = input.title.trim().to_owned();
@@ -210,7 +212,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
             description,
             title_error: Some(t(cx, "procedures.create.error.title-required").await?),
         };
-        return view! { procedures_page(organization: organization, form: form) };
+        return Ok(view! { procedures_page(organization: organization, form: form) }.boxed());
     }
     let operation = CreateProcedure::build(CreateProcedureVariables {
         input: CreateProcedureInput {
@@ -220,7 +222,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
         },
     });
     match platform_client::run(&client, operation).await {
-        Ok(_) => redirect_to(cx, href!(page, OrganizationId(*id)).resolve(cx)).await,
+        Ok(_) => redirect_to(cx, href!(page, OrganizationId(*id)).resolve(cx)),
         Err(error @ Error::GraphQl(_)) if error.code() == Some(Code::Forbidden) => {
             Err(not_found().into())
         }

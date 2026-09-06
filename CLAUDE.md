@@ -37,11 +37,11 @@ incl. property suites), `cargo clippy --workspace --all-targets`,
 `cargo fmt --all --check` (rustfmt defaults are the style authority),
 `topcoat fmt platform` (formats `view!` macro bodies, which rustfmt
 leaves alone — not yet enforced by CI, so run it and commit the result;
-the root `Topcoat.toml` is only an editor-integration marker; **never
-write a comment inside an `attributes!` block passed to a component
-call** — `topcoat fmt` 0.6.2 re-emits it into the enclosing call's
-children, so the file grows by a copy on every run: put the comment
-above the `attrs:` argument or above the call),
+the root `Topcoat.toml` is only an editor-integration marker; the
+0.6.2 formatter bug that duplicated a comment written inside an
+`attributes!` block passed to a component call is fixed in the 0.7.0
+CLI — keep the CLI pinned to the dependency's version, it warns on
+mismatch),
 and `scripts/check-layering.sh` (the §13.5 guard — no runtime/web/ORM
 crate in any Tier 0–4 closure, serde direct only in `-wire`/`-value`);
 CI also denies rustdoc warnings and replays the tracked fuzz seeds
@@ -55,11 +55,12 @@ Three levels; always use the **lowest level that can prove the
 behavior**.
 
 1. **Component tests** — `#[cfg(test)]` beside the component: plain
-   `#[test]`, no runtime — but component futures resolve at view
-   *build*, not render, so use the shared helper
-   `components::testing::render` (a `CxTestBuilder` Cx + a noop-waker
-   `block_on` driving the `view!` build, the pattern topcoat-view's
-   own unit tests use). Only for *our*
+   `#[test]`, no runtime — a `view!` is lazy (building it is
+   synchronous), and the component futures run when it is resolved,
+   so use the shared helper `components::testing::render` (a
+   `CxTestBuilder` Cx + a noop-waker `block_on` driving
+   `ViewExt::single`, the pattern topcoat-view's own unit tests
+   use): `render(|cx| view! { cx => … })`. Only for *our*
    pure presentational components (props in → HTML out, no IO); they
    own our components' markup contracts — aria wiring, slots, class
    merging. Never test vendored registry components: `registry_sync`

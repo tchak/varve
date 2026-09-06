@@ -54,11 +54,13 @@ use topcoat::{
     context::{Cx, try_app_context},
     icon::{icon, iconify::iconify_icon},
     router::{
-        HeaderValue, RouterBuilder, StatusCode, error::NotFoundError, header, href, layout,
+        HeaderValue, RouterBuilder, Slot, StatusCode, error::NotFoundError, header, href, layout,
         not_found, page,
     },
     tailwind,
-    view::{StaticClass, attributes, class, view},
+    view::{
+        BoxView, StaticClass, View, ViewExt, attributes, class, component, error_boundary, view,
+    },
 };
 
 use crate::{
@@ -91,13 +93,24 @@ pub(crate) fn builder() -> RouterBuilder {
 /// A 303 answer from a `#[page]` handler: a view carrying only the
 /// status code and `Location` header (the browser never renders the
 /// enclosing layout markup on a redirect).
-async fn redirect_to(cx: &Cx, location: String) -> Result {
+fn redirect_to(cx: &Cx, location: String) -> Result<BoxView<'static>> {
     let location = HeaderValue::try_from(location)?;
-    view! {
+    Ok(view! {
         cx =>
         (StatusCode::SEE_OTHER)
         ((header::LOCATION, location))
     }
+    .boxed())
+}
+
+/// The branded not-found page's title, the `error.not-found` message
+/// as the page's `<h1>`. A component so the shell's error boundary,
+/// whose fallback is a plain closure, can defer the lookup to render
+/// time.
+#[component]
+async fn not_found_title(cx: &Cx) -> Result<impl View> {
+    let message = t(cx, "error.not-found").await?;
+    Ok(view! { page_title((message)) })
 }
 
 /// The breadcrumb trail's root (P.4 *Breadcrumb navigation*): the
@@ -188,19 +201,9 @@ const MENU_LINK: StaticClass = class!(
 /// first. Also brands the not-found error (from the [`not_found!`]
 /// catch-all or any page) instead of letting it bubble to a bare 404.
 #[layout]
-async fn shell(cx: &Cx, slot: Result) -> Result {
+async fn shell(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
     let lang = request_locale(cx).await?.to_string();
     let title = t(cx, "app.title").await?;
-    let slot = match slot {
-        Err(error) if error.downcast_ref::<NotFoundError>().is_some() => {
-            let message = t(cx, "error.not-found").await?;
-            view! {
-                (StatusCode::NOT_FOUND)
-                page_title((message))
-            }
-        }
-        other => other,
-    };
     let account_email = principal(cx)
         .await?
         .map(|principal| principal.email.clone());
@@ -210,7 +213,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
     let sign_in_label = t(cx, "nav.sign-in").await?;
     let sign_up_label = t(cx, "nav.sign-up").await?;
     let sign_out_label = t(cx, "nav.sign-out").await?;
-    view! {
+    Ok(view! {
         <!DOCTYPE html>
         <html lang=(lang)>
             <head>
@@ -234,28 +237,25 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                                 attrs: attributes! {
                                     aria-label=(account_menu_label.as_str())
                                     class=(class!(
-                                        button_variants(
-                                            ButtonVariant::Ghost,
-                                            ButtonSize::Icon,
-                                        ),
+                                        button_variants(ButtonVariant::Ghost, ButtonSize::Icon),
                                         "rounded-full!",
                                     ))
                                 },
-                                icon(data: iconify_icon!("feather:user"))
+                                icon(data: iconify_icon!("lucide:user"))
                             )
                             dropdown_menu_content(
                                 attrs: attributes! { class="right-0 left-auto" },
                                 dropdown_menu_label((account_email))
                                 <a href=(href!(organizations::page)) class=(MENU_LINK)>
                                     icon(
-                                        data: iconify_icon!("feather:briefcase"),
+                                        data: iconify_icon!("lucide:briefcase"),
                                         attrs: attributes! { class="size-4" }
                                     )
                                     (organizations_label)
                                 </a>
                                 <a href=(href!(settings::page)) class=(MENU_LINK)>
                                     icon(
-                                        data: iconify_icon!("feather:settings"),
+                                        data: iconify_icon!("lucide:settings"),
                                         attrs: attributes! { class="size-4" }
                                     )
                                     (settings_label)
@@ -265,7 +265,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                                     dropdown_menu_item(
                                         attrs: attributes! { type="submit" },
                                         icon(
-                                            data: iconify_icon!("feather:log-out"),
+                                            data: iconify_icon!("lucide:log-out"),
                                             attrs: attributes! { class="size-4" }
                                         )
                                         (sign_out_label)
@@ -276,10 +276,7 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                     } else {
                         <a
                             href=(href!(signin::page))
-                            class=(button_variants(
-                                ButtonVariant::Ghost,
-                                ButtonSize::Sm,
-                            ))
+                            class=(button_variants(ButtonVariant::Ghost, ButtonSize::Sm))
                         >
                             (sign_in_label)
                         </a>
@@ -297,17 +294,30 @@ async fn shell(cx: &Cx, slot: Result) -> Result {
                 <main
                     class="mx-auto w-full max-w-3xl flex-1 px-6 py-10 lg:max-w-5xl xl:max-w-6xl"
                 >
-                    (slot?)
+                    error_boundary(
+                        fallback: |error| {
+                            if error.downcast_ref::<NotFoundError>().is_none() {
+                                return Err(error);
+                            }
+                            Ok(
+                                view! {
+                                    (StatusCode::NOT_FOUND)
+                                    not_found_title()
+                                },
+                            )
+                        },
+                        (slot)
+                    )
                 </main>
             </body>
         </html>
-    }
+    })
 }
 
 /// Home: a greeting for the signed-in account (by display name, off
 /// the memoized account row), a sign-in prompt otherwise.
 #[page]
-async fn home(cx: &Cx) -> Result {
+async fn home(cx: &Cx) -> Result<impl View> {
     let title = t(cx, "home.title").await?;
     let message = match account(cx).await? {
         Some(account) => {
@@ -315,10 +325,10 @@ async fn home(cx: &Cx) -> Result {
         }
         None => t(cx, "home.signed-out").await?,
     };
-    view! {
+    Ok(view! {
         <section class="flex flex-col gap-3">
             page_title((title))
             <p class="text-muted-foreground">(message)</p>
         </section>
-    }
+    })
 }

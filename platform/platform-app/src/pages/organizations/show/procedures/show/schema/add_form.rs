@@ -17,7 +17,7 @@ use topcoat::{
     context::Cx,
     router::href,
     runtime::Event,
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::{
@@ -55,7 +55,7 @@ pub(in crate::pages) async fn form(
     procedure_id: uuid::Uuid,
     organization_id: uuid::Uuid,
     facts: AddFacts,
-) -> Result {
+) -> Result<impl View> {
     let AddFacts {
         parent,
         section_parent,
@@ -91,7 +91,7 @@ pub(in crate::pages) async fn form(
     let type_id = format!("{prefix}-type");
     let label_id = format!("{prefix}-label");
     let audience_id = format!("{prefix}-audience");
-    view! {
+    Ok(view! {
         // The type select shows for a column only; the signal is this
         // form's own (a handler reaches its own `view!`'s signals).
         signal what = "column".to_owned();
@@ -108,7 +108,11 @@ pub(in crate::pages) async fn form(
             )
             <form
                 method="post"
-                action=(href!(add::submit, OrganizationId(organization_id), ProcedureId(procedure_id)))
+                action=(href!(
+                    add::submit,
+                    OrganizationId(organization_id),
+                    ProcedureId(procedure_id),
+                ))
                 class="contents"
             >
                 if let Some(parent) = &parent {
@@ -177,5 +181,5 @@ pub(in crate::pages) async fn form(
                 card_footer(button(attrs: attributes! { type="submit" }, (submit)))
             </form>
         )
-    }
+    })
 }

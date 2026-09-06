@@ -5,7 +5,7 @@
 
 use topcoat::{
     Result,
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::components::breadcrumb::{
@@ -50,8 +50,8 @@ impl Crumb {
 /// "breadcrumb" (upstream: topcoat-ui should take the label as a
 /// prop).
 #[component]
-pub async fn breadcrumbs(label: String, crumbs: Vec<Crumb>) -> Result {
-    view! {
+pub async fn breadcrumbs(label: String, crumbs: Vec<Crumb>) -> Result<impl View> {
+    Ok(view! {
         <nav aria-label=(label.as_str()) data-breadcrumbs="">
             breadcrumb_list(
                 for (at, crumb) in crumbs.iter().enumerate() {
@@ -74,7 +74,7 @@ pub async fn breadcrumbs(label: String, crumbs: Vec<Crumb>) -> Result {
                 }
             )
         </nav>
-    }
+    })
 }
 
 #[cfg(test)]
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn ancestors_link_and_the_current_page_carries_aria_current() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 breadcrumbs(
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn a_single_crumb_renders_without_a_separator() {
-        let html = render(async |cx| {
+        let html = render(|cx| {
             view! {
                 cx =>
                 breadcrumbs(

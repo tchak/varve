@@ -21,7 +21,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{error::RouterErrorExt, href, page, path_param},
-    view::{component, view},
+    view::{View, component, view},
 };
 
 use crate::{
@@ -41,7 +41,7 @@ path_param!(pub(super) organization_id: uuid::Uuid, error = not_found);
 /// the members, teams, and procedures cards (counts in the headings,
 /// an empty notice where a list is empty).
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let id = path_param::<OrganizationId>(cx)?;
     let client = client(cx).await?;
     let organization = platform_client::run(
@@ -53,11 +53,11 @@ pub async fn page(cx: &Cx) -> Result {
     .await?
     .organization
     .ok_or_not_found()?;
-    view! { organization_page(organization: organization) }
+    Ok(view! { organization_page(organization: organization) })
 }
 
 #[component]
-async fn organization_page(cx: &Cx, organization: Organization) -> Result {
+async fn organization_page(cx: &Cx, organization: Organization) -> Result<impl View> {
     let created = t_args(
         cx,
         "organization.created",
@@ -92,7 +92,7 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
         crate::pages::organizations_crumb(cx).await?,
         Crumb::here(organization.name.clone()),
     ];
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
                 breadcrumbs(label: crumb_label, crumbs: crumbs)
@@ -154,7 +154,10 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
                     <div class="flex items-center justify-between gap-3">
                         <h2 class="leading-none font-semibold">(procedures_heading)</h2>
                         <a
-                            href=(href!(procedures::page, OrganizationId(organization_id)))
+                            href=(href!(
+                                procedures::page,
+                                OrganizationId(organization_id),
+                            ))
                             class="text-sm font-medium underline-offset-4 hover:underline"
                         >
                             (procedures_manage)
@@ -176,5 +179,5 @@ async fn organization_page(cx: &Cx, organization: Organization) -> Result {
                 )
             )
         </div>
-    }
+    })
 }

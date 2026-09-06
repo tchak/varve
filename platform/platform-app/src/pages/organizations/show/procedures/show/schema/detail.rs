@@ -31,7 +31,7 @@ use topcoat::{
     icon::{icon, iconify::iconify_icon},
     router::href,
     runtime::{Event, Signal},
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -109,13 +109,13 @@ struct Facets<'a> {
 /// components below it each nest a dozen more, so leaving this future
 /// unboxed overflows the compiler's type-depth limit (the same reason
 /// `structure::tree_row` is boxed).
-#[component(boxed)]
+#[component]
 pub(in crate::pages) async fn panel(
     cx: &Cx,
     editing: Editing,
     offers: Offers,
     revision: &Signal<f64>,
-) -> Result {
+) -> Result<impl View> {
     let Editing { at, element } = editing;
     let element_id = super::element::id_of(&element).to_owned();
     let saving_text = t(cx, "schema.status.saving").await?;
@@ -133,7 +133,7 @@ pub(in crate::pages) async fn panel(
         }
         _ => (String::new(), String::new(), String::new()),
     };
-    view! {
+    Ok(view! {
         signal status = String::new();
         signal heading = initial_heading.clone();
         signal option_status = String::new();
@@ -160,12 +160,7 @@ pub(in crate::pages) async fn panel(
                         saved_text,
                         heading,
                     },
-                    facets: Facets {
-                        kind,
-                        format,
-                        pattern,
-                        option_status,
-                    }
+                    facets: Facets { kind, format, pattern, option_status }
                 )
             }
             Element::Group(group) => {
@@ -227,6 +222,7 @@ pub(in crate::pages) async fn panel(
             }
         }
     }
+    .boxed())
 }
 
 /// The heading the selected element's card carries: which kind it is
@@ -235,12 +231,12 @@ pub(in crate::pages) async fn panel(
 /// formats it again with [`heading_for`] and writes it back into the
 /// signal this reads.
 #[component]
-async fn detail_heading(heading: &Signal<String>) -> Result {
-    view! {
+async fn detail_heading(heading: &Signal<String>) -> Result<impl View> {
+    Ok(view! {
         <h2 id="schema-detail-heading" class="leading-none font-semibold">
             $(heading.get())
         </h2>
-    }
+    })
 }
 
 /// An element's detail heading. Shared with [`super::autosave`],
@@ -278,7 +274,13 @@ pub(in crate::pages) async fn heading_for(cx: &Cx, element: &Element) -> Result<
 
 /// A group: its label, how many rows it holds, and its audience.
 #[component]
-async fn group_detail(cx: &Cx, at: At, group: Group, offers: Offers, save: Autosave<'_>) -> Result {
+async fn group_detail(
+    cx: &Cx,
+    at: At,
+    group: Group,
+    offers: Offers,
+    save: Autosave<'_>,
+) -> Result<impl View> {
     let action = update_action(at, group.id.inner());
     let cardinality = vec![
         Choice {
@@ -296,7 +298,7 @@ async fn group_detail(cx: &Cx, at: At, group: Group, offers: Offers, save: Autos
     let label_label = t(cx, "form.label").await?;
     let save_text = t(cx, "schema.save").await?;
     let id = group.id.inner().to_owned();
-    view! {
+    Ok(view! {
         card(
             card_header(detail_heading(heading: save.heading))
             <form
@@ -349,7 +351,7 @@ async fn group_detail(cx: &Cx, at: At, group: Group, offers: Offers, save: Autos
                 }
             )
         </div>
-    }
+    })
 }
 
 /// A section: its title, its help text, and its audience.
@@ -360,13 +362,13 @@ async fn section_detail(
     section: Section,
     offers: Offers,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let action = update_action(at, section.id.inner());
     let title_label = t(cx, "form.title").await?;
     let help_label = t(cx, "schema.section.help").await?;
     let save_text = t(cx, "schema.save").await?;
     let id = section.id.inner().to_owned();
-    view! {
+    Ok(view! {
         card(
             card_header(detail_heading(heading: save.heading))
             <form
@@ -420,7 +422,7 @@ async fn section_detail(
                 }
             )
         </div>
-    }
+    })
 }
 
 /// A note: an optional title, the body it exists for, its audience.
@@ -431,13 +433,13 @@ async fn note_detail(
     note: Note,
     offers_audience: bool,
     save: Autosave<'_>,
-) -> Result {
+) -> Result<impl View> {
     let action = update_action(at, note.id.inner());
     let title_label = t(cx, "form.title").await?;
     let body_label = t(cx, "schema.note.body").await?;
     let save_text = t(cx, "schema.save").await?;
     let id = note.id.inner().to_owned();
-    view! {
+    Ok(view! {
         card(
             card_header(detail_heading(heading: save.heading))
             <form
@@ -478,7 +480,7 @@ async fn note_detail(
                 noscript_save(text: save_text)
             </form>
         )
-    }
+    })
 }
 
 /// A column: its label and type, then the fieldsets that type can
@@ -493,7 +495,7 @@ async fn column_detail(
     offers_audience: bool,
     save: Autosave<'_>,
     facets: Facets<'_>,
-) -> Result {
+) -> Result<impl View> {
     let id = column.id.inner().to_owned();
     let action = update_action(at, &id);
     let label_label = t(cx, "form.label").await?;
@@ -538,7 +540,7 @@ async fn column_detail(
         _ => (String::new(), String::new()),
     };
     let Facets { kind, .. } = facets;
-    view! {
+    Ok(view! {
         card(
             card_header(detail_heading(heading: save.heading))
             <form
@@ -660,14 +662,19 @@ async fn column_detail(
         <div class="mt-6" :hidden=$(kind.get() != "ENUM") data-facet="options">
             options_card(at: at, column: column.clone(), save: save, facets: facets)
         </div>
-    }
+    })
 }
 
 /// The type select. Its own handler, because the choice does two
 /// things: it saves, and it mirrors into the `kind` signal the
 /// fieldsets above are bound to.
 #[component]
-async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets<'_>) -> Result {
+async fn kind_field(
+    cx: &Cx,
+    current: String,
+    save: Autosave<'_>,
+    facets: Facets<'_>,
+) -> Result<impl View> {
     let Autosave {
         pid,
         eid,
@@ -683,7 +690,7 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
     for name in KINDS {
         names.push((*name, t(cx, kind_message_id_of(name)).await?));
     }
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-2">
             label(attrs: attributes! { for="element-kind" }, (kind_label.as_str()))
             <select
@@ -694,12 +701,11 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
                     kind.set(e.target.value.to_owned());
                     status.set(saving.get());
                     let outcome = save_field(
-                            pid.get(),
-                            eid.get(),
-                            "kind".to_owned(),
-                            e.target.value,
-                        )
-                        .await;
+                        pid.get(),
+                        eid.get(),
+                        "kind".to_owned(),
+                        e.target.value,
+                    ).await;
                     if outcome.is_ok() {
                         status.set(saved_text.get());
                         heading.set(outcome.unwrap());
@@ -716,7 +722,7 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
                 }
             </select>
         </div>
-    }
+    })
 }
 
 /// A text column's format: the choice, and the custom pattern it may
@@ -725,7 +731,12 @@ async fn kind_field(cx: &Cx, current: String, save: Autosave<'_>, facets: Facets
 /// because the stored format is derived from the pair — sending one
 /// at a time can never reach a custom pattern.
 #[component]
-async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Facets<'_>) -> Result {
+async fn format_fields(
+    cx: &Cx,
+    column: Column,
+    save: Autosave<'_>,
+    facets: Facets<'_>,
+) -> Result<impl View> {
     let Autosave {
         pid,
         eid,
@@ -753,7 +764,7 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
         ("IBAN", t(cx, "schema.format.iban").await?),
         ("REGEX", t(cx, "schema.format.regex").await?),
     ];
-    view! {
+    Ok(view! {
         <div
             class="flex flex-col gap-4"
             :hidden=$(kind.get() != "TEXT")
@@ -772,12 +783,11 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
                         format.set(e.target.value.to_owned());
                         status.set(saving.get());
                         let outcome = save_text_format(
-                                pid.get(),
-                                eid.get(),
-                                e.target.value,
-                                pattern.get(),
-                            )
-                            .await;
+                            pid.get(),
+                            eid.get(),
+                            e.target.value,
+                            pattern.get(),
+                        ).await;
                         if outcome.is_ok() {
                             status.set(saved_text.get());
                             heading.set(outcome.unwrap());
@@ -815,12 +825,11 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
                         pattern.set(e.target.value.to_owned());
                         status.set(saving.get());
                         let outcome = save_text_format(
-                                pid.get(),
-                                eid.get(),
-                                format.get(),
-                                e.target.value,
-                            )
-                            .await;
+                            pid.get(),
+                            eid.get(),
+                            format.get(),
+                            e.target.value,
+                        ).await;
                         if outcome.is_ok() {
                             status.set(saved_text.get());
                             heading.set(outcome.unwrap());
@@ -836,7 +845,7 @@ async fn format_fields(cx: &Cx, column: Column, save: Autosave<'_>, facets: Face
                 </p>
             </div>
         </div>
-    }
+    })
 }
 
 /// The enum column's options: one row per option (its label
@@ -850,7 +859,7 @@ async fn options_card(
     column: Column,
     save: Autosave<'_>,
     facets: Facets<'_>,
-) -> Result {
+) -> Result<impl View> {
     let Autosave {
         pid,
         eid,
@@ -885,23 +894,29 @@ async fn options_card(
         ProcedureId(at.procedure_id),
         ElementId(element.clone())
     );
-    let update_action = || {
-        href!(
-            elements::element::options::update::submit,
-            OrganizationId(at.organization_id),
-            ProcedureId(at.procedure_id),
-            ElementId(element.clone())
-        )
+    let update_action = {
+        let element = element.clone();
+        move || {
+            href!(
+                elements::element::options::update::submit,
+                OrganizationId(at.organization_id),
+                ProcedureId(at.procedure_id),
+                ElementId(element.clone())
+            )
+        }
     };
-    let remove_action = || {
-        href!(
-            elements::element::options::remove::submit,
-            OrganizationId(at.organization_id),
-            ProcedureId(at.procedure_id),
-            ElementId(element.clone())
-        )
+    let remove_action = {
+        let element = element.clone();
+        move || {
+            href!(
+                elements::element::options::remove::submit,
+                OrganizationId(at.organization_id),
+                ProcedureId(at.procedure_id),
+                ElementId(element.clone())
+            )
+        }
     };
-    view! {
+    Ok(view! {
         card(
             card_header(
                 <h3 class="leading-none font-semibold">(options_label.as_str())</h3>
@@ -915,7 +930,9 @@ async fn options_card(
                         </p>
                     } else {
                         <ul class="flex flex-col gap-2">
-                            for (index, (option_id, text, remove_name)) in options.iter().enumerate() {
+                            for (index, (option_id, text, remove_name)) in options
+                                .iter()
+                                .enumerate() {
                                 <li
                                     class="flex items-center gap-2"
                                     data-option-id=(option_id.as_str())
@@ -944,12 +961,11 @@ async fn options_card(
                                             @change=$(async |e: Event| {
                                                 option_status.set(saving.get());
                                                 let outcome = save_option(
-                                                        pid.get(),
-                                                        eid.get(),
-                                                        e.target.id,
-                                                        e.target.value,
-                                                    )
-                                                    .await;
+                                                    pid.get(),
+                                                    eid.get(),
+                                                    e.target.id,
+                                                    e.target.value,
+                                                ).await;
                                                 if outcome.is_ok() {
                                                     option_status.set(saved_text.get());
                                                     revision.increment();
@@ -975,7 +991,7 @@ async fn options_card(
                                                 data-option-remove=""
                                             },
                                             icon(
-                                                data: iconify_icon!("feather:trash-2"),
+                                                data: iconify_icon!("lucide:trash-2"),
                                                 attrs: attributes! { class="size-4" }
                                             )
                                         )
@@ -1018,11 +1034,11 @@ async fn options_card(
                 </div>
             )
         )
-    }
+    })
 }
 
 /// Where an element's detail form posts.
-fn update_action(at: At, element_id: &str) -> impl topcoat::view::AttributeValueViewParts {
+fn update_action(at: At, element_id: &str) -> impl topcoat::view::AttributeValueViewParts + use<> {
     href!(
         elements::element::update::submit,
         OrganizationId(at.organization_id),

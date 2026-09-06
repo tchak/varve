@@ -8,7 +8,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::bad_request, href, page},
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -46,7 +46,12 @@ struct ProfileUpdate {
 /// strings, identical in both catalogs), so the select can only ever
 /// submit a locale the platform serves.
 #[component]
-async fn profile_card(cx: &Cx, name: String, locale: String, name_error: Option<String>) -> Result {
+async fn profile_card(
+    cx: &Cx,
+    name: String,
+    locale: String,
+    name_error: Option<String>,
+) -> Result<impl View> {
     let profile_title = t(cx, "settings.account.profile.title").await?;
     let name_label = t(cx, "form.name").await?;
     let language_label = t(cx, "form.language").await?;
@@ -58,7 +63,7 @@ async fn profile_card(cx: &Cx, name: String, locale: String, name_error: Option<
     // The card is a gapped column of sections; `contents` keeps the
     // form transparent to that layout while it wraps both the fields
     // and the footer's submit button.
-    view! {
+    Ok(view! {
         card(
             card_header(card_title((profile_title)))
             <form method="post" action=(href!(submit)) class="contents">
@@ -95,7 +100,7 @@ async fn profile_card(cx: &Cx, name: String, locale: String, name_error: Option<
                 card_footer(button(attrs: attributes! { type="submit" }, (save_label)))
             </form>
         )
-    }
+    })
 }
 
 /// The account tab's cards: the [`profile_card`] form and the
@@ -108,10 +113,10 @@ async fn account_cards(
     name: String,
     locale: String,
     name_error: Option<String>,
-) -> Result {
+) -> Result<impl View> {
     let email = require_account(cx).await?.email.clone();
     let email_title = t(cx, "settings.account.email.title").await?;
-    view! {
+    Ok(view! {
         settings_shell(
             active: Tab::Account,
             <div class="flex flex-col gap-6">
@@ -122,7 +127,7 @@ async fn account_cards(
                 )
             </div>
         )
-    }
+    })
 }
 
 /// The account tab. The form shows the stored name, and the request
@@ -132,11 +137,11 @@ async fn account_cards(
 /// which is exactly the value the select should present — no second
 /// resolution here.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let account = require_account(cx).await?;
     let name = account.name.clone();
     let locale = request_locale(cx).await?.to_string();
-    view! { account_cards(name: name, locale: locale, name_error: None) }
+    Ok(view! { account_cards(name: name, locale: locale, name_error: None) })
 }
 
 /// Saves the profile. The name is trimmed; an empty result re-renders
@@ -152,7 +157,7 @@ pub async fn page(cx: &Cx) -> Result {
 /// from the form — only from a forged request, which deserves a bad
 /// request, not a friendly re-render.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<ProfileUpdate>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<ProfileUpdate>) -> Result<impl View> {
     let account_id = require_account(cx).await?.id;
     if !SUPPORTED_LOCALES.contains(&input.locale.as_str()) {
         return Err(bad_request("locale is not supported").into());
@@ -160,15 +165,16 @@ async fn submit(cx: &Cx, Form(input): Form<ProfileUpdate>) -> Result {
     let name = input.name.trim();
     if name.is_empty() {
         let error = t(cx, "settings.account.profile.error.name-required").await?;
-        return view! {
+        return Ok(view! {
             account_cards(
                 name: String::new(),
                 locale: input.locale,
                 name_error: Some(error)
             )
-        };
+        }
+        .boxed());
     }
     let mut db = db(cx);
     platform_core::update_profile(&mut db, account_id, name, Some(&input.locale)).await?;
-    redirect_to(cx, href!(page).resolve(cx)).await
+    redirect_to(cx, href!(page).resolve(cx))
 }

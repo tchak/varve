@@ -15,7 +15,7 @@ use platform_client::revision_draft::{Audience, ColumnType, Element, TextFormat,
 use topcoat::{
     Result,
     icon::{IconData, icon, iconify::iconify_icon},
-    view::{attributes, component, view},
+    view::{View, attributes, component, view},
 };
 
 use crate::components::badge::{BadgeVariant, badge};
@@ -29,8 +29,8 @@ use crate::components::badge::{BadgeVariant, badge};
 /// an eye-off glyph. The text is what carries the meaning; the
 /// colour never does.
 #[component]
-pub(in crate::pages) async fn reviewer_badge(text: String) -> Result {
-    view! {
+pub(in crate::pages) async fn reviewer_badge(text: String) -> Result<impl View> {
+    Ok(view! {
         badge(
             variant: BadgeVariant::Outline,
             attrs: attributes! {
@@ -38,12 +38,12 @@ pub(in crate::pages) async fn reviewer_badge(text: String) -> Result {
                     dark:bg-amber-500/15 dark:text-amber-300"
             },
             icon(
-                data: iconify_icon!("feather:eye-off"),
+                data: iconify_icon!("lucide:eye-off"),
                 attrs: attributes! { class="size-3" }
             )
             (text.as_str())
         )
-    }
+    })
 }
 
 pub(in crate::pages) fn id_of(element: &Element) -> &str {
@@ -107,25 +107,25 @@ pub(in crate::pages) fn element_kind(element: &Element) -> &'static str {
 /// The row's leading icon: a column's by its type, the other kinds
 /// by what they are. Purely decorative — the kind badge carries the
 /// words — so no `label`: the icon component hides unlabelled icons
-/// from assistive tech. Ids resolve against the staged feather set
+/// from assistive tech. Ids resolve against the staged lucide set
 /// at compile time (`build.rs`); a mistyped id fails the build.
 pub(in crate::pages) fn element_icon(element: &Element) -> IconData {
     match element {
         Element::Column(c) => match kind_of(&c.ty) {
-            "BOOLEAN" => iconify_icon!("feather:check-square"),
-            "INTEGER" => iconify_icon!("feather:hash"),
-            "DECIMAL" => iconify_icon!("feather:percent"),
-            "DATE" => iconify_icon!("feather:calendar"),
-            "DATETIME" => iconify_icon!("feather:clock"),
-            "ENUM" => iconify_icon!("feather:list"),
-            "ATTACHMENT" => iconify_icon!("feather:paperclip"),
-            "GEOMETRY" => iconify_icon!("feather:map-pin"),
-            _ => iconify_icon!("feather:type"),
+            "BOOLEAN" => iconify_icon!("lucide:square-check"),
+            "INTEGER" => iconify_icon!("lucide:hash"),
+            "DECIMAL" => iconify_icon!("lucide:percent"),
+            "DATE" => iconify_icon!("lucide:calendar"),
+            "DATETIME" => iconify_icon!("lucide:clock"),
+            "ENUM" => iconify_icon!("lucide:list"),
+            "ATTACHMENT" => iconify_icon!("lucide:paperclip"),
+            "GEOMETRY" => iconify_icon!("lucide:map-pin"),
+            _ => iconify_icon!("lucide:type"),
         },
-        Element::Group(_) => iconify_icon!("feather:folder"),
-        Element::Section(_) => iconify_icon!("feather:bookmark"),
-        Element::Note(_) => iconify_icon!("feather:info"),
-        Element::Unknown => iconify_icon!("feather:circle"),
+        Element::Group(_) => iconify_icon!("lucide:folder"),
+        Element::Section(_) => iconify_icon!("lucide:bookmark"),
+        Element::Note(_) => iconify_icon!("lucide:info"),
+        Element::Unknown => iconify_icon!("lucide:circle"),
     }
 }
 

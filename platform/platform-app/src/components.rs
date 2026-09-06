@@ -47,15 +47,17 @@ pub(crate) mod testing {
     };
 
     use topcoat::{
-        Result,
         context::{Cx, CxTestBuilder},
+        view::{View, ViewExt},
     };
 
-    /// Builds the view `build` returns against a bare test `Cx` and
-    /// renders it to HTML.
-    pub(crate) fn render(build: impl AsyncFnOnce(&Cx) -> Result) -> String {
+    /// Renders the view `build` returns against a bare test `Cx` to
+    /// HTML. Building a view is synchronous (a `view!` is lazy);
+    /// resolving it drives the component futures — `single`, because
+    /// the components under test never stream.
+    pub(crate) fn render<V: View>(build: impl FnOnce(&Cx) -> V) -> String {
         let cx = CxTestBuilder::new().build();
-        let view = block_on(build(&cx)).expect("build the view");
+        let view = block_on(build(&cx).single()).expect("render the view");
         view.render(&cx)
     }
 

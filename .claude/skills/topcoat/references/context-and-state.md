@@ -2,7 +2,7 @@
 
 Sources: `crates/topcoat/docs/context.md`, `crates/topcoat/docs/app_context.md`,
 `crates/topcoat-core/macro/docs/memoize.md`,
-`crates/topcoat/docs/functions_not_middlewares.md`. Verified at `topcoat-v0.6.2`.
+`crates/topcoat/docs/functions_not_middlewares.md`. Verified at `v0.7.0`.
 
 ## Cx
 
@@ -75,9 +75,13 @@ fn greet(cx: &Cx) -> String {
 ### Work that outlives the handler
 
 `Cx` is clonable; a spawned task or streaming body must own its handle
-(`let cx = cx.clone(); tokio::spawn(async move { … })`). After the response is
-sent the clone still reads context but response-directed writes (cookies) are
-dropped.
+(`let cx = cx.clone(); tokio::spawn(async move { … })`). The router drops its
+own handle once the response is sent; a clone still reads context, but
+response-directed writes (cookies, session) **panic** after the response
+headers went out. Since 0.7 a `live!` region (and `suspense` children) keeps
+rendering *after* the handler returned — it borrows the request `cx`
+implicitly and may read anything, but must not write cookies past its first
+emission (see sessions-and-cookies.md).
 
 ## #[memoize]
 
@@ -97,7 +101,9 @@ async fn find_user(cx: &Cx, id: i64) -> Option<User> { … }
 ```
 
 - Works on sync and async fns. Concurrent async callers share one in-flight
-  future (concurrent view rendering hits the DB once).
+  future (concurrent view rendering hits the DB once). 0.7 fixed the
+  `AsyncFnOnce` lifetime error a memoized async fn with a borrowed argument
+  (`name: &str`) used to hit.
 - Requirements: a param literally named `cx: &Cx`; no `self`; every other arg
   `Hash` (hashed, never cloned — hand-written partial `Hash` impls cause
   silent collisions); return type `Send + Sync + 'static`.

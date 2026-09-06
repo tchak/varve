@@ -41,7 +41,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, error::RouterErrorExt, href, page, path_param},
-    view::{attributes, component, view},
+    view::{BoxView, View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -71,14 +71,14 @@ type CellKey = (String, Vec<Seg>);
 
 /// The preview page.
 #[page]
-pub(super) async fn page(cx: &Cx) -> Result {
+pub(super) async fn page(cx: &Cx) -> Result<impl View> {
     // Two reads: the draft for the shared header (its counts and
     // state line), the preview for the form — values, item lists,
     // findings.
     let procedure = procedure_draft(cx).await?;
     let preview = procedure_preview(cx).await?;
     let notice = flash::take::<Notice>(cx, NOTICE);
-    view! { preview_page(procedure: procedure, preview: preview, notice: notice) }
+    Ok(view! { preview_page(procedure: procedure, preview: preview, notice: notice) })
 }
 
 /// The procedure with its preview through the client; 404 when the
@@ -306,7 +306,7 @@ async fn preview_page(
     procedure: platform_client::revision_draft::ProcedureRevisionDraft,
     preview: ProcedurePreview,
     notice: Option<Notice>,
-) -> Result {
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = procedure.organization.id.inner().parse()?;
     let procedure_id: uuid::Uuid = procedure.id.inner().parse()?;
     let mut tree = Preview::new(&preview);
@@ -332,7 +332,7 @@ async fn preview_page(
         ProcedureId(procedure_id)
     )
     .resolve(cx);
-    view! {
+    Ok(view! {
         // Nothing on this tab autosaves, so the header's draft-state
         // shard never re-fetches; the counter exists for the shared
         // header alone.
@@ -401,25 +401,25 @@ async fn preview_page(
                 </form>
             }
         </div>
-    }
+    })
 }
 
 /// One level of the tree, document order, inside one row scope.
 /// Boxed, like the editor's `tree_list`, to keep each recursion
 /// level's render frame small.
-#[component(boxed)]
+#[component]
 async fn preview_list(
     tree: &Preview,
     parent: Option<String>,
     path: Vec<Seg>,
     heading: usize,
-) -> Result {
+) -> Result<impl View> {
     let children: Vec<Element> = tree
         .children(parent.as_deref())
         .into_iter()
         .cloned()
         .collect();
-    view! {
+    Ok(view! {
         for element in children {
             preview_element(
                 tree: tree,
@@ -429,22 +429,23 @@ async fn preview_list(
             )
         }
     }
+    .boxed())
 }
 
 /// One element: a column as a labelled control over the bag, a group
 /// as a `<fieldset>` — a *many* group as its rows —, a section as a
 /// heading with its help, a note as a dashed aside. Boxed, like
 /// [`preview_list`].
-#[component(boxed)]
+#[component]
 async fn preview_element(
     tree: &Preview,
     element: Element,
     path: Vec<Seg>,
     heading: usize,
-) -> Result {
+) -> Result<impl View> {
     let id = id_of(&element).to_owned();
     let reviewer_only = tree.reviewer_only(&id);
-    view! {
+    Ok(view! {
         match element {
             Element::Column(column) => {
                 <div class="flex flex-col gap-2" data-preview-element=(id.as_str())>
@@ -538,6 +539,7 @@ async fn preview_element(
             }
         }
     }
+    .boxed())
 }
 
 /// A `many` group's rows: one inner `<fieldset>` per item of the
@@ -545,13 +547,13 @@ async fn preview_element(
 /// a *Remove row* button — then *Add a row*. Both are submit buttons
 /// on the page's one form, so typed values elsewhere ride along and
 /// survive the round-trip.
-#[component(boxed)]
+#[component]
 async fn preview_rows(
     tree: &Preview,
     group: platform_client::revision_draft::Group,
     path: Vec<Seg>,
     heading: usize,
-) -> Result {
+) -> Result<impl View> {
     let group_id = group.id.inner().to_owned();
     let rows = tree.rows(&group_id, &path);
     let add = add_value(&group_id, &path);
@@ -568,7 +570,7 @@ async fn preview_rows(
             (n, row_path)
         })
         .collect();
-    view! {
+    Ok(view! {
         for (n, row_path) in rows {
             preview_row(tree: tree, n: n, row_path: row_path, heading: heading)
         }
@@ -586,19 +588,20 @@ async fn preview_rows(
             )
         </div>
     }
+    .boxed())
 }
 
 /// One row of a `many` group: a numbered `<fieldset>` whose children
 /// carry the row's path segment (`row_path` ends with it), and its
 /// *Remove row* button.
-#[component(boxed)]
+#[component]
 async fn preview_row(
     cx: &Cx,
     tree: &Preview,
     n: usize,
     row_path: Vec<Seg>,
     heading: usize,
-) -> Result {
+) -> Result<impl View> {
     let (group_id, item) = row_path
         .last()
         .expect("a row path ends with its row")
@@ -606,7 +609,7 @@ async fn preview_row(
     let row_label = t_args(cx, "schema.preview.row", &one_arg("n", n as i64)).await?;
     let remove_label = t_args(cx, "schema.preview.remove_row", &one_arg("n", n as i64)).await?;
     let remove = remove_value(&group_id, &item, &row_path[..row_path.len() - 1]);
-    view! {
+    Ok(view! {
         <fieldset
             class="flex flex-col gap-4 rounded-md border border-border/70 p-3"
             data-preview-row=(item.as_str())
@@ -635,6 +638,7 @@ async fn preview_row(
             </div>
         </fieldset>
     }
+    .boxed())
 }
 
 /// A section's heading at its nesting depth: the page `<h1>` and
@@ -642,8 +646,8 @@ async fn preview_row(
 /// `<h3>`, nested ones one deeper, capped at `<h6>` (the kernel
 /// allows deeper trees than HTML has levels).
 #[component]
-async fn preview_heading(level: usize, text: String) -> Result {
-    view! {
+async fn preview_heading(level: usize, text: String) -> Result<impl View> {
+    Ok(view! {
         match level {
             3 => {
                 <h3 class="text-base font-semibold">(text.as_str())</h3>
@@ -658,7 +662,7 @@ async fn preview_heading(level: usize, text: String) -> Result {
                 <h6 class="text-sm font-semibold">(text.as_str())</h6>
             }
         }
-    }
+    })
 }
 
 /// An RFC 3339 instant, cut to the `datetime-local` value form
@@ -673,13 +677,13 @@ fn datetime_local(value: &str) -> String {
 /// control references (`aria-describedby` + `aria-invalid`).
 /// Geometry has no control, so its caption is a plain paragraph,
 /// never a dangling `<label for>`.
-#[component(boxed)]
+#[component]
 async fn preview_column(
     tree: &Preview,
     column: Column,
     path: Vec<Seg>,
     reviewer_only: bool,
-) -> Result {
+) -> Result<impl View> {
     let column_id = column.id.inner().to_owned();
     let key: CellKey = (column_id.clone(), path.clone());
     let control = control_id(&column_id, &path);
@@ -709,7 +713,7 @@ async fn preview_column(
     let describedby = has_findings.then_some(finding_id.clone());
     let invalid = has_findings.then_some("true");
     let datetime_value = text_value.as_deref().map(datetime_local);
-    view! {
+    Ok(view! {
         <div class="flex items-center gap-2">
             if has_control {
                 label(attrs: attributes! { for=(control.as_str()) }, (caption.as_str()))
@@ -868,6 +872,7 @@ async fn preview_column(
             </p>
         }
     }
+    .boxed())
 }
 
 /// A text column's input type from its format constraint: email and
@@ -1010,7 +1015,7 @@ pub(in crate::pages) mod fill {
     pub(in crate::pages) async fn submit(
         cx: &Cx,
         Form(pairs): Form<Vec<(String, String)>>,
-    ) -> Result {
+    ) -> Result<impl View> {
         let client = client(cx).await?;
         let procedure = procedure_preview(cx).await?;
         let tree = Preview::new(&procedure);
@@ -1089,12 +1094,12 @@ pub(in crate::pages) mod fill {
 
 /// Where the fill POST lands: the preview, with a notice when the
 /// batch was refused.
-async fn back_to_preview(cx: &Cx, notice: Option<Notice>) -> Result {
+async fn back_to_preview(cx: &Cx, notice: Option<Notice>) -> Result<BoxView<'static>> {
     let organization = path_param::<OrganizationId>(cx)?;
     let procedure = path_param::<ProcedureId>(cx)?;
     if let Some(notice) = notice {
         flash::set(cx, NOTICE, notice)?;
     }
     let location = href!(page, OrganizationId(*organization), ProcedureId(*procedure)).resolve(cx);
-    crate::pages::redirect_to(cx, location).await
+    crate::pages::redirect_to(cx, location)
 }

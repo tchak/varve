@@ -26,7 +26,7 @@ fn main() {
     // compile time, so a mistyped id is a build error, not a blank
     // glyph.
     topcoat::icon::iconify::BuildConfig::new()
-        .icon_set("feather")
+        .icon_set("lucide")
         .icon_set("simple-icons")
         .stage()
         .unwrap();

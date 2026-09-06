@@ -11,7 +11,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::href,
-    view::{component, view},
+    view::{View, component, view},
 };
 
 use crate::components::card::{card, card_content, card_header};
@@ -55,7 +55,7 @@ pub(super) async fn section(
     organization_id: uuid::Uuid,
     procedure_id: uuid::Uuid,
     events: Vec<ProcedureEvent>,
-) -> Result {
+) -> Result<impl View> {
     let heading = t(cx, "procedure.history.title").await?;
     let diff_label = t(cx, "procedure.history.diff").await?;
     let mut rows = Vec::new();
@@ -76,7 +76,7 @@ pub(super) async fn section(
         };
         rows.push((line, diff));
     }
-    view! {
+    Ok(view! {
         card(
             card_header(<h2 class="leading-none font-semibold">(heading)</h2>)
             card_content(
@@ -90,7 +90,7 @@ pub(super) async fn section(
                                         show::page,
                                         OrganizationId(organization_id),
                                         ProcedureId(procedure_id),
-                                        show::EventId(*event_id)
+                                        show::EventId(*event_id),
                                     ))
                                     aria-label=(name.as_str())
                                     class="font-medium underline-offset-4 hover:underline"
@@ -103,5 +103,5 @@ pub(super) async fn section(
                 </ul>
             )
         )
-    }
+    })
 }

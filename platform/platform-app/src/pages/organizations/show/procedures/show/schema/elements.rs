@@ -22,6 +22,7 @@ use topcoat::{
     Result,
     context::Cx,
     router::{content::Form, page, path_param},
+    view::View,
 };
 
 use crate::{client, i18n::t};
@@ -63,7 +64,7 @@ pub(super) mod element {
         pub(in crate::pages) async fn submit(
             cx: &Cx,
             Form(pairs): Form<Vec<(String, String)>>,
-        ) -> Result {
+        ) -> Result<impl View> {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
@@ -86,7 +87,10 @@ pub(super) mod element {
         /// or appended when the next one is the last. At an edge the move is
         /// a no-op landing back on the element.
         #[page(POST)]
-        pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Relocation>) -> Result {
+        pub(in crate::pages) async fn submit(
+            cx: &Cx,
+            Form(input): Form<Relocation>,
+        ) -> Result<impl View> {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
@@ -186,7 +190,7 @@ pub(super) mod element {
         /// `removeElement`; the selection moves to the removed element's
         /// parent (or nothing).
         #[page(POST)]
-        pub(in crate::pages) async fn submit(cx: &Cx) -> Result {
+        pub(in crate::pages) async fn submit(cx: &Cx) -> Result<impl View> {
             let client = client(cx).await?;
             let procedure = procedure_draft(cx).await?;
             let element_id = path_param::<ElementId>(cx).to_owned();
@@ -250,7 +254,10 @@ pub(super) mod element {
 
             /// Appends an option (a minted id).
             #[page(POST)]
-            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Addition>) -> Result {
+            pub(in crate::pages) async fn submit(
+                cx: &Cx,
+                Form(input): Form<Addition>,
+            ) -> Result<impl View> {
                 let client = client(cx).await?;
                 let procedure = procedure_draft(cx).await?;
                 let element_id = path_param::<ElementId>(cx).to_owned();
@@ -286,7 +293,10 @@ pub(super) mod element {
             /// Renames an option (the row's form; Enter without the
             /// script).
             #[page(POST)]
-            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Change>) -> Result {
+            pub(in crate::pages) async fn submit(
+                cx: &Cx,
+                Form(input): Form<Change>,
+            ) -> Result<impl View> {
                 let client = client(cx).await?;
                 let procedure = procedure_draft(cx).await?;
                 let element_id = path_param::<ElementId>(cx).to_owned();
@@ -313,7 +323,10 @@ pub(super) mod element {
             /// Removes an option (the last one too: an empty choice is
             /// a draft state, publication's to refuse).
             #[page(POST)]
-            pub(in crate::pages) async fn submit(cx: &Cx, Form(input): Form<Removal>) -> Result {
+            pub(in crate::pages) async fn submit(
+                cx: &Cx,
+                Form(input): Form<Removal>,
+            ) -> Result<impl View> {
                 let client = client(cx).await?;
                 let procedure = procedure_draft(cx).await?;
                 let element_id = path_param::<ElementId>(cx).to_owned();

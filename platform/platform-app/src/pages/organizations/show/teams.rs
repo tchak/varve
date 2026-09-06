@@ -25,7 +25,7 @@ use topcoat::{
         error::{RouterErrorExt, not_found},
         href, page, path_param,
     },
-    view::{attributes, component, view},
+    view::{View, ViewExt, attributes, component, view},
 };
 
 use crate::{
@@ -76,7 +76,11 @@ async fn organization_teams(cx: &Cx) -> Result<OrganizationTeams> {
 /// the list card, and the creation card. Shared by the GET [`page`]
 /// and [`submit`]'s failed-creation re-render.
 #[component]
-async fn teams_page(cx: &Cx, organization: OrganizationTeams, form: CreationForm) -> Result {
+async fn teams_page(
+    cx: &Cx,
+    organization: OrganizationTeams,
+    form: CreationForm,
+) -> Result<impl View> {
     let organization_id: uuid::Uuid = organization.id.inner().parse()?;
     let title = t(cx, "teams.title").await?;
     let crumb_label = t(cx, "nav.breadcrumb").await?;
@@ -93,7 +97,7 @@ async fn teams_page(cx: &Cx, organization: OrganizationTeams, form: CreationForm
     let create_heading = t(cx, "teams.create.title").await?;
     let name_label = t(cx, "form.name").await?;
     let create_label = t(cx, "teams.create.submit").await?;
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
                 breadcrumbs(label: crumb_label, crumbs: crumbs)
@@ -147,14 +151,14 @@ async fn teams_page(cx: &Cx, organization: OrganizationTeams, form: CreationForm
                 </form>
             )
         </div>
-    }
+    })
 }
 
 /// The list and the creation form.
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let organization = organization_teams(cx).await?;
-    view! { teams_page(organization: organization, form: CreationForm::default()) }
+    Ok(view! { teams_page(organization: organization, form: CreationForm::default()) })
 }
 
 /// Creates a team through `createTeam` and answers 303 back to
@@ -163,7 +167,7 @@ pub async fn page(cx: &Cx) -> Result {
 /// (module docs). The organization is re-read for the re-render only
 /// — a creation never needs it.
 #[page(POST)]
-async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
+async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result<impl View> {
     let id = path_param::<OrganizationId>(cx)?;
     let client = client(cx).await?;
     let name = input.name.trim().to_owned();
@@ -173,7 +177,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
             name,
             name_error: Some(t(cx, "teams.create.error.name-required").await?),
         };
-        return view! { teams_page(organization: organization, form: form) };
+        return Ok(view! { teams_page(organization: organization, form: form) }.boxed());
     }
     let operation = CreateTeam::build(CreateTeamVariables {
         input: CreateTeamInput {
@@ -182,7 +186,7 @@ async fn submit(cx: &Cx, Form(input): Form<Creation>) -> Result {
         },
     });
     match platform_client::run(&client, operation).await {
-        Ok(_) => redirect_to(cx, href!(page, OrganizationId(*id)).resolve(cx)).await,
+        Ok(_) => redirect_to(cx, href!(page, OrganizationId(*id)).resolve(cx)),
         Err(error @ Error::GraphQl(_)) if error.code() == Some(Code::Forbidden) => {
             Err(not_found().into())
         }

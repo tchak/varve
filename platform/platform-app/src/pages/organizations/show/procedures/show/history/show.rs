@@ -18,7 +18,7 @@ use topcoat::{
         error::{RouterErrorExt, not_found},
         href, page, path_param,
     },
-    view::{component, view},
+    view::{View, component, view},
 };
 
 use crate::pages::organizations::show::OrganizationId;
@@ -38,7 +38,7 @@ use crate::{
 path_param!(pub(super) event_id: uuid::Uuid, error = not_found);
 
 #[page]
-pub async fn page(cx: &Cx) -> Result {
+pub async fn page(cx: &Cx) -> Result<impl View> {
     let organization_id = *path_param::<OrganizationId>(cx)?;
     let procedure_id = *path_param::<ProcedureId>(cx)?;
     let event_id = *path_param::<EventId>(cx)?;
@@ -58,7 +58,7 @@ pub async fn page(cx: &Cx) -> Result {
     let DiffEvent::Published(event) = procedure.event.ok_or_not_found()? else {
         return Err(not_found().into());
     };
-    view! {
+    Ok(view! {
         diff_page(
             organization_id: organization_id,
             procedure_id: procedure_id,
@@ -66,7 +66,7 @@ pub async fn page(cx: &Cx) -> Result {
             procedure_title: procedure.title,
             event: event
         )
-    }
+    })
 }
 
 /// The publication's story: when and by whom, the initial-schema
@@ -80,7 +80,7 @@ async fn diff_page(
     organization_name: String,
     procedure_title: String,
     event: PublishedEventDiff,
-) -> Result {
+) -> Result<impl View> {
     let heading = t_args(
         cx,
         "history.title",
@@ -137,7 +137,7 @@ async fn diff_page(
         ),
         Crumb::here(heading.clone()),
     ];
-    view! {
+    Ok(view! {
         <div class="flex flex-col gap-6">
             <div class="flex flex-col gap-2">
                 breadcrumbs(label: crumb_label, crumbs: crumbs)
@@ -161,5 +161,5 @@ async fn diff_page(
                 )
             )
         </div>
-    }
+    })
 }
