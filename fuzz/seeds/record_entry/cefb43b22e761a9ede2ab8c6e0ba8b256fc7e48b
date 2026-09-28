@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":null,"op_salts":["010101"],"ops":[{"op":"set","column":"eman","path":[[{"op":"set","state":{"textops":"Dupont"}},{"ov":"tem","at":0}],"origin"],"state":{"textops":"Dupont"}},{"oat":0}],"origin":{"derievd":{"souron":"s000000"}},"prev":"s0Z"}

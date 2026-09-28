@@ -1,0 +1,1 @@
+{"actor_kind":"humn","note":null,"op_salts":["011"],"ops":[{"op":"set","column":"eman","path":[],"state":{"boolean":"Dupont"}},{"ov":"add,tem","at":0}],"origin":{"derievd":{"sn":"s5"}},"prev":"s0Z"}

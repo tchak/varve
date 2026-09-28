@@ -1,0 +1,4 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":2,"revisions":["sha2c62dc7040d"],"source_instance":"seed"}
+{"id":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d","k":"revision","schema":{"elements":[],"resolvers":[],"revision":"f0d9"}}
+{"block":"rib","defaults":{",288898881":10000000000090000000000000000000},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d4ad0b824e015be225ba4","k":"block_defaults","version":1}
+{licaj:"snaps

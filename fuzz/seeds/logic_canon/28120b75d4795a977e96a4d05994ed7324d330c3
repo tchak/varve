@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"46dp"},"right":{"const":0}}]}]}

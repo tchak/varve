@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"eq","source":{"column":"n"},"source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"ispty","":{"cst":{"nu}ber":{"value":"6."}}}},{"op":"pendine"}],"right":{"const":{"numer":{"value":"3."}}}},{"op":"pendine"}]}]}

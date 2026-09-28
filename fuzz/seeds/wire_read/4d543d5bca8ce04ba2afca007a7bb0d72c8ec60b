@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sh8040d"],"source_instance":"aeq448aa02563d47c39972e288040d","surface":{"id":"form040d"}}
+{"block":"rib.","defaults":{"bln":-88E0,"in000PPPf":0},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59299c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}
+{"d"778888888

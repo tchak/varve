@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":["a40d"],"source_instance":"son","schema":{"isio":"sha3\r55:3aa2c"}}
+{"block":"rib","defaults":{"":10200080000000000},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d08b0d2a4e015be225ba4","k":"block_defaults","version":1}
+{"k":"version}

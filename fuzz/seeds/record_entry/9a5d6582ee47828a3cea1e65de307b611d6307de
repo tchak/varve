@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":null,"op_salts":["0101"],"ops":[{"op":"set","column":"eman","path":[],"state":{"decimal":""}},{"ov":"em","at":0}],"origin":"si00Z"}
