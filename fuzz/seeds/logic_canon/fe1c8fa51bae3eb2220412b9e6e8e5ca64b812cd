@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"le","source":{"column":"","field":""},"right":{"const":{"number":{"value":"64606","unit":"day"}}}},{"op":"lt"}]}]}

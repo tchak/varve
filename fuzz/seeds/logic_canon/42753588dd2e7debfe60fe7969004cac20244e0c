@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"mpt/","op":"gt","source":{"column":"95dp"},"right":{"const":{"number":{"value":".008000000000000","unit":"day"}}}},{"op":""}]}]}

@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":["00653622134"],"ops":[{"op":"set","column":"e","path":[],"state":{"integer":"Dupontcoop_lssat"}},{"at":1}],"prev":"sh00Z"}

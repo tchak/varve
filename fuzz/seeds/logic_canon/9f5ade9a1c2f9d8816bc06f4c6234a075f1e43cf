@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"gt","source":{"column":"47dep"},"right":{"const":{"number":{"value":".06","unit":"day"}}}}]},77777774555470040.0,7.0,777777755545004,77477,77777775555470]}

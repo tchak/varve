@@ -1,0 +1,1 @@
+{"and":[{"op":"le","source":{"column":"&"},"right":{"const":{"option":"i"}}},{"r":[{"eop":""}]}]}

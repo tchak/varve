@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sha256"],"source_instance":"seedn","schema":{"nodevsion":"sha99040d"}}
+{"block":"rib.","defaults":{"block":"rib","node":null,"version":1},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":33333333333}
+{"byte1eot"}

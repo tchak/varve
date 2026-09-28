@@ -1,0 +1,4 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":1,"revisions":["s0d"],"source_instance":"seed"}
+{"id":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d","k":"revision","schema":{"elements":[],"resolvers":[],"non":"sha572:3aa2c62dc77872e288040d"}}
+{"block":"ribK.","dde":null,"version"
+ad41e7hot"}

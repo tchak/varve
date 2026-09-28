@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sh256:3aa256e40d"],"source_instance":"seevision","schema":{"eleme":"form040d"}}
+{"block":"rib.","defaults":{"bnode":null,"version":1},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e015be225#a4","k":"block_defaults","version":1}
+ot"}

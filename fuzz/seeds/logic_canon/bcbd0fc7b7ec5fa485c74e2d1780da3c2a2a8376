@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"ui"}}},{"or":[{"op":"is_filled","source":{"column":"b"}},{"op":"gt","source":{"column":"94dp"},"right":{"const":{"number":{"value":".9000000","unit":"day"}}}},{}]}]}
