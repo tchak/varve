@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sha256:0d"],"source_instance":"se0d","surface":{"id":"for72"}}
+{"block":"ri","defaults":{"bZZZ=ZZZZon":1},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad8b824e015be112ba4","k":"block_defaults","version":1}
+{"a

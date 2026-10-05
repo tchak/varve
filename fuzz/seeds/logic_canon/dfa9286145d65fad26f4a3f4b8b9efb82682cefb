@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"","field":{"number":{"value":"2.","unit":"mm"}}}},{"r":"insee"}]}]}

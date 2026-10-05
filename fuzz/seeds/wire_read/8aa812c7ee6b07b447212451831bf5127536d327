@@ -1,0 +1,4 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":["sdc70d47c3940d"],"source_instance":"seed"}
+
+{"block":"rib","defaults":{"blo1":102000000090000000449},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}
+{"efaults","[88896,

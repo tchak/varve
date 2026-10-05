@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":["5017de14963d288@40d"],"source_instance":"seed"}
+{"id":"sha256:3aa2c62dc77fb053f50d9418cd5017de14939648aa02563d47c39972e288040d","k":"revision","schema":{"elements":[],"resolvers":[],"ren":"sh3aa2c62d  ° f50d9"}}
+{"block":"rib","defaults":{"71":172000000000070000},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab95999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}

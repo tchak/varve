@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"rghce":{},"":{},"e":{},"soust":{"const":{"option":"oui"}}},{"or":[{"op":"gt","source":{"column":"dep"},"right":{"const":{"er":{"n":"a"},"r":{"cojstvalue":"J2"}}}},{"op":"iee"}]}]}

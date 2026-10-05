@@ -1,0 +1,2 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["scd"],"source_instance":"a3c62dc77f","surface":{"id":"forsha2572e2880"}}
+{"block":"rib.","defaults":{"bln":-0,"in":0},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab-9299g1f1d0ad0b825e015be225ba4","k":"block_defaults","version":1}

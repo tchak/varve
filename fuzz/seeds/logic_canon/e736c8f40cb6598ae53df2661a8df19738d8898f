@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oui"}}},{"or":[{"op":"gt","source":{"column":"94dp"},"right":{"const":{"number":{"value":"00.00000000"}}}},{"p":""}]}]}
