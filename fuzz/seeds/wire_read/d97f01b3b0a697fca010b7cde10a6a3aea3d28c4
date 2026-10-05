@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":["sd60d"],"source_instance":"revision","":{"elresolversision":"sh053f50d9"}}
+{"block":"rib","defaults":{"block":"rib","nion2":102000000000e000000},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e012be225ba4","k":"block_defaults","version":1}
+{"}

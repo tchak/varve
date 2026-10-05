@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"8e-333,73,37000005178217717143347722y","op":"gt","source":{"column":""},"right":{"const":{"number":{"value":"0.5","unit":"week"}}}},{"op":"i"}]}]}

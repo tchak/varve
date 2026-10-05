@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"gt","source":{"column":"95dp"},"right":{"const":{"number":{"value":".900000000000000000000000000000000000000","unit":"day"}}}},{"op":""}]}]}
