@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"lt","source":{"column":"","field":"dep"},"right":{"const":{"number":{"value":"4773"}}}},{"op":"pekgnee"}]}]}

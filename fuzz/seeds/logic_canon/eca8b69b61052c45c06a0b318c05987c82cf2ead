@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"lt","source":{"column":"scn","field":""},"right":{"const":{"number":{"value":"0.5","unit":"m2"}}}}]}]}

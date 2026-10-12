@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"dep"},"right":{"const":{"number":{"value":"2.","unit":"kg"}}}},{"r":"insee"}]}]}
