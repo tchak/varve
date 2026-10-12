@@ -1,0 +1,2 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":[],"source_instance":"ion","sch":{"eon":"sha252aa29"}}
+{"block":"ridd","defaults":{"b}0r1":10000000000000000000},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}

@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":""}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"le","source":{"column":"n","field":"dep"},"right":{"const":{"number":{"value":"1046","unit":"day"}}}}]}]}
