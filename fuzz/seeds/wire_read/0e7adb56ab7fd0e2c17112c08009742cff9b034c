@@ -1,0 +1,3 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":0,"revisions":["sha256:340d"],"source_instance":"a","surface":{}}
+{"block":"rib.","defaults":{"9,8,189,2o@f":88888850719988280},"hash":"sha256:be95d948f7055165a2d2f10ece916137ab59299c1f1d0ad0b824e015be657ba4","k":"block_defaults","version":2}
+{"d":"ha8

@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"48"},"right":{"const":{"number":{"value":"-.06","unit":"day"}}}}]}]}

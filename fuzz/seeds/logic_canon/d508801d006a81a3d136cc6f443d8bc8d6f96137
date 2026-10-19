@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"eq","source":{"column":"scn","field":""},"right":{"const":{"number":{"value":"0"}}}}]}]}

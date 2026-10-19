@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"contains","source":{"column":"b"}},{}]}]}
