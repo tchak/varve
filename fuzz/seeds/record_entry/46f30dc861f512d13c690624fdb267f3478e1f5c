@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":["010)a0101"],"ops":[{"op":"set","column":"eman","path":[],"state":{"integer":"00000000000000"}},{"ov":"add(item","at":0}],"origin":{"derievd":{"soqron":"s0000"}},"prev":"00Z"}
