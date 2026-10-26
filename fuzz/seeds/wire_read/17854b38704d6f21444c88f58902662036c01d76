@@ -1,0 +1,2 @@
+{"blobs":"bundled","format_version":1,"intent":"upsert","k":"header","mode":"snapshot","record_count":5,"revisions":["5017de14963d288@40d"],"source_instance":"son","schema":{"elements":[],"resolv":"sh1aa2c66d  ° 50d9"}}
+{"defaults":{"71":172000000000070000},"hash":"sha256:be90d948f7055165a2d2f10ece916137ab95999c1f1d0ad0b824e015be225ba4","k":"block_defaults","version":1}

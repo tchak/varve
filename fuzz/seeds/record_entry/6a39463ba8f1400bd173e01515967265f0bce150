@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":["010)a0101"],"ops":[{"op":"set","column":"an","path":[],"state":{"integer":"00000000000000"}}],"origin":{"derd":{"soqron":"s0000"}},"prev":"0Z"}
