@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"is_y","op":"gt","source":{"column":"n"},"right":{"const":{"number":{"value":"0.5","unit":"km"}}}},{"r":"e"}]}]}

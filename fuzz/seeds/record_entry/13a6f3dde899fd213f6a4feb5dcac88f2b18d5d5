@@ -1,0 +1,1 @@
+{"actor_kind":"human","note":["014110101"],"ops":[{"op":"set","column":"ema","path":[],"state":{"integer":"000000000000008295686921247936511, alts"}},{"ov":5}],"origin":{"devd":{"soqron":"s000000"}},"prev":"sh00Z"}
