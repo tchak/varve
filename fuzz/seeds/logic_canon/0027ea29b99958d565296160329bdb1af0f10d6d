@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"datetime":"5554-78-77T/777.7400"}}}]}

@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"i"}}},{"or":[{"op":"is_empty","source":{"column":"b"}},{"op":"is_empty","source":{"column":"b"}},{"op":"e"}]}]}

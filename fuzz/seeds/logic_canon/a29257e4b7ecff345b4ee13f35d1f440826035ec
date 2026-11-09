@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"s","field":""},"right":{"const":{"number":{"value":"0","unit":"m2"}}}}]}]}

@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"isy","op":"gt","source":{"column":"n","field":"p"},"right":{"const":{"number":{"value":"0","unit":"ha"}}}},{"r":"iee"}]}]}

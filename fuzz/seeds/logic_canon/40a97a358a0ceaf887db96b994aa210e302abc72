@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"le","source":{"column":"s","field":""},"right":{"const":{"number":{"value":".2"}}}}]}]}

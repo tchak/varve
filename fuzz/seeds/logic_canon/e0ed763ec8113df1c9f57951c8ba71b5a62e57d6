@@ -1,0 +1,1 @@
+{"and":[{"and":[{"op":"gt","source":{"column":"e"},"right":{"const":{"number":{"value":"072400000077772222"}}}}]}]}
