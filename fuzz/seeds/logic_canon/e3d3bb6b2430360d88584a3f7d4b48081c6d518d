@@ -1,0 +1,1 @@
+{"and":[{"op":"eq","source":{"column":"a"},"right":{"const":{"option":"oi"}}},{"or":[{"op":"eq","source":{"column":"n"},"right":{"const":{"number":{"value":"4."}}}},{"op":"not_eq"}]}]}

@@ -1,0 +1,1 @@
+{"actor_kind":"man","note":["01011011"],"ops":[{"op":"set","column":"eman","path":[],"state":{"integer":"00000000000000000000000800000"}},{"ov":"adem","at":5}],"origin":{"deratvd":{"soqron":"s000000"}},"prev":"sh0"}

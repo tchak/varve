@@ -1,0 +1,1 @@
+{"and":[{"or":[{"op":"gt","source":{"column":"dp"},"right":{"const":{"number":{"value":"00.00000000"}}}},{"p":""}]}]}
